@@ -1,0 +1,43 @@
+# arquivos para ser ignorados pelo git
+*.log
+*.tmp
+*.bak
+# diretórios para ser ignorados pelo git
+node_modules/
+dist/
+# arquivos de configuração para ser ignorados pelo git
+.env
+.env.test
+# arquivos de build para ser ignorados pelo git
+build/
+# arquivos de cache para ser ignorados pelo git
+.cache/
+# arquivos de cobertura de teste para ser ignorados pelo git
+coverage/
+# arquivos de dependências para ser ignorados pelo git
+vendor/
+package-lock.json
+yarn.lock
+# arquivos de sistema para ser ignorados pelo git
+.DS_Store   
+Thumbs.db
+# arquivos de IDE para ser ignorados pelo git
+.idea/
+.vscode/
+# arquivos de log para ser ignorados pelo git
+logs/
+# arquivos de backup para ser ignorados pelo git
+*.bak
+# arquivos de configuração do editor para ser ignorados pelo git
+*.sublime-project
+*.sublime-workspace
+# arquivos de configuração do sistema para ser ignorados pelo git
+*.swp
+# arquivos de configuração do ambiente para ser ignorados pelo git
+.env.local                              
+.env.development
+.env.test
+.env.production
+.env.staging
+
+
