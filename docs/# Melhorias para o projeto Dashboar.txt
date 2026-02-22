@@ -1,0 +1,54 @@
+# Melhorias para o projeto Dashboard do Suporte com robô PSY
+
+1°- 	Resumo das Ações Obrigatórias:
+
+	Implementar Banner de Cookies com opção de rejeitar. Validar se nosso projeto se encaixa.
+	Criar Política de Privacidade detalhada.
+	Elaborar Termos de Uso claros.
+	Mapear e limitar a coleta de dados ao mínimo necessário (minimização).
+	Definir bases legais para cada tratamento de dado (ex: contrato, consentimento).
+	Proteger a propriedade intelectual do software via contratos e/ou registro. 
+	Estar de acordo com a LGPD.
+
+2º Criar funções para tratamento de dados, e geração de relatórios em .pdf e .csv (Extraídos do Helpdesk, Multi360(.csv) e GoTo(.csv))
+	Utilizar pandas ou outro framework/ biblioteca para o tratamento dos dados.
+	Criar funções e utilizar frameworks / Bibliotecas para criação de relatórios em .pdf ou .csv dos dados já tratados.
+	Configurar, organizar, e criar um Dashboard com os dados raspados, e importados via arquivo .csv (Multi360 e GoTo).
+
+3º- Após documentações obrigatórias implementação de novas funcionalidades:
+	Menu de configurações do sistema, ficará disponível na barra lateral esquerda, 
+	terá a descrição "Configurações", e terá diversas funcionalidades que ainda irão precisar serem implementadas,
+	no sistema. Ou seja vamos ter que desenvolver a lógica e implementar na estrutura atual sem quebrar o código atual.
+
+	No menu de configurações do Dashboard, terá as seguintes funcionalidades que serão mostradas ou não ao usuário final
+	dependendo do seu perfil de usuário no sistema.
+	
+	
+	01- Alterar senha dos usuários (Somente perfil Analista de Suporte e Coordenação),
+	02- Alterar Perfil dos usuários,
+	03- Visualizar Relatórios com dados dos chamados.
+	04- Visualizar Relatórios com dados dos atendimentos do suporte (Multi360 & Goto).
+	05- Visualizar Dashboard com dados dos chamados.
+	06- Visualizar Dashboard com dados dos atendimentos do suporte (Multi360 & Goto).
+	07- Visualizar usuários ativos (Visualizando o Dashboard no momento).
+	08- Visualizar contribuições dos usuários.
+	09- Testar comunicação com Banco de dados em tempo real.
+	10- Testar qualidade da internet na Rede em tempo real.
+	11- Monitor de recursos (Quantidade de recursos que o sistema está usando do servidor e da Rede local) em tempo real.
+	12- Alterar senha do usuário Administrador (Super Usuário).
+
+	O usuário com perfil SuperAdmin terá acesso a todas essas configurações. Ou seja as 12 opções.
+	Os usuários com perfil Coordenação terão acesso as opções 1, 2 , 3, 4, 5, 6, 7, 8 somente.
+	Os usuários com perfil Analista de Suporte terão acesso as opções 3, 5, 8 somente.	
+
+ 
+
+
+
+
+
+
+
+
+
+Se o perfil for SuperAdmin: Ele terá acesso total as configurações do Dashboard. São elas:
