@@ -16,7 +16,7 @@ DB_NAME = os.getenv("DB_NAME", "central_chamados")
 connection_string = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 try:
-    # ⚠️ Performance: O motor (engine) agora é criado APENAS UMA VEZ 
+    # Performance: O motor (engine) agora é criado APENAS UMA VEZ 
     # quando este arquivo é lido. Ele gerencia as conexões automaticamente.
     engine_global = create_engine(connection_string)
 except Exception as e:

@@ -1,32 +1,31 @@
 """
-Dashboard de Suporte - Dashboard do Suporte.
-Desenvolvido por: [Rafael Duarte Nasciemento]
+PSY BI Analytic.
+Desenvolvido por: [Rafael D. Nasciemento]
 Data: 2026-02-19
 Descrição:
-Este dashboard foi criado para fornecer uma visão abrangente e interativa dos chamados do suporte. 
-Ele se conecta diretamente ao banco de dados, garantindo que as informações estejam sempre atualizadas. 
-O acesso é protegido por um sistema de login seguro e monitorado (LGPD).
+Este é o código principal do Dashboard de Suporte, onde implementamos a interface, a lógica de autenticação, controle de acesso (RBAC) e as visualizações dos dados. O PSY é o assistente virtual que automatiza a coleta de dados e facilita a análise das métricas do suporte técnico.
 """
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from sqlalchemy import text
 from modules.database import get_connection
-from modules.auditoria import registrar_log_auditoria # <-- Função real importada!
+from modules.auditoria import registrar_log_auditoria 
 import bcrypt  
-from datetime import datetime
+from datetime import datetime, timedelta # Adicionado timedelta para o cálculo de inatividade
+import random
+from tela_crm import tela_vinculacao_crm
 
 #_______________________________________________________________________________#
 # 1. CONFIGURAÇÃO INICIAL DA PÁGINA E ESTILO
 #_______________________________________________________________________________#
 st.set_page_config(
-    page_title="Dashboard Suporte",
+    page_title="PSY BI Analytic - Dashboard de Suporte",
     page_icon="mascote/psy_braco_cruzado_aposto.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Customização de CSS para deixar os KPIs mais bonitos
 st.markdown("""
     <style>
     div[data-testid="metric-container"] {
@@ -39,18 +38,38 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# ==========================================
+# 2. CONFIGURAÇÕES DE RBAC 
+# ==========================================
+MENU_CONFIGURACOES = {
+    1: "01 - Alterar senha dos usuários",
+    2: "02 - Alterar Perfil dos usuários",
+    3: "03 - Visualizar Relatórios com dados dos chamados",
+    4: "04 - Visualizar Relatórios com dados dos atendimentos (Multi360 & Goto)",
+    5: "05 - Visualizar Dashboard com dados dos chamados",
+    6: "06 - Visualizar Dashboard com dados dos atendimentos (Multi360 & Goto)",
+    7: "07 - Visualizar usuários ativos",
+    8: "08 - Visualizar contribuições dos usuários",
+    9: "09 - Testar comunicação com Banco de dados (Tempo real)",
+    10: "10 - Testar qualidade da internet na Rede (Tempo real)",
+    11: "11 - Monitor de recursos (Servidor e Rede)",
+    12: "12 - Alterar senha do usuário Administrador (SuperAdmin)",
+    13: "13 - Vínculo CRM (Clientes)"
+}
+
+PERMISSOES_POR_PERFIL = {
+    3: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], # SuperAdmin
+    2: [1, 2, 3, 4, 5, 6, 7, 8, 13],                # Coordenação
+    1: [3, 5, 8]                                    # Analista de Suporte
+}
 
 # ==========================================
-# 2. FUNÇÕES DE SEGURANÇA E LGPD
+# 3. FUNÇÕES DE SEGURANÇA E LGPD
 # ==========================================
 def verificar_login(username, senha_digitada):
-    """
-    Verifica a senha e retorna o ID e o Perfil do usuário para o Controle de Acesso (RBAC).
-    """
     engine = get_connection()
     try:
         with engine.connect() as conn:
-            # Selecionamos também o ID e o PERFIL do banco de dados
             query = text("SELECT id, password_hash, perfil FROM usuarios_dashboard WHERE username = :u AND ativo = TRUE")
             resultado = conn.execute(query, {"u": username}).fetchone()
             
@@ -59,130 +78,148 @@ def verificar_login(username, senha_digitada):
                 senha_hash_banco = resultado[1].encode('utf-8')
                 perfil = resultado[2]
                 
-                # Compara a senha digitada com a criptografia do banco
                 if bcrypt.checkpw(senha_digitada.encode('utf-8'), senha_hash_banco):
                     return True, usuario_id, perfil
     except Exception as e:
-        st.error(f"Erro ao conectar com o banco de dados de usuários: {e}")
+        st.error(f"O PSY encontrou um erro durante a autenticação: {e}")
     
     return False, None, None
 
+def verificar_aceite_termos(usuario_id):
+    """Verifica no banco de dados se o usuário já aceitou os termos anteriormente"""
+    engine = get_connection()
+    try:
+        with engine.connect() as conn:
+            query = text("SELECT 1 FROM logs_auditoria_sistema WHERE usuario_id = :u AND acao = 'ACEITE_TERMOS' LIMIT 1")
+            resultado = conn.execute(query, {"u": usuario_id}).fetchone()
+            return bool(resultado) # Retorna True se encontrou, False se não encontrou
+    except Exception as e:
+        return False
+
 def exibir_termos_uso():
-    st.title("Dashboard do Suporte - Proteção de Dados 🛡️")
-    st.warning("Atenção: Acesso Restrito e Monitorado.")
+    # Esconde a Sidebar inteira nesta tela
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] {display: none;}
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.title("PSY BI Analytic - Termo de Uso e Confidencialidade")
+    st.warning("**Atenção:** Este é um ambiente restrito e protegido. O acesso e uso deste sistema estão sujeitos a termos de uso e de confidencialidade e proteção de dados. Leia atentamente antes de prosseguir.")
     
     st.markdown("""
-    ### Termo de Confidencialidade e Uso Aceitável (LGPD)
-    Bem-vindo ao Dashboard do Suporte. Este é um sistema corporativo de uso interno.
+    ### 📜 Termo de Uso e Confidencialidade de Dados (LGPD)
+    Este sistema processa dados pessoais e informações estratégicas protegidas pela **Lei Geral de Proteção de Dados (Lei nº 13.709/2018)**.
+    Ao acessar o Dashboard do PSY BI Analytic, você assume o compromisso de sigilo e responsabilidade conforme as cláusulas abaixo:
     
-    **1. O que coletamos e armazenamos:**
-    O "PSY" extrai dados da plataforma Tecnuv estritamente para fins de análise de métricas e suporte. Todos os dados são armazenados localmente.
+    **1. Confidencialidade e Proteção de Dados**
+    Os dados exibidos (nomes de clientes, telefones, históricos de chamados e mensagens) são estritamente confidenciais.
+    É **terminantemente proibido**:
+    * Compartilhar capturas de tela (prints), relatórios ou credenciais com terceiros não autorizados.
+    * Utilizar os dados para fins pessoais ou alheios à operação de suporte técnico.
+    * Armazenar exportações de dados em dispositivos pessoais ou nuvens públicas não homologadas.
     
-    **2. Sua Responsabilidade (Usuário):**
-    * Os dados exibidos neste painel contêm informações sensíveis e PII de clientes.
-    * É terminantemente proibido exportar dados não autorizados ou compartilhar prints.
-    * Todas as suas ações neste sistema estão sendo registradas em logs de auditoria.
-    
-    **3. Administração e Propriedade:**
-    Este software é propriedade intelectual da empresa.
+    **2. Monitoramento e Auditoria**
+    Para fins de segurança e compliance, **todas as ações realizadas neste sistema são registradas em logs de auditoria**.
+    Isso inclui horários de login, visualização de relatórios e tentativas de exportação. O "PSY" atua como agente de coleta automatizada e seus logs também são auditados.
+.
     """)
     
-    aceito = st.checkbox("Li, compreendi as diretrizes da LGPD e aceito as condições de uso e monitoramento.")
+    aceito = st.checkbox("Eu li e concordo com os termos de uso e confidencialidade acima.")
     
     if st.button("Confirmar Acesso"):
         if aceito:
             st.session_state['termos_aceitos'] = True
             usuario_logado_id = st.session_state.get('usuario_id', 0)
             
-            # Grava no banco real usando a função que criamos no auditoria.py
             registrar_log_auditoria(
                 usuario_id=usuario_logado_id,
                 acao="ACEITE_TERMOS",
-                detalhes="Usuário concordou com o Termo de Confidencialidade Interno."
+                detalhes="Usuário aceitou os termos de uso e confidencialidade para acessar o PSY BI Analytic."
             )
             st.rerun() 
         else:
-            st.error("Você deve aceitar os termos para utilizar o Dashboard.")
-
+            st.error("Você deve aceitar os termos para utilizar o PSY BI Analytic.")
 
 # ==========================================
-# 3. BARREIRA DE ACESSO (LOGIN & TERMOS)
+# 4. BARREIRA DE ACESSO (LOGIN, TERMOS E TIMEOUT)
 # ==========================================
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 
+# --- Lógica de Timeout (15 Minutos de Inatividade) ---
+if st.session_state['autenticado']:
+    agora = datetime.now()
+    ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
+    
+    # Se a diferença entre agora e o último acesso for maior que 15 minutos
+    if agora - ultimo_acesso > timedelta(minutes=15):
+        st.session_state.clear() # Limpa a sessão
+        st.warning("⏱️ Sua sessão expirou por inatividade (15 minutos). Por favor, faça login novamente para sua segurança.")
+        st.stop()
+    else:
+        # Atualiza o cronômetro para o momento atual de interação
+        st.session_state['ultimo_acesso'] = agora
+
+# --- Tela de Login ---
 if not st.session_state['autenticado']:
+    st.markdown("""
+        <style>
+            [data-testid="stSidebarNav"] {display: none;}
+        </style>
+    """, unsafe_allow_html=True)
+
+    with st.sidebar:
+        try: st.image("mascote/psy_braco_cruzado_aposto.png", use_container_width=True)
+        except: pass
+        
+        st.markdown("## 👋 Olá! Bem-vindo(a) ao PSY BI Analytic")
+        st.info("**Versão 1.0.0** (Beta)")
+        
+        st.markdown("### 🤖 Quem é o Mascote PSY?")
+        st.markdown("Seu assistente virtual de análise de dados. \n\n**Minha Missão:**\nAutomatizar a coleta de métricas e gerar insights para otimizar o atendimento do suporte.")
+        
+        frases_psy = ["A persistência realiza o impossível. — Provérbio Chinês", "Falar é barato. Mostre-me o código. — Linus Torvalds"]
+        st.info(f"💡 ** A frase do PSY hoje é :**\n\n_{random.choice(frases_psy)}_")
+        st.divider()
+        st.caption("*PSY BI Analytic - Dashboard de Suporte* \nDesenvolvido por Rafael D. Nascimento - copyright © 2026")
+
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("<h2 style='text-align: center;'>Acesso ao Dashboard do Suporte</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>Acesso ao PSY BI Analytic</h2>", unsafe_allow_html=True)
         col_img1, col_img2, col_img3 = st.columns([1, 1, 1])
         with col_img2:
-            try: st.image("mascote/psy_braco_cruzado_aposto.png", width=120)
+            try: st.image("mascote/psy_no_dashboard.png", width=150)
             except: pass
 
         with st.form("form_login"):
             usuario = st.text_input("Usuário", placeholder="Digite seu nome de usuário")
             senha = st.text_input("Senha", type="password")
-            btn_login = st.form_submit_button("Entrar no Dashboard", use_container_width=True)
+            btn_login = st.form_submit_button("Entrar no PSY BI Analytic", use_container_width=True)
             
         if btn_login:
-            # Recebe os dados extras da nossa nova função de login
             sucesso, user_id, user_perfil = verificar_login(usuario, senha)
-            
             if sucesso:
                 st.session_state['autenticado'] = True
                 st.session_state['usuario_id'] = user_id
-                st.session_state['perfil'] = user_perfil # Salva o nível de acesso (1, 2 ou 3)
+                st.session_state['perfil'] = user_perfil 
                 
-                # Registra o log de acesso no banco
+                # NOVO: Verifica no banco se já aceitou os termos no passado!
+                st.session_state['termos_aceitos'] = verificar_aceite_termos(user_id)
+                st.session_state['ultimo_acesso'] = datetime.now() # Inicia o cronômetro
+                
                 registrar_log_auditoria(user_id, "LOGIN", "Login realizado com sucesso.")
-                
-                st.image("mascote/psy_sorriso.png", width=100)
                 st.rerun() 
             else:
                 st.error("Usuário inativo ou senha incorreta.")
-                try: st.image("mascote/psy_triste.png", width=100)
-                except: pass
 
-        with st.expander("Esqueceu a senha?"):
-            col_img, col_txt = st.columns([1, 4])
-            with col_img:
-                try: st.image("mascote/psy_interrogacao.png", width=70)
-                except: pass
-            with col_txt:
-                st.info("O reset de senha deve ser solicitado diretamente ao Administrador do Sistema.")
-    st.stop() # Para o código aqui se não logar
+    st.stop()
 
-# Se autenticou, valida os termos de uso antes de liberar a tela
+# --- Tela de Termos de Uso ---
 if not st.session_state.get('termos_aceitos'):
     exibir_termos_uso()
     st.stop() 
-
-
-# ==========================================
-# 4. INTERFACE PRINCIPAL E SIDEBAR
-# ==========================================
-try:
-    st.sidebar.image("mascote/psy_braco_cruzado_aposto.png", use_container_width=True)
-except Exception:
-    st.sidebar.warning("⚠️ Imagem do PSY não encontrada na pasta 'mascote/'.")
-    
-st.sidebar.markdown("<h3 style='text-align: center;'>Olá! Eu sou o PSY 🤖</h3>", unsafe_allow_html=True)
-st.sidebar.markdown("<p style='text-align: center; color: gray;'>Analista de dados e guardião de métricas do suporte.</p>", unsafe_allow_html=True)
-
-# Exibe o perfil atual na sidebar para clareza
-perfil_atual = st.session_state.get('perfil', 1)
-nome_perfil = "Analista" if perfil_atual == 1 else ("Coordenador" if perfil_atual == 2 else "Admin")
-st.sidebar.info(f"🔑 Acesso: {nome_perfil}")
-
-st.sidebar.divider()
-
-if st.sidebar.button("🚪 Sair do Sistema (Logout)", use_container_width=True):
-    # Loga a saída do sistema
-    registrar_log_auditoria(st.session_state.get('usuario_id'), "LOGOUT", "Usuário encerrou a sessão.")
-    st.session_state.clear() # Limpa toda a sessão (ID, perfil, aceite de termos)
-    st.rerun()
 
 # ==========================================
 # 5. CAMADA DE DADOS COM CACHE
@@ -212,37 +249,68 @@ def carregar_fila_tecnuv():
         st.error(f"Erro ao conectar com o banco de dados: {e}")
         return pd.DataFrame()
 
+# ==========================================
+# 6. SIDEBAR REORGANIZADA E MENU DE NAVEGAÇÃO
+# ==========================================
+perfil_atual = st.session_state.get('perfil', 1)
+nome_perfil = "Analista" if perfil_atual == 1 else ("Coordenador" if perfil_atual == 2 else "Desenvolvedor/Administrador")
+
+st.sidebar.title("Navegação")
+opcoes_menu = ["Início", "Dashboards sobre chamados"]
+if perfil_atual in [2, 3]: 
+    opcoes_menu.append("Dashboards Atendimentos (Multi360 e Goto)")
+opcoes_menu.append("Configurações")
+
+menu_principal = st.sidebar.radio("Selecione o módulo:", opcoes_menu)
+
+submenu_escolhido = None
+if menu_principal == "Configurações":
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Menu de Configurações")
+    
+    ids_permitidos = PERMISSOES_POR_PERFIL.get(perfil_atual, [])
+    opcoes_filtradas = [MENU_CONFIGURACOES[i] for i in ids_permitidos]
+    
+    submenu_escolhido = st.sidebar.selectbox("Selecione a funcionalidade:", opcoes_filtradas)
+
+st.sidebar.markdown("---")
+
+try: st.sidebar.image("mascote/psy_braco_cruzado_aposto.png", use_container_width=True)
+except Exception: pass
+    
+st.sidebar.markdown("<h3 style='text-align: center;'>Olá! Eu sou o PSY 🤖</h3>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='text-align: center; color: gray;'>Seu Analista de dados.</p>", unsafe_allow_html=True)
+st.sidebar.info(f"Acesso: {nome_perfil}")
+
+frases_psy = ["Tudo parece impossível até que seja feito. — Nelson Mandela", "Falar é barato. Mostre-me o código. — Linus Torvalds"]
+st.sidebar.success(f"💡 **Frase do dia:**\n_{random.choice(frases_psy)}_")
+
+if st.sidebar.button("Sair do Sistema (Logout)", use_container_width=True):
+    registrar_log_auditoria(st.session_state.get('usuario_id'), "LOGOUT", "Usuário encerrou a sessão.")
+    st.session_state.clear()
+    st.rerun()
 
 # ==========================================
-# 6. CONSTRUÇÃO DA INTERFACE E ABAS (RBAC)
+# 7. ROTEAMENTO DAS PÁGINAS 
 # ==========================================
 col_logo, col_titulo = st.columns([1, 11])
 with col_logo:
     try: st.image("mascote/psy_notebook.png", width=70)
     except: pass
 with col_titulo:
-    st.title("Metrics – Atendimento e Suporte")
-    st.markdown("Tudo sobre o suporte em um único lugar.")
+    st.title("PSY BI Analytic - Dashboard de Suporte")
+    st.markdown("Tudo sobre o suporte em um único lugar! 🚀")
 
-# -- LÓGICA DE RBAC (Controle de Abas) --
-lista_abas = ["🤖 Acompanhamento dos Chamados"]
-# Se for Perfil 2 (Coord) ou 3 (Admin), adiciona a segunda aba
-if perfil_atual in [2, 3]:
-    lista_abas.append("📈 Gestão do Suporte (Multi360/GoTo)")
-
-abas = st.tabs(lista_abas)
-
-# ------------------------------------------
-# CONTEÚDO DA ABA 1 (TECNUV)
-# ------------------------------------------
-with abas[0]:
-    st.header("Visão Geral dos Chamados")
+if menu_principal == "Início":
+    st.write(f"Bem-vindo(a) ao seu espaço, **{nome_perfil}**! Utilize o menu lateral para navegar pelas funcionalidades e relatórios.")
+    
+elif menu_principal == "Dashboards sobre chamados":
+    st.header("Acompanhamento dos Chamados")
     df_chamados = carregar_fila_tecnuv()
     
     if not df_chamados.empty:
         st.divider()
         col_filtro1, col_filtro2 = st.columns(2)
-        
         status_unicos = df_chamados['Status'].dropna().unique().tolist()
         filtro_status = col_filtro1.multiselect("Filtrar por Status:", options=status_unicos, default=status_unicos)
         
@@ -255,79 +323,61 @@ with abas[0]:
 
         st.divider()
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de Chamados Filtrados", len(df_filtrado))
-        em_dev = len(df_filtrado[df_filtrado['Status'].str.contains('Desenvolvimento', case=False, na=False)])
-        col2.metric("Em Desenvolvimento", em_dev)
-        pendentes = len(df_filtrado[df_filtrado['Status'].str.contains('Pendente', case=False, na=False)])
-        col3.metric("Pendentes", pendentes)
-        nao_atribuidos = len(df_filtrado[df_filtrado['Atendente'] == 'Não Atribuído'])
-        col4.metric("Sem Atendente Definido", nao_atribuidos, delta="- Atenção" if nao_atribuidos > 0 else "OK", delta_color="inverse")
+        col1.metric("Total de Chamados", len(df_filtrado))
+        col2.metric("Em Desenvolvimento", len(df_filtrado[df_filtrado['Status'].str.contains('Desenvolvimento', case=False, na=False)]))
+        col3.metric("Pendentes", len(df_filtrado[df_filtrado['Status'].str.contains('Pendente', case=False, na=False)]))
+        col4.metric("Sem Atendente Definido", len(df_filtrado[df_filtrado['Atendente'] == 'Não Atribuído']))
 
         st.divider()
-        st.markdown("### 📈 Análise Gráfica")
+        st.markdown("Análise Gráfica dos Chamados")
         graf_col1, graf_col2 = st.columns(2)
 
         with graf_col1:
             df_status_count = df_filtrado['Status'].value_counts().reset_index()
             df_status_count.columns = ['Status', 'Quantidade']
-            fig_status = px.bar(
-                df_status_count, x='Quantidade', y='Status', orientation='h',
-                title="Volume por Status", text='Quantidade',
-                color='Quantidade', color_continuous_scale='Blues'
-            )
+            fig_status = px.bar(df_status_count, x='Quantidade', y='Status', orientation='h', title="Volume por Status", color='Quantidade', color_continuous_scale='Blues')
             fig_status.update_layout(showlegend=False, xaxis_title="", yaxis_title="", margin=dict(l=0, r=0, t=40, b=0))
             st.plotly_chart(fig_status, use_container_width=True)
 
         with graf_col2:
             df_clientes_count = df_filtrado['Cliente'].value_counts().head(10).reset_index()
             df_clientes_count.columns = ['Cliente', 'Quantidade']
-            fig_clientes = px.pie(
-                df_clientes_count, names='Cliente', values='Quantidade', hole=0.4,
-                title="Top 10 Clientes com Mais Chamados"
-            )
+            fig_clientes = px.pie(df_clientes_count, names='Cliente', values='Quantidade', hole=0.4, title="Top 10 Clientes com Mais Chamados")
             fig_clientes.update_traces(textposition='inside', textinfo='percent+value')
-            fig_clientes.update_layout(margin=dict(l=0, r=0, t=40, b=0))
             st.plotly_chart(fig_clientes, use_container_width=True)
 
         st.divider()
-        st.markdown("### 📋 Detalhamento dos Chamados")
         df_exibicao = df_filtrado.copy()
         df_exibicao["Última Interação (Tecnuv)"] = df_exibicao["Última Interação (Tecnuv)"].dt.strftime('%d/%m/%Y %H:%M')
-        
         st.dataframe(df_exibicao, use_container_width=True, hide_index=True, height=400)
         
-        # LÓGICA DE RBAC: Apenas Admin pode limpar cache manual
         if perfil_atual == 3:
-            col_btn1, col_btn2 = st.columns([1, 5])
-            with col_btn1:
-                if st.button("🔄 Atualizar Dados (Admin)"):
-                    registrar_log_auditoria(st.session_state.get('usuario_id'), "CLEAR_CACHE", "Admin forçou atualização.")
-                    st.cache_data.clear()
-                    st.rerun()
-    else:
-        st.info("O banco de dados está vazio ou não pôde ser lido. Entre em contato com o administrador.")
+            if st.button("Atualizar Dados (Admin)"):
+                registrar_log_auditoria(st.session_state.get('usuario_id'), "CLEAR_CACHE", "Admin forçou atualização.")
+                st.cache_data.clear()
+                st.rerun()
 
-# ------------------------------------------
-# CONTEÚDO DA ABA 2 (GESTÃO DE CSV)
-# ------------------------------------------
-# A renderização desta aba só acontece se ela existir na lista (se o usuário for perfil 2 ou 3)
-if len(abas) > 1:
-    with abas[1]:
-        st.header("Importação e Cruzamento de Dados (Suporte)")
-        st.markdown("Faça o upload dos relatórios do **Multi360** e **GoTo** para cruzar com a base de clientes.")
-        
-        arquivo_csv = st.file_uploader("Selecione o arquivo CSV exportado:", type=["csv"])
-        
-        if arquivo_csv is not None:
-            registrar_log_auditoria(st.session_state.get('usuario_id'), "UPLOAD_CSV", f"Upload arquivo: {arquivo_csv.name}")
-            st.success("Arquivo carregado com sucesso!")
-            try:
-                df_csv = pd.read_csv(arquivo_csv, nrows=5, sep=None, engine='python') 
-                st.write("Pré-visualização do Arquivo:")
-                st.dataframe(df_csv, use_container_width=True)
-            except Exception as e:
-                st.error(f"Erro ao ler o arquivo CSV: {e}")
-        else:
-            st.warning("Por favor, selecione um arquivo CSV.")
-            
+elif menu_principal == "Dashboards Atendimentos (Multi360 e Goto)":
+    st.header("Gestão dos Atendimentos - Multi360 e GoTo")
+    st.markdown("Aqui você pode fazer upload dos arquivos CSV exportados do Multi360 e GoTo para análise.")
+    arquivo_csv = st.file_uploader("Selecione um arquivo CSV para upload:", type=["csv"])
+    
+    if arquivo_csv is not None:
+        registrar_log_auditoria(st.session_state.get('usuario_id'), "UPLOAD_CSV", f"Upload arquivo: {arquivo_csv.name}")
+        st.success("Arquivo carregado com sucesso! Processando os dados...")
+        try:
+            df_csv = pd.read_csv(arquivo_csv, nrows=5, sep=None, engine='python') 
+            st.write("Exemplo dos dados carregados: ")
+            st.dataframe(df_csv, use_container_width=True)
+        except Exception as e:
+            st.error(f"Ocorreu um erro ao processar o arquivo CSV:{e}")
+
+elif menu_principal == "Configurações":
+    st.header("⚙️ Configurações do Sistema")
+    st.write("Você está na área de administração.")
+    
+    if submenu_escolhido == MENU_CONFIGURACOES[13]:
         st.divider()
+        tela_vinculacao_crm() 
+    else:
+        st.info(f"Você selecionou: **{submenu_escolhido}**. Esta funcionalidade está em desenvolvimento pelo oráculo.")

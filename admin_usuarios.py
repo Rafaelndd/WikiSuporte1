@@ -14,7 +14,7 @@ def validar_senha_forte(senha):
 def criar_usuario(username, senha, perfil):
     valida, msg = validar_senha_forte(senha)
     if not valida:
-        print(f"❌ Erro: {msg}")
+        print(f"Erro: {msg}")
         return
 
     # Criptografa a senha antes de salvar
@@ -27,9 +27,9 @@ def criar_usuario(username, senha, perfil):
             # Query atualizada para incluir a coluna 'perfil'
             query = text("INSERT INTO usuarios_dashboard (username, password_hash, perfil) VALUES (:u, :h, :p)")
             conn.execute(query, {"u": username, "h": senha_hash, "p": perfil})
-        print(f"✅ Usuário '{username}' criado com sucesso sob o perfil de '{perfil}'!")
+        print(f"Usuário '{username}' criado com sucesso sob o perfil de '{perfil}'!")
     except Exception as e:
-        print(f"❌ Erro ao criar usuário (já existe?): {e}")
+        print(f"Erro ao criar usuário (já existe?): {e}")
 
 if __name__ == "__main__":
     print("=== CRIAÇÃO DE USUÁRIO DO DASHBOARD ===")
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     #elif opcao == '3':
         #perfil = "SuperAdmin"
     else:
-        print("⚠️ Opção inválida. Atribuindo perfil padrão: Analista de Suporte.")
+        print("Opção inválida. Atribuindo perfil padrão: Analista de Suporte.")
         perfil = "Analista de Suporte"
         
     criar_usuario(user, senha, perfil)

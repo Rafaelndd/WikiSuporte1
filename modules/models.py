@@ -3,44 +3,22 @@ import sys
 from datetime import datetime
 from sqlalchemy import Column, String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
-from
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 1. Ajuste de Caminho: Garante que o Python encontre os módulos vizinhos
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# 2. Importação correta (Verifique se o arquivo database.py está na mesma pasta)
+try:
+    from database import get_connection
+except ImportError:
+    # Caso o script seja rodado da raiz, tenta a importação absoluta
+    from modules.database import get_connection
 
 Base = declarative_base()
 
-# Adicione isso ao final do seu models.py
-
-class AtendimentoMulti360(Base):
-    __tablename__ = "atendimentos_multi360"
-
-    protocolo = Column(BigInteger, primary_key=True, index=True) # Impede duplicação de atendimentos
-    origem = Column(String(50), nullable=True)
-    status = Column(String(50), nullable=True)
-    atendente = Column(String(100), nullable=True)
-    departamento = Column(String(100), nullable=True)
-    nome_contato = Column(String(200), nullable=True)
-    numero_telefone = Column(String(50), nullable=True)
-    data_inicio = Column(DateTime, nullable=False, index=True) # Indexado para buscas rápidas por mês
-    data_finalizacao = Column(DateTime, nullable=True)
-    avaliacao = Column(Integer, nullable=True) # Nota de 1 a 10
-    
-    data_importacao = Column(DateTime, default=datetime.now) # Auditoria de quando o arquivo subiu
-
-class AtendimentoGoTo(Base):
-    __tablename__ = "atendimentos_goto"
-
-    id_conversa = Column(String(100), primary_key=True, index=True) # 'Conversation space id'
-    data_chamada = Column(DateTime, nullable=False, index=True)
-    duracao_ms = Column(BigInteger, nullable=True) # Em milissegundos, fácil de somar e tirar média
-    direcao = Column(String(50), nullable=True) # 'Recebida', 'Realizada'
-    resultado = Column(String(100), nullable=True)
-    telefone_origem = Column(String(100), nullable=True)
-    participantes = Column(Text, nullable=True)
-    gravado = Column(String(10), nullable=True)
-    
-    data_importacao = Column(DateTime, default=datetime.now)
+# ==========================================
+# MODELOS DO HELP DESK (TECNUV)
+# ==========================================
 
 class ChamadoTecnuv(Base):
     __tablename__ = "chamados_tecnuv"
@@ -57,7 +35,13 @@ class ChamadoTecnuv(Base):
     prioridade = Column(Text, nullable=True)
     assunto_html = Column(Text, nullable=True)
     motivo_abertura_html = Column(Text, nullable=True)
+    versao_sistema = Column(String(50), nullable=True)
     data_abertura = Column(DateTime, nullable=True)
+    data_encerramento = Column(DateTime, nullable=True)
+    data_cancelamento = Column(DateTime, nullable=True)
+    usuario_cancelamento = Column(String(100), nullable=True)
+    usuario_encerramento = Column(String(100), nullable=True)
+    assunto_encerramento = Column(Text, nullable=True)
     
     ultima_alteracao_tecnuv = Column(DateTime, nullable=True)
     ultima_verificacao_robo = Column(DateTime, default=datetime.now)
@@ -93,42 +77,40 @@ class HistoricoInteracao(Base):
         UniqueConstraint('nr_chamado', 'data_interacao', 'usuario', name='uix_chamado_msg_autor'),
     )
 
-def inicializar_banco():
+# ==========================================
+# MODELOS DE SEGURANÇA E AUDITORIA (LGPD)
+# ==========================================
 
-    print("Conectando ao PostgreSQL para validar o schema...")
-    try:
-        engine = get_connection()
-        Base.metadata.create_all(bind=engine)
-        print("Schema V4.0 validado.")
-    except Exception as e:
-        print(f"Falha crítica ao inicializar as tabelas: {e}")
-        sys.exit(1)
-
-
-
-
-
-# (Supondo que você já tenha a tabela de usuarios)
 class UsuarioDashboard(Base):
     __tablename__ = 'usuarios_dashboard'
     id = Column(Integer, primary_key=True)
     nome = Column(String(100), nullable=False)
     perfil = Column(Integer, nullable=False) # 1-Analista, 2-Coord, 3-Admin
-    # ... outros campos ...
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    ativo = Column(Integer, default=1) # 1 para Ativo, 0 para Inativo
 
-# NOVA TABELA PARA ADEQUAÇÃO À LGPD
 class LogAuditoria(Base):
-    """
-    Tabela responsável por registrar acessos, aceites de termos e ações críticas,
-    garantindo a rastreabilidade exigida pela LGPD.
-    """
     __tablename__ = 'logs_auditoria_sistema'
-    
     id = Column(Integer, primary_key=True, autoincrement=True)
     usuario_id = Column(Integer, ForeignKey('usuarios_dashboard.id'), nullable=False)
-    acao = Column(String(100), nullable=False) # Ex: "LOGIN", "ACEITE_TERMOS", "ACESSO_ABA_CSV"
-    detalhes = Column(Text, nullable=True)     # Informações extras (ex: IP, qual relatório exportou)
+    acao = Column(String(100), nullable=False)
+    detalhes = Column(Text, nullable=True)
     data_hora = Column(DateTime, default=datetime.now)
+
+# ==========================================
+# INICIALIZAÇÃO
+# ==========================================
+
+def inicializar_banco():
+    print("O PSY está inicializando o banco de dados... Verificando conexões e analisado o ambiente.")
+    try:
+        engine = get_connection()
+        Base.metadata.create_all(bind=engine)
+        print("O PSY concluiu a inicialização do banco de dados com sucesso! O ambiente está pronto para uso.")
+    except Exception as e:
+        print(f"O PSY encontrou um erro durante a inicialização do banco de dados:{e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     inicializar_banco()

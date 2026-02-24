@@ -39,5 +39,6 @@ logs/
 .env.test
 .env.production
 .env.staging
+backups/
 
 

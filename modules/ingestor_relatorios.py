@@ -27,7 +27,7 @@ def processar_e_salvar_csv(arquivo_csv):
         match = re.match(padrao_nome, nome_arquivo)
         
         if not match:
-            return False, "❌ Arquivo Rejeitado! O nome do arquivo GoTo deve seguir o padrão: call-report-grouped-by-user_AAAAMMDD_AAAAMMDD.csv"
+            return False, "Arquivo Rejeitado! O nome do arquivo GoTo deve seguir o padrão: call-report-grouped-by-user_AAAAMMDD_AAAAMMDD.csv"
             
         # Extrai as datas do nome do arquivo (Apenas para log/validação)
         data_ini_str, data_fim_str = match.groups()
@@ -61,10 +61,10 @@ def processar_e_salvar_csv(arquivo_csv):
                 
                 df_limpo.to_sql('atendimentos_goto', conn, if_exists='append', index=False)
                 
-            return True, f"✅ Sucesso! {len(df_limpo)} ligações do GoTo importadas. Período: {data_min.strftime('%d/%m/%Y')} a {data_max.strftime('%d/%m/%Y')}"
+            return True, f"Sucesso! {len(df_limpo)} ligações do GoTo importadas. Período: {data_min.strftime('%d/%m/%Y')} a {data_max.strftime('%d/%m/%Y')}"
 
         except Exception as e:
-            return False, f"Erro ao processar arquivo GoTo: {e}"
+            return False, f"Erro ao processar arquivo GoTo :{e}"
 
     # ---------------------------------------------------------
     # ROTA B: É UM ARQUIVO DO MULTI360 (WHATSAPP)
@@ -98,11 +98,11 @@ def processar_e_salvar_csv(arquivo_csv):
                 
                 df_limpo.to_sql('atendimentos_multi360', conn, if_exists='append', index=False)
                 
-            mensagem = f"✅ Sucesso! {len(df_limpo)} atendimentos Multi360 importados.\nPeríodo identificado: {data_min.strftime('%d/%m/%Y')} a {data_max.strftime('%d/%m/%Y')}"
+            mensagem = f"Sucesso! {len(df_limpo)} atendimentos Multi360 importados.\nPeríodo identificado: {data_min.strftime('%d/%m/%Y')} a {data_max.strftime('%d/%m/%Y')}"
             return True, mensagem
             
         except Exception as e:
-            return False, f"Erro ao processar arquivo Multi360: {e}"
+            return False, f"Erro ao processar arquivo Multi360 :{e}"
 
     else:
-        return False, "❌ Formato desconhecido. Envie um CSV do Multi360 ou GoTo."
+        return False, "Formato desconhecido. Envie um CSV do Multi360 ou GoTo."

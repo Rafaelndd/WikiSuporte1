@@ -1,0 +1,89 @@
+VALIDAÇÃO TÉCNICA - ROBÔ TECNUV Data geração: 21/02/2026 02:52:50
+
+============================================================ 1) ERROS
+IDENTIFICADOS NA SEGUNDA EXECUÇÃO
+============================================================
+
+Erro registrado no terminal:
+
+2026-02-20 23:23:26,251 [ERROR] [ERRO] Falha no Deep Scrape do chamado
+3152 Stacktrace: Symbols not available. Dumping unresolved backtrace:
+0x3bf3e3 0x3bf424 0x1b2090 0x1fc51a 0x1fc7bb 0x23e212 0x21ee64 0x23bb23
+0x21ebb6 0x1f0319 0x1f10d4 0x6146a4 0x60f9a9 0x62c940 0x3d80f8 0x3dfe4d
+0x3c7c18 0x3c7de2 0x3b18ea 0x76dd5d49 0x7710d83b 0x7710d7c1 (nil)
+
+Chamados afetados: 13520, 13469, 13452, 12911, 11884, 11602, 11299,
+11195, 11194, 11155, 10902, 9531, 9012, 8589, 7256, 6787, 5931, 3683,
+3152.
+
+Comportamento: - Todos os chamados com erro “Dumping unresolved
+backtrace” vieram com dados nulos.
+
+============================================================ 2) PROBLEMA
+ESTRUTURAL NO BANCO DE DADOS
+============================================================
+
+Situação atual incorreta: - A tabela chamados_tecnuv utiliza o número do
+chamado como chave primária.
+
+Correção necessária: - Criar campo “id” como chave primária (IDENTITY
+gerado pelo PostgreSQL). - Criar campo “nr_chamado” para armazenar o
+número real do chamado. - nr_chamado deve ser utilizado como chave de
+relacionamento.
+
+Relacionamento correto: - 1 chamado -> N interações. - A tabela
+historico_interacoes deve referenciar nr_chamado. - Permitir identificar
+quantidade e detalhamento das interações.
+
+============================================================ 3)
+VALIDAÇÃO CAMPO A CAMPO
+============================================================
+
+Campos corretos (exceto nos chamados com erro): - cliente_nome -
+atendente_tecnuv - usuario_epsy - assunto (parcial, ver observação) -
+motivo_abertura - ultima_alteracao_tecnuv - ultima_verificacao_robo
+(100% correto)
+
+  --------------------------
+  Problemas identificados:
+  --------------------------
+
+1)  status_atual
+
+-   Não retornou dados para nenhum chamado.
+
+2)  assunto
+
+-   Não está salvando o conteúdo completo do chamado.
+-   Deve persistir integralmente o HTML completo do campo.
+
+Exemplo de conteúdo esperado (HTML completo):
+
+Olá, bom dia! tudo bem? A empresa 63 - TRANSPORTADORA MAHLE - FILIAL
+PARA - CNPJ: 74.068.248/0002-01 … Anydesk Mahle Central: 1625114024
+Senha Anydesk: #mahle01 Senha Windows: #!Mahle@2024
+
+3)  data_abertura
+
+-   Todos os registros vieram como NULL.
+-   Informação está presente no HTML da listagem.
+-   Exemplo encontrado: 31/10/2025 15:47:43
+
+Deve ser corretamente extraída e persistida.
+
+============================================================ 4)
+CHECKLIST TÉCNICO DE CORREÇÃO
+============================================================
+
+[ ] Corrigir erro de Deep Scrape que gera Dumping unresolved backtrace.
+[ ] Garantir retry controlado e log detalhado do erro. [ ] Ajustar
+estrutura da tabela chamados_tecnuv: - Criar PK id (IDENTITY). - Criar
+campo nr_chamado. [ ] Criar relacionamento 1:N com historico_interacoes.
+[ ] Corrigir captura de data_abertura. [ ] Corrigir captura de
+status_atual. [ ] Garantir persistência integral do HTML do
+assunto/motivo_abertura. [ ] Validar que dados não sejam inseridos como
+NULL quando houver erro de scrape. [ ] Implementar validação antes do
+commit no banco.
+
+============================================================ FIM DO
+DOCUMENTO ============================================================
