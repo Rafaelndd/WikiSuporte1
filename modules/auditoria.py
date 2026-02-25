@@ -1,23 +1,15 @@
-import sys
-import io
-
-# --- AJUSTE DE ENCODING (Para evitar o UnicodeEncodeError no Windows) ---
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
-# --- CORREÇÃO DE IMPORTS (Para evitar o ModuleNotFoundError via app.py) ---
-try:
-    from modules.models import LogAuditoria 
-    from modules.database import get_connection
-except ModuleNotFoundError:
-    # Fallback para execução direta do script de auditoria
-    from models import LogAuditoria 
-    from database import get_connection
-
+import logging
+from typing import Optional
 from sqlalchemy.orm import sessionmaker
 
+# Importação absoluta e limpa (padrão de projeto estruturado)
+from modules.models import LogAuditoria 
+from modules.database import get_connection
 
-def registrar_log_auditoria(usuario_id: int, acao: str, detalhes: str = None) -> None:
+# Configura o logger específico para este módulo
+logger = logging.getLogger(__name__)
+
+def registrar_log_auditoria(usuario_id: int, acao: str, detalhes: Optional[str] = None) -> None:
     """
     Registra uma ação no banco de dados para fins de auditoria e segurança.
     Utiliza a conexão padrão (get_connection) para manter a integridade da arquitetura.
@@ -27,32 +19,33 @@ def registrar_log_auditoria(usuario_id: int, acao: str, detalhes: str = None) ->
     - acao (str): Nome da ação (ex: 'LOGIN', 'ACEITE_TERMOS').
     - detalhes (str, opcional): Contexto extra (ex: 'Aba de CSV acessada').
     """
-    # 1. Obtém o motor de conexão central do projeto
-    engine = get_connection()
-    
-    # 2. Cria a fábrica de sessões e abre uma conversa com o banco
-    Session = sessionmaker(bind=engine)
-    session = Session() 
+    # 1. Obtém o motor de conexão central e a sessão
+    try:
+        engine = get_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session() 
+    except Exception as e:
+        logger.error(f"[Auditoria] Falha catastrófica ao conectar com o banco: {e}")
+        return # Aborta silenciosamente para não travar a navegação do usuário
     
     try:
-        # 3. Monta o objeto do log
+        # 2. Monta o objeto do log
         novo_log = LogAuditoria(
             usuario_id=usuario_id,
             acao=acao,
             detalhes=detalhes
         )
         
-        # 4. Salva no banco de dados
+        # 3. Salva no banco de dados
         session.add(novo_log)
         session.commit()
-        print(f"[PSY Log] Salvo com sucesso: User ID :{usuario_id} | {acao}")
+        logger.info(f"[Auditoria] Salvo com sucesso | User ID: {usuario_id} | Ação: {acao}")
         
     except Exception as e:
-        # 5. Em caso de erro, desfaz a transação para evitar travamento
+        # 4. Em caso de erro, desfaz a transação imediatamente para evitar travamento da tabela
         session.rollback()
-        print(f"[PSY Erro] Falha ao registrar log :{e}")
+        logger.error(f"[Auditoria] Falha ao registrar log no banco: {e}")
         
     finally:
-        # 6. OBRIGATÓRIO: Fecha a sessão para liberar a memória do servidor
+        # 5. OBRIGATÓRIO: Fecha a sessão para liberar o "Pool" de conexões
         session.close()
-        

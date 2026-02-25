@@ -1,44 +1,58 @@
-# arquivos para ser ignorados pelo git
-*.log
-*.tmp
-*.bak
-# diretórios para ser ignorados pelo git
-node_modules/
-dist/
-# arquivos de configuração para ser ignorados pelo git
-.env
-.env.test
-# arquivos de build para ser ignorados pelo git
+# Byte-compiled / Optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
 build/
-# arquivos de cache para ser ignorados pelo git
-.cache/
-# arquivos de cobertura de teste para ser ignorados pelo git
-coverage/
-# arquivos de dependências para ser ignorados pelo git
-vendor/
-package-lock.json
-yarn.lock
-# arquivos de sistema para ser ignorados pelo git
-.DS_Store   
-Thumbs.db
-# arquivos de IDE para ser ignorados pelo git
-.idea/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# Environment Variables & Secrets (CRITICAL)
+.env
+.streamlit/secrets.toml
+
+# Logs
+*.log
+oraculo_engine.log
+
+# Data files (Prevent committing customer data)
+*.csv
+*.xlsx
+*.xls
+
+# IDE / Editor
 .vscode/
-# arquivos de log para ser ignorados pelo git
-logs/
-# arquivos de backup para ser ignorados pelo git
-*.bak
-# arquivos de configuração do editor para ser ignorados pelo git
-*.sublime-project
-*.sublime-workspace
-# arquivos de configuração do sistema para ser ignorados pelo git
+.idea/
 *.swp
-# arquivos de configuração do ambiente para ser ignorados pelo git
-.env.local                              
-.env.development
-.env.test
-.env.production
-.env.staging
+
+# OS Generated files
+.DS_Store
+Thumbs.db
+
+# Backups (Git handles history, avoid committing manual backups)
 backups/
-
-
+hist
+docs

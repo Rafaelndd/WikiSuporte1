@@ -1,6 +1,6 @@
 import logging
 import sys
-from modules.robo_tecnuv import OraculoBot
+from modules.selenium_raspagem import OraculoBot
 from dotenv import load_dotenv
 
 # Carrega variáveis de ambiente logo no início
