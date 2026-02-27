@@ -216,10 +216,13 @@ class OraculoBot:
                 
                 self.wait.until(EC.presence_of_all_elements_located((By.XPATH, "//table/tbody/tr")))
                 linhas = self.driver.find_elements(By.XPATH, "//table/tbody/tr")
+                
                 for linha in linhas:
                     try:
                         tds = linha.find_elements(By.TAG_NAME, "td")
-                        if not tds: 
+                        
+                        # A Vacina: Validamos se a linha tem as colunas corretas (pelo menos 10)
+                        if len(tds) < 10: 
                             continue
                         
                         cliente_tabela = tds[1].text.strip()
@@ -227,17 +230,27 @@ class OraculoBot:
                         if "TECNUV SISTEMAS" in cliente_tabela.upper():
                             continue
                         
-                        btn_abrir = linha.find_element(By.CSS_SELECTOR, "a.btn-primary")
-                        link = btn_abrir.get_attribute("href")
-                        nr_chamado = int(link.split("/")[-1])
+                        # Pega o número diretamente da 1ª coluna (muito mais seguro)
+                        nr_chamado_str = tds[0].text.strip()
+                        if not nr_chamado_str.isdigit():
+                            continue # Ignora se não for número (ex: cabeçalhos perdidos)
+                            
+                        nr_chamado = int(nr_chamado_str)
                         
+                        # Constrói o link à força, sem depender do botão existir na tela!
+                        link = f"https://postogestor.com.br/helpdesk/sistema/tecnuv/editar/id/{nr_chamado}"
+                        
+                        # Trata o ícone lendo diretamente a Coluna 10
                         try:
-                            icone_i = linha.find_element(By.XPATH, ".//a[contains(@class, 'dcontexto')]")
-                            html_icone = icone_i.get_attribute("innerHTML")
-                            data_alt_web = self.extrair_data_alteracao(html_icone)
+                            html_coluna_10 = tds[10].get_attribute("innerHTML")
+                            if "dcontexto" in html_coluna_10:
+                                data_alt_web = self.extrair_data_alteracao(html_coluna_10)
+                            else:
+                                data_alt_web = None
+                                logging.warning(f"Chamado {nr_chamado} sem ícone de alteração (dcontexto).")
                         except:
                             data_alt_web = None
-                            logging.warning(f"Chamado {nr_chamado} sem ícone de alteração (dcontexto).")
+                            logging.warning(f"Falha ao ler coluna de ícone do chamado {nr_chamado}.")
 
                         chamados_coletados.append({
                             "nr_chamado": nr_chamado,
