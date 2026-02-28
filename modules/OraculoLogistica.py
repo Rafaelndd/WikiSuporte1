@@ -140,37 +140,35 @@ class OraculoLogistica:
         print(f"✅ [PSY - Assistente WikiSuporte] Varredura de Código finalizada: {sucesso} possíveis chamados corrigidos pela Tecnuv identificados.")
 
 
-
     def processar_html_tickets(self, html_content):
         """
-        Extrai os tickets da EPSY fazendo Deep Scraping no HTML fornecido.
+        Extrai os tickets da EPSY fazendo Deep Scraping no HTML fornecido com Isolamento de Transações.
         """
         soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # Encontra as linhas da tabela ignorando o cabeçalho
         linhas = soup.find_all('tr')
         
         sucesso = 0
         erros = 0
-        with self.engine.begin() as conn:
+        
+        # MUDANÇA ARQUITETURAL: Usamos connect() em vez de begin() 
+        # para nós mesmos controlarmos as transações linha a linha!
+        with self.engine.connect() as conn:
             for linha in linhas:
                 tds = linha.find_all('td')
                 
-                # O HTML mostra que a tabela tem cerca de 8 colunas[cite: 5]. Se tiver menos, é lixo.
                 if len(tds) < 7:
                     continue
-                    
+                
+                id_bruto = tds[0].text.strip()
+                id_limpo = re.sub(r'\D', '', id_bruto)
+                if not id_limpo:
+                    continue 
+                
+                # ==========================================
+                # 🛡️ INÍCIO DA TRANSAÇÃO ISOLADA DO TICKET
+                # ==========================================
+                trans = conn.begin() 
                 try:
-                    # ==========================================
-                    # 1. DADOS BÁSICOS (Limpando sujeira do HTML)
-                    # ==========================================
-                    id_bruto = tds[0].text.strip()
-                    # Extrai apenas os números (Resolve a armadilha do ID)
-                    id_limpo = re.sub(r'\D', '', id_bruto)
-                    
-                    if not id_limpo:
-                        continue 
-                        
                     nr_ticket = int(id_limpo)
                     cliente_nome = tds[1].text.strip()
                     assunto = tds[2].text.strip()
@@ -180,20 +178,20 @@ class OraculoLogistica:
                     chamado_vinc_str = re.sub(r'\D', '', tds[6].text.strip())
                     chamado_vinculado = int(chamado_vinc_str) if chamado_vinc_str else None
                     
+                    # A CORREÇÃO DA CASCATA: Se a Tecnuv mandar 0, nós anulamos.
+                    if chamado_vinculado == 0:
+                        chamado_vinculado = None
+                        
                     data_ab_str = tds[3].text.strip()
                     data_abertura = None
                     if data_ab_str:
                         try:
                             data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M:%S")
                         except ValueError:
-                            # Tenta fallback para formato sem segundos se der erro
                             try:
                                 data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M")
                             except: pass
 
-                    # ==========================================
-                    # 2. MATCH DO ANALISTA
-                    # ==========================================
                     primeiro_nome = nome_analista_epsy.split()[0] if nome_analista_epsy else ''
                     id_analista_epsy = None
                     if primeiro_nome:
@@ -202,42 +200,34 @@ class OraculoLogistica:
                             {"b": f"%{primeiro_nome}%"}
                         ).scalar()
 
-                    # ==========================================
-                    # 3. O COFRE SECRETO (Extração dentro do ícone 'i')
-                    # ==========================================
+                    # O COFRE SECRETO
                     tempo_aberto_str = None
                     avaliacao = None
                     data_ultima_interacao = None
                     ultima_mensagem = None
                     
-                    # O ícone com a classe dcontexto que você mapeou [cite: 20]
                     icone_info = linha.find('a', class_='dcontexto')
-                    
                     if icone_info:
                         html_interno = str(icone_info)
                         
-                        # Regex para Tempo Aberto
                         m_tempo = re.search(r'Ticket ficou aberto por:</font>.*?<font[^>]*>(.*?)</font>', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_tempo: tempo_aberto_str = m_tempo.group(1).replace('<br>', '').strip()
                             
-                        # Regex para Data Interação (Ex: João as 07/11/2022 09:05:30) [cite: 24]
                         m_interacao = re.search(r'Última Alteração:</font>.*?<font[^>]*>.*?(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_interacao:
                             try:
                                 data_ultima_interacao = datetime.strptime(m_interacao.group(1).strip(), "%d/%m/%Y %H:%M:%S")
                             except: pass
                                 
-                        # Regex para Mensagem (pega tudo até o próximo </font>) [cite: 24, 25]
                         m_msg = re.search(r'Última Mensagem:</font>.*?<font[^>]*>(.*?)</font>', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_msg:
                             ultima_mensagem = re.sub(r'<br\s*/?>', ' | ', m_msg.group(1)).strip()
                             
-                        # Regex para Avaliação (A armadilha da imagem: 5star.png) [cite: 27]
                         m_ava = re.search(r'Avaliação:</font>.*?<img[^>]*src="[^"]*?(\d)star\.png"', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_ava: avaliacao = m_ava.group(1).strip()
 
                     # ==========================================
-                    # 4. UPSERT
+                    # UPSERT SEGURO
                     # ==========================================
                     query_insert = text("""
                         INSERT INTO tickets_epsy (
@@ -271,14 +261,20 @@ class OraculoLogistica:
                         "avaliacao": avaliacao, "data_ultima_interacao": data_ultima_interacao, 
                         "ultima_mensagem": ultima_mensagem
                     })
+                    
+                    # CONFIRMA A TRANSAÇÃO (O Ticket deu certo!)
+                    trans.commit() 
                     sucesso += 1
                     
                 except Exception as e:
+                    # CANCELA A TRANSAÇÃO (O Ticket deu errado, mas salva o resto da página!)
+                    trans.rollback() 
                     erros += 1
-                    # AQUI ESTÁ A LUZ: Se der erro, ele vai gritar no terminal em vez de se esconder!
-                    print(f"⚠️ Erro ao processar ticket ID {id_bruto}: {e}")
+                    print(f"⚠️ Erro isolado no ticket ID {id_bruto}: {e}")
                     
         print(f"✅ [PSY - Assistente WikiSuporte] Página processada. +{sucesso} tickets salvos | {erros} ignorados.")
+
+
     def sincronizar_vinculos_goto(self):
         """
         Vare a tabela do GoTo e vincula os telefones aos clientes usando a chave LGPD.
