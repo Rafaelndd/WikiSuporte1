@@ -2,6 +2,9 @@ import time
 import os
 import re
 import logging
+
+
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from datetime import datetime
 from selenium import webdriver
@@ -184,7 +187,7 @@ class MotorExtracao:
             print(f"❌ Erro ao tentar paginar os Tickets: {e}")
 
 
-    # 2. AGORA, AJUSTE A FUNÇÃO PRINCIPAL:
+    
     def raspar_todas_as_fontes(self):
         try:
             # 1. Releases (Página Home) - LÓGICA NOVA COM CLIQUES
@@ -239,62 +242,52 @@ class MotorExtracao:
             html_pagina = self.driver.page_source
             self.oraculo.processar_html_manuais(html_pagina)
             
-            # 5. Wikis da Tecnuv 
-            print("\n📥 Acessando Base de Wikis...")
+            # ==========================================
+            # 5. Wikis da Tecnuv (Modo Mergulhador)
+            # ==========================================
             self.extrair_todas_as_wikis()
-  
-            try:
-                self.oraculo.processar_html_wikis(self.driver.page_source)
-            except AttributeError:
-                print("⚠️ Método processar_html_wikis ainda não implementado no OraculoLogistica.")
-            
-        except Exception as e:
-            print(f"❌ Erro durante a navegação: {e}")
-
+        finally:
+            print("✅ Extração de todas as fontes concluída!")
+   
 
     def extrair_todas_as_wikis(self):
         print("\n📥 Acessando Base de Wikis (Iniciando Modo Mergulhador)...")
-        # URL da tabela das wikis
-        url_base_busca = "https://postogestor.com.br/helpdesk/sistema/wiki/busca" 
+        
+        # O URL correto da lista principal de Wikis (Ajuste se necessário)
+        url_base_wikis = "https://postogestor.com.br/helpdesk/sistema/wiki" 
         
         ids_ja_sincronizados = self.oraculo.obter_ids_wikis_sincronizadas()
         ids_pendentes_para_mergulho = []
 
         try:
-            self.driver.get(url_base_busca)
-            
-            # Tenta encontrar e clicar no botão "Buscar" de várias formas
-            try:
-                btn_busca = WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.ID, "btnBusca"))
-                )
-                btn_busca.click()
-            except:
-                try:
-                    btn_busca = self.driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Buscar']")
-                    btn_busca.click()
-                except:
-                    print("👁️ Botão de busca não encontrado. Aguardando a tabela carregar sozinha...")
+            self.driver.get(url_base_wikis)
+            print("⏳ Aguardando a tabela de Wikis carregar...")
                 
-            # O ESCUDO: Se a tabela não carregar, ele não explode o terminal, ele avisa e sai.
+            # O ESCUDO: Fica a olhar até que apareça a primeira linha com o botão "Abrir"
             try:
                 WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/wiki/editar/id/']"))
                 )
             except Exception as e:
-                print("⚠️ A tabela de Wikis não apareceu. O robô pode estar no URL errado ou a Tecnuv está lenta.")
+                print("⚠️ A tabela de Wikis não apareceu. O URL base pode estar errado ou o site demorou muito.")
                 return # Aborta o mergulho em segurança
 
             time.sleep(2)
             html_atual = self.driver.page_source
+            
+            # Tenta descobrir o número total de páginas (se não achar, assume que é 1 página só)
             match_paginas = re.search(r'Nº de páginas:.*?<font[^>]*>(\d+)</font>', html_atual, re.DOTALL)
             total_paginas = int(match_paginas.group(1)) if match_paginas else 1
 
             print(f"📊 O Fantasma detetou {total_paginas} páginas de Wikis. Iniciando Voo de Reconhecimento...")
 
+            # ==========================================
+            # FASE 1: VOO DE RECONHECIMENTO (Anotar IDs)
+            # ==========================================
             for pagina_atual in range(1, total_paginas + 1):
                 if pagina_atual > 1:
-                    self.driver.get(f"{url_base_busca}?pg={pagina_atual}")
+                    # Tenta navegar para a próxima página (Alguns sistemas usam ?pg=2, outros /pg/2)
+                    self.driver.get(f"{url_base_wikis}?pg={pagina_atual}")
                     time.sleep(3)
                     
                 soup = BeautifulSoup(self.driver.page_source, 'html.parser')
@@ -304,12 +297,15 @@ class MotorExtracao:
                     m = re.search(r'/id/(\d+)', link['href'])
                     if m:
                         wiki_id = int(m.group(1))
-                        # SEGREDO DA VELOCIDADE: Só mergulha se a Wiki não existir no Banco!
+                        # SEGREDO DA VELOCIDADE: Só anota se a Wiki não existir no Banco!
                         if wiki_id not in ids_ja_sincronizados and wiki_id not in ids_pendentes_para_mergulho:
                             ids_pendentes_para_mergulho.append(wiki_id)
 
             print(f"🎯 Reconhecimento concluído! Encontradas {len(ids_pendentes_para_mergulho)} Wikis NOVAS para mergulhar.")
 
+            # ==========================================
+            # FASE 2: O MERGULHO PROFUNDO
+            # ==========================================
             if not ids_pendentes_para_mergulho:
                 print("💤 Nenhuma wiki nova encontrada. Poupando o oxigénio do mergulhador!")
                 return

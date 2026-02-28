@@ -221,8 +221,11 @@ class OraculoBot:
                     try:
                         tds = linha.find_elements(By.TAG_NAME, "td")
                         
-                        # A Vacina: Validamos se a linha tem as colunas corretas (pelo menos 10)
-                        if len(tds) < 10: 
+                        # ==========================================
+                        # 🛡️ CORREÇÃO 1: A VACINA DE ÍNDICES
+                        # Para acessar tds[10], a linha precisa ter no mínimo 11 elementos!
+                        # ==========================================
+                        if len(tds) < 11: 
                             continue
                         
                         cliente_tabela = tds[1].text.strip()
@@ -230,27 +233,38 @@ class OraculoBot:
                         if "TECNUV SISTEMAS" in cliente_tabela.upper():
                             continue
                         
-                        # Pega o número diretamente da 1ª coluna (muito mais seguro)
+                        # Pega o número diretamente da 1ª coluna
                         nr_chamado_str = tds[0].text.strip()
                         if not nr_chamado_str.isdigit():
-                            continue # Ignora se não for número (ex: cabeçalhos perdidos)
+                            continue 
                             
                         nr_chamado = int(nr_chamado_str)
-                        
-                        # Constrói o link à força, sem depender do botão existir na tela!
                         link = f"https://postogestor.com.br/helpdesk/sistema/tecnuv/editar/id/{nr_chamado}"
                         
-                        # Trata o ícone lendo diretamente a Coluna 10
+                        # ==========================================
+                        # 🛡️ CORREÇÃO 2: O PREDADOR DE DATAS (RegEx)
+                        # ==========================================
+                        data_alt_web = None
                         try:
                             html_coluna_10 = tds[10].get_attribute("innerHTML")
                             if "dcontexto" in html_coluna_10:
-                                data_alt_web = self.extrair_data_alteracao(html_coluna_10)
-                            else:
-                                data_alt_web = None
-                                logging.warning(f"Chamado {nr_chamado} sem ícone de alteração (dcontexto).")
-                        except:
-                            data_alt_web = None
-                            logging.warning(f"Falha ao ler coluna de ícone do chamado {nr_chamado}.")
+                                import re
+                                from datetime import datetime
+                                
+                                # Caça qualquer data/hora no formato dd/mm/yyyy hh:mm:ss (ou sem segundos)
+                                datas_encontradas = re.findall(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}(?::\d{2})?)', html_coluna_10)
+                                
+                                if datas_encontradas:
+                                    # A "Última Alteração" é geralmente a última data listada no balão
+                                    ultima_data_str = datas_encontradas[-1] 
+                                    
+                                    try:
+                                        data_alt_web = datetime.strptime(ultima_data_str, "%d/%m/%Y %H:%M:%S")
+                                    except ValueError:
+                                        # Se a Tecnuv não mandar os segundos, tentamos sem eles
+                                        data_alt_web = datetime.strptime(ultima_data_str, "%d/%m/%Y %H:%M")
+                        except Exception as e:
+                            logging.warning(f"Falha ao processar a RegEx do chamado {nr_chamado}: {e}")
 
                         chamados_coletados.append({
                             "nr_chamado": nr_chamado,
