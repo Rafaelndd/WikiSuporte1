@@ -569,15 +569,15 @@ class OraculoBot:
 
 
 # ==============================================================================
-# CIRURGIA: O CÉREBRO DO DAEMON (LIGAÇÃO COM O STREAMLIT)
+# CIRURGIA: O CÉREBRO DO PSY Assistente WikiSuporte (LIGAÇÃO COM O STREAMLIT)
 # ==============================================================================
 
-def iniciar_daemon_bot():
+def iniciar_psy_assistente_wikisuporte_bot():
     """
     Mantém o robô ativo em segundo plano, escutando o arquivo 'robo_state.json' 
     gerado pelo painel do Streamlit. Respeita intervalos e execuções manuais.
     """
-    logging.info("🤖 Daemon do OraculoBot Iniciado. Aguardando comandos do Painel WikiSuporte...")
+    logging.info("🤖 PSY Assistente WikiSuporte do OraculoBot Iniciado. Aguardando comandos do Painel WikiSuporte...")
     
     while True:
         try:
@@ -639,7 +639,7 @@ def iniciar_daemon_bot():
                     logging.info("💤 Ciclo finalizado. Robô a dormir até o próximo intervalo.")
                     
         except Exception as e:
-            logging.error(f"Erro crítico no Cérebro do Daemon: {e}")
+            logging.error(f"Erro crítico no Cérebro do PSY Assistente WikiSuporte: {e}")
             # Destrava em caso de erro fatal para não prender o painel do Streamlit
             estado = ler_estado_robo()
             if estado.get("em_andamento"):
@@ -651,4 +651,4 @@ def iniciar_daemon_bot():
 
 if __name__ == "__main__":
     # Se rodar o arquivo diretamente no terminal, ele acorda o Vigilante.
-    iniciar_daemon_bot()
+    iniciar_psy_assistente_wikisuporte_bot()

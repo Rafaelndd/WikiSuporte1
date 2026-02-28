@@ -65,47 +65,30 @@ class OraculoLogistica:
         print(f"✅ [PSY - Assistente WikiSuporte] Escala atualizada: {sucesso} plantões inseridos com sucesso!")
 
     def processar_html_manuais(self, html_content):
-        """
-        Extrai a lista de Manuais em PDF da Tecnuv e salva na Base de Conhecimento Unificada.
-        Ignora os manuais em formato de vídeo e usa o Número (#) para evitar duplicatas.
-        """
-        print("🤖 [PSY - Assistente] A processar HTML da Biblioteca de Manuais...")
-
+        print("🤖 [PSY - Assistente] A processar HTML da Biblioteca de Manuais (Modo Delta Sync)...")
         soup = BeautifulSoup(html_content, 'html.parser')
         linhas = soup.find_all('tr')
         
-        # 🟢 O SONAR: Quantas linhas o HTML realmente tem?
-        print(f"🔎 DEBUG DO ORÁCULO: O robô encontrou {len(linhas)} linhas <tr> no HTML.")
-        
-        # Encontra as linhas da tabela (a classe 'small' é usada nas linhas de conteúdo)
-        linhas = soup.find_all('tr', class_='small')
-        
-        sucesso = 0
-        erros = 0
+        inseridos = 0
+        atualizados = 0
+        ignorados_iguais = 0
         ignorados_video = 0
+        erros = 0
         
         with self.engine.connect() as conn:
             for linha in linhas:
                 tds = linha.find_all('td')
-                
-                # Garante que tem as 5 colunas: #, Manual, Categoria, Subcategoria, Botão
                 if len(tds) < 5:
                     continue
                     
                 trans = conn.begin()
                 try:
-                    # ==========================================
-                    # 1. VALIDAÇÃO E EXTRAÇÃO DO NÚMERO (#)
-                    # ==========================================
                     nr_str = re.sub(r'\D', '', tds[0].text.strip())
                     if not nr_str:
                         trans.rollback()
                         continue
                     nr_documento = int(nr_str)
                     
-                    # ==========================================
-                    # 2. FILTRO ANTI-VÍDEO
-                    # ==========================================
                     link_tag = tds[4].find('a')
                     if not link_tag:
                         trans.rollback()
@@ -119,53 +102,57 @@ class OraculoLogistica:
                         trans.rollback()
                         continue
                         
-                    # ==========================================
-                    # 3. EXTRAÇÃO DOS DADOS
-                    # ==========================================
                     url_pdf = link_tag.get('href')
+                    if not url_pdf:
+                        trans.rollback()
+                        continue
+                        
                     titulo = tds[1].text.strip()
                     categoria = tds[2].text.strip()
                     subcategoria = tds[3].text.strip()
-                    
-                    # Conteúdo guarda a URL (No futuro o Gemini vai ler esse PDF)
                     conteudo = f"URL_DOCUMENTO: {url_pdf}"
                     
                     # ==========================================
-                    # 4. UPSERT SEGURO NA BASE UNIFICADA
+                    # 🔍 O MOTOR DE DELTA SYNC DOS MANUAIS
+                    # ==========================================
+                    doc_banco = conn.execute(
+                        text("SELECT titulo, conteudo FROM base_conhecimento WHERE origem = 'MANUAL_HELPDESK' AND nr_documento = :nr"), 
+                        {"nr": nr_documento}
+                    ).fetchone()
+                    
+                    if doc_banco:
+                        db_titulo, db_conteudo = doc_banco
+                        # Se o título e o PDF não mudaram, NADA MUDOU!
+                        if db_titulo == titulo and db_conteudo == conteudo:
+                            ignorados_iguais += 1
+                            trans.commit()
+                            continue # Pula a gravação
+                        else:
+                            atualizados += 1
+                    else:
+                        inseridos += 1
+
+                    # ==========================================
+                    # UPSERT
                     # ==========================================
                     query_upsert = text("""
-                        INSERT INTO base_conhecimento (
-                            nr_documento, origem, titulo, categoria, subcategoria, conteudo, status
-                        )
-                        VALUES (
-                            :nr, 'MANUAL_HELPDESK', :tit, :cat, :subcat, :cont, 'APROVADO'
-                        )
+                        INSERT INTO base_conhecimento (nr_documento, origem, titulo, categoria, subcategoria, conteudo, status)
+                        VALUES (:nr, 'MANUAL_HELPDESK', :tit, :cat, :subcat, :cont, 'APROVADO')
                         ON CONFLICT (origem, nr_documento) DO UPDATE 
-                        SET 
-                            titulo = EXCLUDED.titulo,
-                            categoria = EXCLUDED.categoria,
-                            subcategoria = EXCLUDED.subcategoria,
-                            conteudo = EXCLUDED.conteudo,
+                        SET titulo = EXCLUDED.titulo, categoria = EXCLUDED.categoria,
+                            subcategoria = EXCLUDED.subcategoria, conteudo = EXCLUDED.conteudo,
                             atualizado_em = CURRENT_TIMESTAMP
                     """)
                     
-                    conn.execute(query_upsert, {
-                        "nr": nr_documento,
-                        "tit": titulo,
-                        "cat": categoria,
-                        "subcat": subcategoria,
-                        "cont": conteudo
-                    })
-                    
+                    conn.execute(query_upsert, {"nr": nr_documento, "tit": titulo, "cat": categoria, "subcat": subcategoria, "cont": conteudo})
                     trans.commit()
-                    sucesso += 1
                     
                 except Exception as e:
                     trans.rollback()
                     erros += 1
                     print(f"⚠️ Erro ao processar o manual nº {nr_str}: {e}")
                     
-        print(f"✅ [PSY - Assistente] Manuais sincronizados: {sucesso} gravados | {ignorados_video} vídeos ignorados | {erros} erros.")
+        print(f"✅ [PSY - Assistente] Manuais: {inseridos} Novos | {atualizados} Atualizados | {ignorados_iguais} Intocados (Ignorados) | {ignorados_video} Vídeos pulados.")
 
 
     def processar_html_releases(self, html_content):
@@ -425,7 +412,7 @@ class OraculoLogistica:
             resultado = conn.execute(text("SELECT nr_documento FROM base_conhecimento WHERE origem = 'WIKI_HELPDESK'"))
             # Retorna um "Set" (conjunto) para buscas ultra-rápidas no Python
             return {linha[0] for linha in resultado}
-            
+
 
     def processar_e_salvar_wiki_interna(self, html_content, id_wiki):
         """

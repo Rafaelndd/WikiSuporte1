@@ -242,7 +242,6 @@ class MotorExtracao:
             # 5. Wikis da Tecnuv 
             print("\n📥 Acessando Base de Wikis...")
             self.extrair_todas_as_wikis()
-            time.sleep(3)
   
             try:
                 self.oraculo.processar_html_wikis(self.driver.page_source)
@@ -255,66 +254,64 @@ class MotorExtracao:
 
     def extrair_todas_as_wikis(self):
         print("\n📥 Acessando Base de Wikis (Iniciando Modo Mergulhador)...")
-        # Assume o mesmo padrão de rota dos manuais
+        # URL da tabela das wikis
         url_base_busca = "https://postogestor.com.br/helpdesk/sistema/wiki/busca" 
         
-        # Pede ao Oráculo a lista do que já temos guardado
         ids_ja_sincronizados = self.oraculo.obter_ids_wikis_sincronizadas()
         ids_pendentes_para_mergulho = []
 
         try:
             self.driver.get(url_base_busca)
             
-            # Tenta forçar a busca para carregar a tabela
+            # Tenta encontrar e clicar no botão "Buscar" de várias formas
             try:
                 btn_busca = WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Buscar']"))
+                    EC.element_to_be_clickable((By.ID, "btnBusca"))
                 )
                 btn_busca.click()
             except:
-                pass
+                try:
+                    btn_busca = self.driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Buscar']")
+                    btn_busca.click()
+                except:
+                    print("👁️ Botão de busca não encontrado. Aguardando a tabela carregar sozinha...")
                 
-            # Cão de Guarda: Espera ver pelo menos um botão de "Abrir" wiki
-            WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/wiki/editar/id/']"))
-            )
-            time.sleep(2)
+            # O ESCUDO: Se a tabela não carregar, ele não explode o terminal, ele avisa e sai.
+            try:
+                WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/wiki/editar/id/']"))
+                )
+            except Exception as e:
+                print("⚠️ A tabela de Wikis não apareceu. O robô pode estar no URL errado ou a Tecnuv está lenta.")
+                return # Aborta o mergulho em segurança
 
+            time.sleep(2)
             html_atual = self.driver.page_source
             match_paginas = re.search(r'Nº de páginas:.*?<font[^>]*>(\d+)</font>', html_atual, re.DOTALL)
             total_paginas = int(match_paginas.group(1)) if match_paginas else 1
 
             print(f"📊 O Fantasma detetou {total_paginas} páginas de Wikis. Iniciando Voo de Reconhecimento...")
 
-            # ==========================================
-            # FASE 1: VOO DE RECONHECIMENTO (Anotar IDs)
-            # ==========================================
             for pagina_atual in range(1, total_paginas + 1):
                 if pagina_atual > 1:
-                    # Navega usando o padrão de paginação
                     self.driver.get(f"{url_base_busca}?pg={pagina_atual}")
                     time.sleep(3)
                     
                 soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                
-                # Procura todas as tags <a> que contêm o link para editar a wiki
                 links_abrir = soup.find_all('a', href=re.compile(r'/wiki/editar/id/(\d+)'))
                 
                 for link in links_abrir:
                     m = re.search(r'/id/(\d+)', link['href'])
                     if m:
                         wiki_id = int(m.group(1))
-                        # Só adiciona se for NOVA! (Sincronização Delta)
+                        # SEGREDO DA VELOCIDADE: Só mergulha se a Wiki não existir no Banco!
                         if wiki_id not in ids_ja_sincronizados and wiki_id not in ids_pendentes_para_mergulho:
                             ids_pendentes_para_mergulho.append(wiki_id)
 
             print(f"🎯 Reconhecimento concluído! Encontradas {len(ids_pendentes_para_mergulho)} Wikis NOVAS para mergulhar.")
 
-            # ==========================================
-            # FASE 2: O MERGULHO PROFUNDO
-            # ==========================================
             if not ids_pendentes_para_mergulho:
-                print("💤 Nenhuma wiki nova encontrada. Poupando recursos!")
+                print("💤 Nenhuma wiki nova encontrada. Poupando o oxigénio do mergulhador!")
                 return
 
             for i, wiki_id in enumerate(ids_pendentes_para_mergulho, 1):
@@ -323,22 +320,20 @@ class MotorExtracao:
                 
                 self.driver.get(url_interna)
                 
-                # Espera a caixa de texto da wiki aparecer na tela
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "w_desc"))
-                )
+                # Cão de Guarda do texto da Wiki
+                try:
+                    WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.ID, "w_desc")))
+                    html_interno = self.driver.page_source
+                    self.oraculo.processar_e_salvar_wiki_interna(html_interno, wiki_id)
+                except:
+                    print(f"⚠️ Erro ao ler a Wiki {wiki_id}. Conteúdo vazio ou acesso negado.")
                 
-                # Manda o HTML interno para o Oráculo
-                html_interno = self.driver.page_source
-                self.oraculo.processar_e_salvar_wiki_interna(html_interno, wiki_id)
-                
-                # Um respiro leve para não derrubar o servidor deles
-                time.sleep(1) 
+                time.sleep(1) # Respeito ao servidor
 
             print("✅ Varredura profunda de Wikis concluída com sucesso!")
 
         except Exception as e:
-            print(f"❌ Erro na extração de Wikis: {e}")
+            print(f"❌ Erro crítico no robô de Wikis: {e}")
 
             
     def fechar(self):
@@ -349,10 +344,10 @@ class MotorExtracao:
     
 
 # ==========================================
-# O DAEMON (MOTOR EM SEGUNDO PLANO)
+# O PSY Assistente WikiSuporte (MOTOR EM SEGUNDO PLANO)
 # ==========================================
-def iniciar_daemon():
-    print("🤖 Daemon do WikiSuporte Iniciado. Aguardando ordens do painel de controlo...")
+def iniciar_psy_assistente():
+    print("🤖 PSY Assistente do WikiSuporte Iniciado. Aguardando ordens do painel de controle...")
     
     while True:
         # Lê o painel de configurações que criámos no Streamlit
@@ -390,4 +385,4 @@ def iniciar_daemon():
             time.sleep(60)
 
 if __name__ == "__main__":
-    iniciar_daemon()
+    iniciar_psy_assistente()
