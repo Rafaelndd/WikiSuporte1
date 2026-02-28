@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+
 from sqlalchemy import text
 from datetime import datetime, timedelta, time
-
 from modules.database import get_connection
 
-# Tenta importar a auditoria
+# Logs de auditoria (com tratamento de exceção para evitar falhas caso o módulo não esteja presente)
 try:
     from modules.auditoria import registrar_log_auditoria
 except:
@@ -54,34 +54,22 @@ def carregar_dados_multi360():
         return df
     except: return pd.DataFrame()
 
-# ==========================================
-# 3. INTERFACE E FILTROS GLOBAIS
-# ==========================================
-st.title("📊 Dashboard de Atendimentos")
-st.markdown("Visão analítica de fluxo e performance operacional (Omnichannel).")
-
-df_goto_raw = carregar_dados_goto()
-df_multi360_raw = carregar_dados_multi360()
-
-if df_goto_raw.empty and df_multi360_raw.empty:
-    st.warning("Nenhum dado de atendimento encontrado. Importe os relatórios no menu de Importação de Dados.")
-    st.stop()
 
 # ==========================================
 # 3. INTERFACE E FILTROS GLOBAIS
 # ==========================================
 st.title("📊 Dashboard de Atendimentos")
-st.markdown("Visão analítica de fluxo e performance operacional (Omnichannel).")
+st.markdown("Visão clara do fluxo de atendimentos e do desempenho da equipe em todos os canais.")
 
 df_goto_raw = carregar_dados_goto()
 df_multi360_raw = carregar_dados_multi360()
 
 if df_goto_raw.empty and df_multi360_raw.empty:
-    st.warning("Nenhum dado de atendimento encontrado. Importe os relatórios no menu de Importação de Dados.")
+    st.warning("Nenhum arquivo dos atendimentos foi encontrado. Por favor, importe os dados para visualizar o dashboard.")
     st.stop()
 
 # --- NOVO PAINEL DE FILTROS NA PÁGINA PRINCIPAL ---
-with st.expander("⚙️ Painel de Controlo e Filtros Globais", expanded=True):
+with st.expander("⚙️ Filtros: ", expanded=True):
     col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
     
     with col_f1:
@@ -105,15 +93,15 @@ with st.expander("⚙️ Painel de Controlo e Filtros Globais", expanded=True):
             data_final_padrao = datetime.now().date()
             data_inicial_padrao = (datetime.now() - timedelta(days=30)).date()
 
-        datas_selecionadas = st.date_input("📅 Período de Análise:", value=(data_inicial_padrao, data_final_padrao), max_value=datetime.now().date() + timedelta(days=1))
+        datas_selecionadas = st.date_input("📅 Período (Abertura):", value=(data_inicial_padrao, data_final_padrao), max_value=datetime.now().date() + timedelta(days=1))
         
     with col_f2:
         sla_finalizacao_horas = st.number_input("⏱️ Meta SLA WhatsApp (Horas):", value=24)
         
     with col_f3:
-        st.write("") # Espaçamento para alinhar o botão
+        st.write("") 
         st.write("")
-        if st.button("🔄 Atualizar Dados do Banco", use_container_width=True):
+        if st.button("🔄 Atualizar", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
@@ -200,7 +188,7 @@ aba_geral, aba_wpp, aba_telefonia = st.tabs(["👁️ Visão Omnichannel", "💬
 # ABA 1: VISÃO OMNICHANNEL (UNIFICADA)
 # ------------------------------------------
 with aba_geral:
-    st.subheader("Panorama Global de Atendimentos")
+    st.subheader("📈 Visão Geral de Atendimentos")
     
     vol_wpp = len(df_wpp)
     vol_tel = len(df_tel)
@@ -210,9 +198,9 @@ with aba_geral:
     perc_tel = (vol_tel / total_interacoes * 100) if total_interacoes > 0 else 0
     
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Operacional", total_interacoes)
-    c2.metric("Tickets WhatsApp", vol_wpp, f"{perc_wpp:.1f}% da operação", delta_color="off")
-    c3.metric("Chamadas Telefónicas", vol_tel, f"{perc_tel:.1f}% da operação", delta_color="off")
+    c1.metric("Total de Atendimentos", total_interacoes)
+    c2.metric("Atendimentos Multi360", vol_wpp, f"{perc_wpp:.1f}% da operação", delta_color="off")
+    c3.metric("Atendimentos Goto", vol_tel, f"{perc_tel:.1f}% da operação", delta_color="off")
     
     tma_wpp_min = df_wpp['TMA_HORAS'].mean() * 60 if not df_wpp.empty else 0
     tma_tel_min = df_tel['duracao_minutos'].mean() if not df_tel.empty else 0
@@ -221,7 +209,7 @@ with aba_geral:
     st.divider()
     
     if total_interacoes > 0:
-        g1, g2 = st.columns([1, 2]) # Gráfico de proporção vs Tendência
+        g1, g2 = st.columns([1, 2])
         
         with g1:
             st.markdown("#### Distribuição de Canais")
@@ -232,7 +220,7 @@ with aba_geral:
             st.plotly_chart(fig_omni, use_container_width=True)
             
         with g2:
-            st.markdown("#### Tendência de Fluxo (WPP vs Telefone)")
+            st.markdown("#### Tendência Diária de Atendimentos")
             
             # Prepara os dados diários de ambos os canais para o mesmo gráfico
             trends = []
@@ -259,18 +247,18 @@ with aba_geral:
 # ------------------------------------------
 with aba_wpp:
     if df_wpp.empty:
-        st.info("Nenhum dado de WhatsApp no período selecionado.")
+        st.info("Nenhum dado do Multi360 importado para o período selecionado.")
     else:
-        sub_exec, sub_indiv, sub_qual, sub_oper, sub_estrat = st.tabs(["📌 Visão Executiva", "👤 Performance Individual", "⭐ Qualidade", "⚙️ Operacional", "📊 Estratégico"])
+        sub_exec, sub_indiv, sub_qual, sub_oper, sub_estrat = st.tabs(["📌 Visão Geral", "👤 Performance Individual", "⭐ Qualidade", "⚙️ Operacional", "📊 Estratégico"])
 
         with sub_exec:
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Atendimentos", len(df_wpp))
-            col2.metric("TMA Geral (h)", round(df_wpp["TMA_HORAS"].mean(), 2))
+            col1.metric("Total de Atendimentos", len(df_wpp))
+            col2.metric("Tempo Médio de Atendimento (h)", round(df_wpp["TMA_HORAS"].mean(), 2))
             col3.metric("% Dentro SLA", f"{round(df_wpp['DENTRO_SLA'].mean()*100, 1)}%")
-            col4.metric("Nota Média", round(df_wpp["avaliacao"].mean(), 2))
+            col4.metric("Avaliação Média", round(df_wpp["avaliacao"].mean(), 2))
 
-            st.subheader("🏆 Ranking de Score Composto")
+            st.subheader("🏆 Ranking de avaliações Multi360")
             if not score_df.empty:
                 st.dataframe(score_df.sort_values("Score", ascending=False).style.format("{:.2f}"), use_container_width=True)
 
@@ -281,7 +269,7 @@ with aba_wpp:
                 fig_tma = px.line(tma_diario, x="DIA", y="TMA_HORAS", markers=True)
                 st.plotly_chart(fig_tma, use_container_width=True)
             with col_g2:
-                st.subheader("🔥 Heatmap (Volume Dia x Hora)")
+                st.subheader("🔥 Mapa visual do TMA Diário (Volume Dia x Hora)")
                 heatmap = df_wpp.pivot_table(index="DIA_SEMANA", columns="HORA", values="protocolo", aggfunc="count").fillna(0)
                 dias_ordem = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                 heatmap = heatmap.reindex([d for d in dias_ordem if d in heatmap.index])
@@ -291,11 +279,11 @@ with aba_wpp:
         with sub_indiv:
             atendentes_lista = df_wpp["atendente"].dropna().unique().tolist()
             if atendentes_lista:
-                atendente = st.selectbox("Selecione o Atendente:", atendentes_lista)
+                atendente = st.selectbox("Selecione o atendente:", atendentes_lista)
                 df_at = df_wpp[df_wpp["atendente"] == atendente]
 
                 c_at1, c_at2, c_at3, c_at4 = st.columns(4)
-                c_at1.metric("Volume", len(df_at))
+                c_at1.metric("Volume de Atendimentos", len(df_at))
                 c_at2.metric("TMA Médio (h)", round(df_at["TMA_HORAS"].mean(), 2))
                 c_at3.metric("Ociosidade Média (h)", round(df_at["TEMPO_OCIOSO_HORAS"].mean(), 2))
                 c_at4.metric("Score Geral", round(score_df.loc[atendente]["Score"], 2) if atendente in score_df.index else "N/A")
@@ -310,7 +298,7 @@ with aba_wpp:
         with sub_qual:
             col_q1, col_q2 = st.columns(2)
             with col_q1:
-                st.subheader("⭐ Ranking por Nota Média")
+                st.subheader("⭐ Ranking de Avaliações por Atendente")
                 ranking_nota = df_wpp.groupby("atendente")["avaliacao"].mean().sort_values(ascending=False).reset_index()
                 st.dataframe(ranking_nota.style.format({'avaliacao': "{:.2f}"}), use_container_width=True)
             with col_q2:
@@ -340,12 +328,12 @@ with aba_wpp:
 # ------------------------------------------
 with aba_telefonia:
     if df_tel.empty:
-        st.info("Nenhum dado de Telefonia importado para o período selecionado.")
+        st.info("Nenhum arquivo do Goto importado para o período selecionado.")
     else:
-        tab_tel_geral, tab_tel_agentes = st.tabs(["📌 Visão Executiva", "👤 Performance Agentes"])
+        tab_tel_geral, tab_tel_agentes = st.tabs(["📌 Visão Geral", "👤 Performance dos atendimentos por Atendente"])
         
         with tab_tel_geral:
-            st.subheader("Métricas de Voz (Telefonia)")
+            st.subheader("Métricas Gerais Goto")
             
             t_col1, t_col2, t_col3 = st.columns(3)
             t_col1.metric("Total de Ligações", len(df_tel))
@@ -364,7 +352,7 @@ with aba_telefonia:
 
         with tab_tel_agentes:
             if coluna_agente_tel:
-                st.subheader("Análise de Produtividade por Agente")
+                st.subheader("Análise de Produtividade por atendente (Goto)")
                 
                 # Prepara o DataFrame agrupado por Agente
                 df_agentes_tel = df_tel.groupby(coluna_agente_tel).agg(
@@ -386,9 +374,9 @@ with aba_telefonia:
                     fig_tel_tma.update_layout(yaxis={'categoryorder':'total ascending'})
                     st.plotly_chart(fig_tel_tma, use_container_width=True)
                 
-                st.markdown("#### Tabela Consolidada de Agentes (Voz)")
+                st.markdown("#### Dados Detalhados por Atendente (Goto)")
                 st.dataframe(df_agentes_tel.style.format({'TMA_Minutos': "{:.1f}", 'Tempo_Total_Minutos': "{:.1f}"}), use_container_width=True, hide_index=True)
             else:
-                st.info("A coluna com o nome do utilizador não foi identificada no relatório de telefonia.")
+                st.info("Não foi possível indentificar qual atendente realizoou cada ligação. Verifique se o arquivo do Goto possui uma coluna de identificação de agente (ex: 'usuario' ou 'nome').")
 
-registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD", "Visualizou Dashboard de Atendimentos Completo.")
+registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD", "Acessou o dashboard de atendimentos Multi360 e Goto")

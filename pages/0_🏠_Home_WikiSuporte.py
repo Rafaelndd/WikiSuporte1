@@ -11,12 +11,12 @@ if not st.session_state.get('autenticado'):
 nome_usuario = st.session_state.get('nome', 'Gestor')
 id_logado = st.session_state.get('usuario_id', 0)
 
-@st.cache_data(ttl=60) # Atualiza a cada 1 min para não perder plantões
+@st.cache_data(ttl=600) 
 def obter_alertas_usuario(usuario_id):
     engine = get_connection()
     try:
         # 1. Verifica Plantão de Hoje
-        query_plantao = text("SELECT data_hora_entrada, data_hora_saida FROM plantoes_epsy WHERE id_usuario_epsy = :uid AND data_hora_entrada::DATE = CURRENT_DATE")
+        query_plantao = text("SELECT data_hora_entrada, data_hora_saida FROM plantoes_epsy WHERE id_analista_epsy = :uid AND data_hora_entrada::DATE = CURRENT_DATE")
         df_plantao = pd.read_sql(query_plantao, engine, params={"uid": usuario_id})
         
         # 2. Verifica Releases (Correções pendentes de validação)
@@ -34,7 +34,7 @@ def obter_alertas_usuario(usuario_id):
         return pd.DataFrame(), pd.DataFrame()
 
 st.title(f"Bem-vindo(a), {nome_usuario} 👋")
-st.markdown("Cockpit Executivo - Alertas, Plantões e Base de Conhecimento.")
+st.markdown("Este é o painel de controle do WikiSuporte, onde você pode acessar rapidamente os recursos essenciais para o seu dia a dia no suporte técnico. Fique atento(a) aos alertas abaixo para não perder nenhuma informação importante!")
 
 df_plantao, df_correcoes = obter_alertas_usuario(id_logado)
 
@@ -42,23 +42,23 @@ df_plantao, df_correcoes = obter_alertas_usuario(id_logado)
 if not df_plantao.empty:
     entrada = df_plantao.iloc[0]['data_hora_entrada'].strftime('%H:%M')
     saida = df_plantao.iloc[0]['data_hora_saida'].strftime('%H:%M')
-    st.error(f"🚨 **ALERTA DE PLANTÃO:** Você está escalado para o plantão de hoje! (Horário: {entrada} às {saida})")
+    st.error(f"Você está escalado para o plantão de hoje! (Horário: {entrada} às {saida})")
 
 if not df_correcoes.empty:
     chamados_str = ", ".join([str(n) for n in df_correcoes['nr_chamado'].tolist()])
-    st.warning(f"⚠️ **AÇÃO REQUERIDA:** A Tecnuv liberou correções num Release recente para os seus chamados: **{chamados_str}**. Por favor, valide no sistema e encerre-os.")
+    st.warning(f"Importante! {chamados_str}.")
 
 st.divider()
 
-# --- BUSCA GLOBAL ---
-st.markdown("### 🔍 Pesquisa Rápida Global")
-st.text_input("Procure por erros, manuais ou wikis na base de dados (Em breve: Busca Full-Text):", placeholder="Ex: Rejeição SEFAZ...")
+# ---  ---
+st.markdown("### Dúvidas? Encontre Soluções Rápidas!")
+st.text_input("Informe sua dúvida ou problema abaixo: ", placeholder="Ex: Bico 00...")
 
 st.write("")
 col_graficos, col_alertas = st.columns([2.5, 1])
 
 with col_graficos:
-    st.subheader("Acesso Rápido aos Módulos")
+    st.subheader("📚 Acesso Rápido as funcionalidades do WikiSuporte.")
     btn_m1, btn_m2, btn_m3, btn_m4 = st.columns(4)
     if btn_m1.button("📖 Manuais PostoGestor", use_container_width=True): st.switch_page("pages/8_📖_Manuais_PG.py")
     if btn_m2.button("📊 Tickets EPSY", use_container_width=True): st.switch_page("pages/5_📊_Dashboard_Tickets_EPSY.py")
@@ -66,5 +66,5 @@ with col_graficos:
     if btn_m4.button("🤝 Contribuições", use_container_width=True): st.switch_page("pages/7_🤝_Contribuicoes_Suporte.py")
 
 with col_alertas:
-    st.subheader("📌 Recados Operacionais")
-    st.info("Mantenha a base de conhecimento atualizada. Registe as suas soluções diárias na aba de Contribuições.")
+    st.subheader("📌 Recado PSY")
+    st.info("Sua participação faz toda a diferença para manter o WikiSuporte sempre atualizado e útil. Se tiver sugestões, correções ou novos conteúdos, fique à vontade para contribuir. Juntos, fortalecemos nosso conhecimento e tornamos o suporte cada vez melhor para toda a equipe.")
