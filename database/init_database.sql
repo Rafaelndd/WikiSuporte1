@@ -329,3 +329,92 @@ WHERE
     
     -- Segurança: Só tenta atualizar os que ainda estão vazios
     AND ag.id_analista_epsy IS NULL;
+
+
+    -- 1. APAGA A TABELA ANTIGA DE TICKETS
+DROP TABLE IF EXISTS tickets_epsy CASCADE;
+
+-- 2. RECRIA A TABELA COM TODAS AS COLUNAS DO DEEP SCRAPING
+CREATE TABLE tickets_epsy (
+    nr_ticket INTEGER PRIMARY KEY,          -- O ID oficial do sistema da Tecnuv
+    cliente_nome VARCHAR(255),
+    assunto TEXT,
+    data_abertura TIMESTAMP,
+    nome_analista_epsy VARCHAR(100),        -- Quem abriu (Texto)
+    id_analista_epsy INTEGER,               -- Quem abriu (ID cruzado com a EPSY)
+    status_atual VARCHAR(100) NOT NULL,
+    chamado_vinculado INTEGER,              -- FK para a tabela chamados_tecnuv (se quiser)
+    tempo_aberto_str VARCHAR(100),          -- Ex: "3 Dias 0 Horas"
+    avaliacao VARCHAR(50),                  -- Ex: "5"
+    data_ultima_interacao TIMESTAMP,
+    ultima_mensagem TEXT,
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- (Opcional, mas recomendado) Recria a trigger que atualiza o "atualizado_em" automaticamente
+DROP TRIGGER IF EXISTS trg_atualiza_ticket ON tickets_epsy;
+CREATE TRIGGER trg_atualiza_ticket 
+    BEFORE UPDATE ON tickets_epsy 
+    FOR EACH ROW 
+    EXECUTE PROCEDURE update_modified_column();
+
+
+
+-- 1. ENSINA O BANCO COMO ATUALIZAR A HORA (A Função)
+CREATE OR REPLACE FUNCTION update_modified_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.atualizado_em = now();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- 2. AMARRA A FUNÇÃO À TABELA DE TICKETS (O Gatilho)
+DROP TRIGGER IF EXISTS trg_atualiza_ticket ON tickets_epsy;
+
+CREATE TRIGGER trg_atualiza_ticket 
+    BEFORE UPDATE ON tickets_epsy 
+    FOR EACH ROW 
+    EXECUTE PROCEDURE update_modified_column();
+
+
+-- =========================================================================
+-- O CÉREBRO DA IA: TABELA UNIFICADA DE CONHECIMENTO (RAG)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS base_conhecimento (
+    id SERIAL PRIMARY KEY,                  -- O ID interno do nosso sistema (Garantido pela sua regra)
+    nr_documento INTEGER,                   -- A coluna '#' da Tecnuv (Pode ser NULL para criações internas)
+    origem VARCHAR(50) NOT NULL,            -- 'MANUAL_HELPDESK', 'WIKI_HELPDESK', 'CONHECIMENTO_SUPORTE'
+    
+    titulo VARCHAR(255) NOT NULL,
+    categoria VARCHAR(100),
+    subcategoria VARCHAR(100),
+    
+    conteudo TEXT NOT NULL,                 -- Texto da Wiki/Suporte ou a URL do PDF do Manual
+    id_analista_autor INTEGER,              -- FK para a tabela de usuarios (Quem criou a dica interna)
+    
+    status VARCHAR(50) DEFAULT 'APROVADO',  -- 'RASCUNHO', 'APROVADO', 'DESATUALIZADO'
+    
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- =========================================================================
+    -- REGRAS DE INTEGRIDADE (A sua trava contra duplicatas)
+    -- =========================================================================
+    -- 1. Garante que nunca teremos dois Manuais da Tecnuv com o mesmo Número (#)
+    -- O PostgreSQL é inteligente: Ele aplica o UNIQUE apenas se o nr_documento NÃO for nulo.
+    -- Ou seja, ele trava duplicatas da Tecnuv, mas permite que os analistas criem artigos sem número!
+    CONSTRAINT unique_doc_origem UNIQUE (origem, nr_documento),
+    
+    -- 2. Conecta a tabela ao autor (se for conhecimento interno)
+    CONSTRAINT fk_base_autor FOREIGN KEY (id_analista_autor) REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
+-- Recria a Trigger para manter a data de atualização automática
+DROP TRIGGER IF EXISTS trg_atualiza_conhecimento ON base_conhecimento;
+CREATE TRIGGER trg_atualiza_conhecimento 
+    BEFORE UPDATE ON base_conhecimento 
+    FOR EACH ROW 
+    EXECUTE PROCEDURE update_modified_column();

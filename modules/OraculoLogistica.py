@@ -66,41 +66,107 @@ class OraculoLogistica:
 
     def processar_html_manuais(self, html_content):
         """
-        Raspa a tabela de manuais. Ignora ficheiros que sejam vídeos (YouTube).
+        Extrai a lista de Manuais em PDF da Tecnuv e salva na Base de Conhecimento Unificada.
+        Ignora os manuais em formato de vídeo e usa o Número (#) para evitar duplicatas.
         """
-        print("🤖 [PSY - Assistente WikiSuporte] A processar HTML de Manuais...")
+        print("🤖 [PSY - Assistente] A processar HTML da Biblioteca de Manuais...")
+
         soup = BeautifulSoup(html_content, 'html.parser')
+        linhas = soup.find_all('tr')
+        
+        # 🟢 O SONAR: Quantas linhas o HTML realmente tem?
+        print(f"🔎 DEBUG DO ORÁCULO: O robô encontrou {len(linhas)} linhas <tr> no HTML.")
+        
+        # Encontra as linhas da tabela (a classe 'small' é usada nas linhas de conteúdo)
         linhas = soup.find_all('tr', class_='small')
         
         sucesso = 0
-        with self.engine.begin() as conn:
-            # Limpa a base antiga para atualizar com o HTML mais recente
-            conn.execute(text("TRUNCATE TABLE manuais_tecnuv RESTART IDENTITY"))
-            
+        erros = 0
+        ignorados_video = 0
+        
+        with self.engine.connect() as conn:
             for linha in linhas:
                 tds = linha.find_all('td')
-                if len(tds) >= 5:
+                
+                # Garante que tem as 5 colunas: #, Manual, Categoria, Subcategoria, Botão
+                if len(tds) < 5:
+                    continue
+                    
+                trans = conn.begin()
+                try:
+                    # ==========================================
+                    # 1. VALIDAÇÃO E EXTRAÇÃO DO NÚMERO (#)
+                    # ==========================================
+                    nr_str = re.sub(r'\D', '', tds[0].text.strip())
+                    if not nr_str:
+                        trans.rollback()
+                        continue
+                    nr_documento = int(nr_str)
+                    
+                    # ==========================================
+                    # 2. FILTRO ANTI-VÍDEO
+                    # ==========================================
+                    link_tag = tds[4].find('a')
+                    if not link_tag:
+                        trans.rollback()
+                        continue
+                        
+                    classes_link = link_tag.get('class', [])
+                    icone_video = link_tag.find('span', class_='glyphicon-facetime-video')
+                    
+                    if 'link-video' in classes_link or icone_video:
+                        ignorados_video += 1
+                        trans.rollback()
+                        continue
+                        
+                    # ==========================================
+                    # 3. EXTRAÇÃO DOS DADOS
+                    # ==========================================
+                    url_pdf = link_tag.get('href')
                     titulo = tds[1].text.strip()
                     categoria = tds[2].text.strip()
                     subcategoria = tds[3].text.strip()
                     
-                    link_tag = tds[4].find('a')
-                    if link_tag:
-                        # Regra de Negócio: Ignorar Manuais em formato de Vídeo
-                        classes_link = link_tag.get('class', [])
-                        if 'link-video' in classes_link:
-                            continue
-                            
-                        href = link_tag.get('href', '')
-                        if href and href != '#':
-                            query_insert = text("""
-                                INSERT INTO manuais_tecnuv (titulo, categoria, subcategoria, link_acesso)
-                                VALUES (:t, :c, :s, :l)
-                            """)
-                            conn.execute(query_insert, {"t": titulo, "c": categoria, "s": subcategoria, "l": href})
-                            sucesso += 1
-                            
-        print(f"✅ [PSY - Assistente WikiSuporte] Biblioteca de Manuais atualizada: {sucesso} documentos em PDF extraídos!")
+                    # Conteúdo guarda a URL (No futuro o Gemini vai ler esse PDF)
+                    conteudo = f"URL_DOCUMENTO: {url_pdf}"
+                    
+                    # ==========================================
+                    # 4. UPSERT SEGURO NA BASE UNIFICADA
+                    # ==========================================
+                    query_upsert = text("""
+                        INSERT INTO base_conhecimento (
+                            nr_documento, origem, titulo, categoria, subcategoria, conteudo, status
+                        )
+                        VALUES (
+                            :nr, 'MANUAL_HELPDESK', :tit, :cat, :subcat, :cont, 'APROVADO'
+                        )
+                        ON CONFLICT (origem, nr_documento) DO UPDATE 
+                        SET 
+                            titulo = EXCLUDED.titulo,
+                            categoria = EXCLUDED.categoria,
+                            subcategoria = EXCLUDED.subcategoria,
+                            conteudo = EXCLUDED.conteudo,
+                            atualizado_em = CURRENT_TIMESTAMP
+                    """)
+                    
+                    conn.execute(query_upsert, {
+                        "nr": nr_documento,
+                        "tit": titulo,
+                        "cat": categoria,
+                        "subcat": subcategoria,
+                        "cont": conteudo
+                    })
+                    
+                    trans.commit()
+                    sucesso += 1
+                    
+                except Exception as e:
+                    trans.rollback()
+                    erros += 1
+                    print(f"⚠️ Erro ao processar o manual nº {nr_str}: {e}")
+                    
+        print(f"✅ [PSY - Assistente] Manuais sincronizados: {sucesso} gravados | {ignorados_video} vídeos ignorados | {erros} erros.")
+
 
     def processar_html_releases(self, html_content):
         """
@@ -142,20 +208,20 @@ class OraculoLogistica:
 
     def processar_html_tickets(self, html_content):
         """
-        Extrai os tickets da EPSY fazendo Deep Scraping no HTML fornecido com Isolamento de Transações.
+        Extrai os tickets da EPSY fazendo Sincronização Delta (Apenas novos ou alterados).
+        Retorna um dicionário com as estatísticas para o Motor decidir se continua paginando.
         """
         soup = BeautifulSoup(html_content, 'html.parser')
         linhas = soup.find_all('tr')
         
-        sucesso = 0
+        inseridos = 0
+        atualizados = 0
+        ignorados_iguais = 0
         erros = 0
         
-        # MUDANÇA ARQUITETURAL: Usamos connect() em vez de begin() 
-        # para nós mesmos controlarmos as transações linha a linha!
         with self.engine.connect() as conn:
             for linha in linhas:
                 tds = linha.find_all('td')
-                
                 if len(tds) < 7:
                     continue
                 
@@ -164,9 +230,6 @@ class OraculoLogistica:
                 if not id_limpo:
                     continue 
                 
-                # ==========================================
-                # 🛡️ INÍCIO DA TRANSAÇÃO ISOLADA DO TICKET
-                # ==========================================
                 trans = conn.begin() 
                 try:
                     nr_ticket = int(id_limpo)
@@ -177,19 +240,14 @@ class OraculoLogistica:
                     
                     chamado_vinc_str = re.sub(r'\D', '', tds[6].text.strip())
                     chamado_vinculado = int(chamado_vinc_str) if chamado_vinc_str else None
-                    
-                    # A CORREÇÃO DA CASCATA: Se a Tecnuv mandar 0, nós anulamos.
-                    if chamado_vinculado == 0:
-                        chamado_vinculado = None
+                    if chamado_vinculado == 0: chamado_vinculado = None
                         
                     data_ab_str = tds[3].text.strip()
                     data_abertura = None
                     if data_ab_str:
-                        try:
-                            data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M:%S")
+                        try: data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M:%S")
                         except ValueError:
-                            try:
-                                data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M")
+                            try: data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M")
                             except: pass
 
                     primeiro_nome = nome_analista_epsy.split()[0] if nome_analista_epsy else ''
@@ -200,7 +258,9 @@ class OraculoLogistica:
                             {"b": f"%{primeiro_nome}%"}
                         ).scalar()
 
+                    # ==========================================
                     # O COFRE SECRETO
+                    # ==========================================
                     tempo_aberto_str = None
                     avaliacao = None
                     data_ultima_interacao = None
@@ -215,19 +275,37 @@ class OraculoLogistica:
                             
                         m_interacao = re.search(r'Última Alteração:</font>.*?<font[^>]*>.*?(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_interacao:
-                            try:
-                                data_ultima_interacao = datetime.strptime(m_interacao.group(1).strip(), "%d/%m/%Y %H:%M:%S")
+                            try: data_ultima_interacao = datetime.strptime(m_interacao.group(1).strip(), "%d/%m/%Y %H:%M:%S")
                             except: pass
                                 
                         m_msg = re.search(r'Última Mensagem:</font>.*?<font[^>]*>(.*?)</font>', html_interno, re.IGNORECASE | re.DOTALL)
-                        if m_msg:
-                            ultima_mensagem = re.sub(r'<br\s*/?>', ' | ', m_msg.group(1)).strip()
+                        if m_msg: ultima_mensagem = re.sub(r'<br\s*/?>', ' | ', m_msg.group(1)).strip()
                             
                         m_ava = re.search(r'Avaliação:</font>.*?<img[^>]*src="[^"]*?(\d)star\.png"', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_ava: avaliacao = m_ava.group(1).strip()
 
                     # ==========================================
-                    # UPSERT SEGURO
+                    # 🔍 O MOTOR DE DELTA SYNC (A sua nova regra!)
+                    # ==========================================
+                    ticket_banco = conn.execute(
+                        text("SELECT status_atual, data_ultima_interacao FROM tickets_epsy WHERE nr_ticket = :nr"), 
+                        {"nr": nr_ticket}
+                    ).fetchone()
+                    
+                    if ticket_banco:
+                        db_status, db_interacao = ticket_banco
+                        # Se o status é o mesmo E a data da última mensagem é a mesma, NADA MUDOU!
+                        if db_status == status_atual and db_interacao == data_ultima_interacao:
+                            ignorados_iguais += 1
+                            trans.commit()
+                            continue # Pula a gravação e vai para o próximo ticket!
+                        else:
+                            atualizados += 1
+                    else:
+                        inseridos += 1
+
+                    # ==========================================
+                    # UPSERT SEGURO (Só chega aqui se for Novo ou Alterado)
                     # ==========================================
                     query_insert = text("""
                         INSERT INTO tickets_epsy (
@@ -262,17 +340,17 @@ class OraculoLogistica:
                         "ultima_mensagem": ultima_mensagem
                     })
                     
-                    # CONFIRMA A TRANSAÇÃO (O Ticket deu certo!)
                     trans.commit() 
-                    sucesso += 1
                     
                 except Exception as e:
-                    # CANCELA A TRANSAÇÃO (O Ticket deu errado, mas salva o resto da página!)
                     trans.rollback() 
                     erros += 1
                     print(f"⚠️ Erro isolado no ticket ID {id_bruto}: {e}")
                     
-        print(f"✅ [PSY - Assistente WikiSuporte] Página processada. +{sucesso} tickets salvos | {erros} ignorados.")
+        print(f"✅ [PSY - Assistente] Página processada: {inseridos} novos | {atualizados} atualizados | {ignorados_iguais} intocados (ignorados).")
+        
+        # O Oráculo devolve os números para o Motor tomar uma decisão
+        return {"inseridos": inseridos, "atualizados": atualizados, "ignorados_iguais": ignorados_iguais}
 
 
     def sincronizar_vinculos_goto(self):

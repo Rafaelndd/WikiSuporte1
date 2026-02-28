@@ -116,28 +116,28 @@ class MotorExtracao:
             print(f"❌ Erro ao ler os Releases: {e}")
 
     def extrair_todos_os_tickets(self):
-        print("\n📥 Acessando Fila de Tickets (Iniciando Deep Scraping)...")
-        # URL base sem a paginação
+        print("\n📥 Acessando Fila de Tickets (Iniciando Sincronização Delta)...")
         url_base_tickets = "https://postogestor.com.br/helpdesk/?path=sistema/tickets" 
         
         try:
-            # 1. Acede à página inicial de tickets
             self.driver.get(url_base_tickets)
+            time.sleep(3) 
             
-            # 2. Aguarda o botão "Buscar" (id="btnBusca") estar clicável e clica para forçar o carregamento
-            print("⏳ Pressionando o botão de Busca para carregar a tabela completa...")
+            print("⚙️ Injetando script para selecionar TODOS os 11 status...")
+            self.driver.execute_script("""
+                $('#ticket_status option').prop('selected', true);
+                $('#ticket_status').multiselect('refresh');
+            """)
+            time.sleep(1)
+            
+            print("⏳ Pressionando o botão de Busca para carregar a base completa...")
             btn_busca = WebDriverWait(self.driver, 15).until(
                 EC.element_to_be_clickable((By.ID, "btnBusca"))
             )
             btn_busca.click()
+            time.sleep(5) 
             
-            # Dá um tempo para o AJAX/JavaScript da página preencher a tabela
-            time.sleep(4) 
-            
-            # 3. Descobre o total de páginas de forma dinâmica (Lendo o HTML)
             html_atual = self.driver.page_source
-            
-            # Procura pelo padrão: Nº de páginas:<font ...>5</font>
             match_paginas = re.search(r'Nº de páginas:.*?<font[^>]*>(\d+)</font>', html_atual, re.DOTALL)
             
             if match_paginas:
@@ -145,24 +145,40 @@ class MotorExtracao:
                 print(f"📊 Sucesso! O Fantasma detetou {total_paginas} páginas de Tickets.")
             else:
                 total_paginas = 1
-                print("⚠️ Não foi possível ler a paginação no HTML. O robô vai raspar apenas a página 1.")
                 
-            # 4. O Loop de Paginação (O salto de página em página)
+            # ==========================================
+            # 🛑 CONTROLE DE SAÍDA ANTECIPADA (Early Exit)
+            # ==========================================
+            paginas_sem_mudanca_consecutivas = 0
+            LIMITE_PAGINAS_INALTERADAS = 2  # Se ler 2 páginas seguidas sem novidades, ele para!
+
             for pagina_atual in range(1, total_paginas + 1):
                 print(f"📄 Extraindo Página {pagina_atual} de {total_paginas}...")
                 
-                # Se não for a primeira página, o robô navega alterando o URL
                 if pagina_atual > 1:
                     url_paginada = f"{url_base_tickets}&pg={pagina_atual}"
                     self.driver.get(url_paginada)
-                    # Aguarda a tabela recarregar
                     time.sleep(4) 
                     
-                # 5. Envia o HTML da página atual para o BeautifulSoup (Oráculo) mastigar e guardar no Banco
                 html_pagina = self.driver.page_source
-                self.oraculo.processar_html_tickets(html_pagina)
                 
-            print("✅ Varredura Profunda de Tickets concluída com sucesso!")
+                # Captura a resposta do Oráculo
+                estatisticas = self.oraculo.processar_html_tickets(html_pagina)
+                
+                # Se não houve nenhum ticket inserido e nenhum atualizado...
+                if estatisticas["inseridos"] == 0 and estatisticas["atualizados"] == 0:
+                    paginas_sem_mudanca_consecutivas += 1
+                    print(f"💤 Tudo igual! Páginas inalteradas seguidas: {paginas_sem_mudanca_consecutivas}")
+                else:
+                    # Achou algo novo? Zera o contador e continua animado!
+                    paginas_sem_mudanca_consecutivas = 0 
+                    
+                # A MÁGICA ACONTECE AQUI:
+                if paginas_sem_mudanca_consecutivas >= LIMITE_PAGINAS_INALTERADAS:
+                    print("🛑 SINCRONIZAÇÃO DELTA CONCLUÍDA! O robô atingiu o histórico antigo e encerrou a paginação para poupar recursos.")
+                    break # Estilhaça o loop e sai da função!
+                
+            print("✅ Processo de Tickets finalizado com excelência!")
             
         except Exception as e:
             print(f"❌ Erro ao tentar paginar os Tickets: {e}")
@@ -189,11 +205,39 @@ class MotorExtracao:
             time.sleep(3)
             self.oraculo.processar_html_tickets(self.driver.page_source)
             
-            # 4. Manuais
+            # ==========================================
+            # 4. Manuais (Sincronização RAG)
+            # ==========================================
             print("\n📥 Acessando Biblioteca de Manuais...")
-            self.driver.get(URL_MANUAIS)
-            time.sleep(3)
-            self.oraculo.processar_html_manuais(self.driver.page_source)
+            self.driver.get("https://postogestor.com.br/helpdesk/sistema/manuais/busca") 
+            
+            # Clica no botão de busca para forçar o recarregamento da tabela completa
+            try:
+                btn_busca_manuais = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Buscar']"))
+                )
+                print("⏳ Pressionando botão de Busca dos Manuais...")
+                btn_busca_manuais.click()
+            except Exception as e:
+                print("👁️ Botão de busca não encontrado ou clicável. Aguardando a tabela...")
+
+            # O CÃO DE GUARDA INTELIGENTE:
+            # Esperamos até que a linha do "MANUAL DE CADASTRO DE ENTIDADE" (ou qualquer manual) apareça!
+            try:
+                print("⏳ Aguardando os dados do servidor da Tecnuv chegarem na tela...")
+                WebDriverWait(self.driver, 20).until(
+                    # Procura por qualquer tag <a> que tenha 'href' apontando para um .pdf
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "a[href$='.pdf']"))
+                )
+                print("✅ CHUVA DE PDFs! A tabela carregou completamente.")
+            except Exception as e:
+                print("⚠️ Aviso: Os PDFs não carregaram a tempo. A extração pode falhar.")
+            
+            # Um fôlego final de 2 segundos para o JavaScript estabilizar o layout
+            time.sleep(2) 
+            
+            html_pagina = self.driver.page_source
+            self.oraculo.processar_html_manuais(html_pagina)
             
             # 5. Wikis (Com Paginação Básica)
             print("\n📥 Acessando Base de Wikis...")
