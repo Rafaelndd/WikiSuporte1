@@ -239,13 +239,11 @@ class MotorExtracao:
             html_pagina = self.driver.page_source
             self.oraculo.processar_html_manuais(html_pagina)
             
-            # 5. Wikis (Com Paginação Básica)
+            # 5. Wikis da Tecnuv 
             print("\n📥 Acessando Base de Wikis...")
-            self.driver.get(URL_WIKI)
+            self.extrair_todas_as_wikis()
             time.sleep(3)
-            # Para raspagem profunda de wikis (todas as páginas), você pode implementar um loop
-            # Exemplo: for p in range(1, 4): self.driver.get(f"{URL_WIKI}?pg={p}") ...
-            # Aqui enviamos a página atual para o Oráculo (Se você implementou processar_html_wikis)
+  
             try:
                 self.oraculo.processar_html_wikis(self.driver.page_source)
             except AttributeError:
@@ -253,11 +251,102 @@ class MotorExtracao:
             
         except Exception as e:
             print(f"❌ Erro durante a navegação: {e}")
+
+
+    def extrair_todas_as_wikis(self):
+        print("\n📥 Acessando Base de Wikis (Iniciando Modo Mergulhador)...")
+        # Assume o mesmo padrão de rota dos manuais
+        url_base_busca = "https://postogestor.com.br/helpdesk/sistema/wiki/busca" 
+        
+        # Pede ao Oráculo a lista do que já temos guardado
+        ids_ja_sincronizados = self.oraculo.obter_ids_wikis_sincronizadas()
+        ids_pendentes_para_mergulho = []
+
+        try:
+            self.driver.get(url_base_busca)
+            
+            # Tenta forçar a busca para carregar a tabela
+            try:
+                btn_busca = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Buscar']"))
+                )
+                btn_busca.click()
+            except:
+                pass
+                
+            # Cão de Guarda: Espera ver pelo menos um botão de "Abrir" wiki
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/wiki/editar/id/']"))
+            )
+            time.sleep(2)
+
+            html_atual = self.driver.page_source
+            match_paginas = re.search(r'Nº de páginas:.*?<font[^>]*>(\d+)</font>', html_atual, re.DOTALL)
+            total_paginas = int(match_paginas.group(1)) if match_paginas else 1
+
+            print(f"📊 O Fantasma detetou {total_paginas} páginas de Wikis. Iniciando Voo de Reconhecimento...")
+
+            # ==========================================
+            # FASE 1: VOO DE RECONHECIMENTO (Anotar IDs)
+            # ==========================================
+            for pagina_atual in range(1, total_paginas + 1):
+                if pagina_atual > 1:
+                    # Navega usando o padrão de paginação
+                    self.driver.get(f"{url_base_busca}?pg={pagina_atual}")
+                    time.sleep(3)
+                    
+                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                
+                # Procura todas as tags <a> que contêm o link para editar a wiki
+                links_abrir = soup.find_all('a', href=re.compile(r'/wiki/editar/id/(\d+)'))
+                
+                for link in links_abrir:
+                    m = re.search(r'/id/(\d+)', link['href'])
+                    if m:
+                        wiki_id = int(m.group(1))
+                        # Só adiciona se for NOVA! (Sincronização Delta)
+                        if wiki_id not in ids_ja_sincronizados and wiki_id not in ids_pendentes_para_mergulho:
+                            ids_pendentes_para_mergulho.append(wiki_id)
+
+            print(f"🎯 Reconhecimento concluído! Encontradas {len(ids_pendentes_para_mergulho)} Wikis NOVAS para mergulhar.")
+
+            # ==========================================
+            # FASE 2: O MERGULHO PROFUNDO
+            # ==========================================
+            if not ids_pendentes_para_mergulho:
+                print("💤 Nenhuma wiki nova encontrada. Poupando recursos!")
+                return
+
+            for i, wiki_id in enumerate(ids_pendentes_para_mergulho, 1):
+                print(f"🤿 Mergulhando na Wiki {wiki_id} ({i} de {len(ids_pendentes_para_mergulho)})...")
+                url_interna = f"https://postogestor.com.br/helpdesk/sistema/wiki/editar/id/{wiki_id}"
+                
+                self.driver.get(url_interna)
+                
+                # Espera a caixa de texto da wiki aparecer na tela
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "w_desc"))
+                )
+                
+                # Manda o HTML interno para o Oráculo
+                html_interno = self.driver.page_source
+                self.oraculo.processar_e_salvar_wiki_interna(html_interno, wiki_id)
+                
+                # Um respiro leve para não derrubar o servidor deles
+                time.sleep(1) 
+
+            print("✅ Varredura profunda de Wikis concluída com sucesso!")
+
+        except Exception as e:
+            print(f"❌ Erro na extração de Wikis: {e}")
+
             
     def fechar(self):
         if self.driver:
             self.driver.quit()
             print("🛑 Navegador Fantasma encerrado.")
+
+    
 
 # ==========================================
 # O DAEMON (MOTOR EM SEGUNDO PLANO)

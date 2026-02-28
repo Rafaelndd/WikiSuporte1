@@ -415,3 +415,55 @@ class OraculoLogistica:
             self.session.rollback()
             print(f"❌ Erro crítico ao sincronizar clientes Multi360: {e}")
             return 0
+
+    def obter_ids_wikis_sincronizadas(self):
+        """
+        Retorna uma lista com os IDs das Wikis que já estão no nosso Banco de Dados RAG.
+        Isso evita que o robô mergulhe em páginas antigas desnecessariamente.
+        """
+        with self.engine.connect() as conn:
+            resultado = conn.execute(text("SELECT nr_documento FROM base_conhecimento WHERE origem = 'WIKI_HELPDESK'"))
+            # Retorna um "Set" (conjunto) para buscas ultra-rápidas no Python
+            return {linha[0] for linha in resultado}
+            
+
+    def processar_e_salvar_wiki_interna(self, html_content, id_wiki):
+        """
+        Extrai o Título, o Texto rico e os Anexos de dentro da página individual da Wiki.
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # 1. Extrai o Título
+        input_titulo = soup.find('input', id='w_titulo')
+        titulo = input_titulo['value'].strip() if input_titulo and input_titulo.has_attr('value') else f"Wiki Sem Título {id_wiki}"
+        
+        # 2. Extrai a Descrição (O Corpo da Wiki)
+        textarea_desc = soup.find('textarea', id='w_desc')
+        conteudo = textarea_desc.text.strip() if textarea_desc else ""
+        
+        # 3. Mapeia os Anexos (Imagens e Arquivos soltos)
+        anexos = []
+        for a_tag in soup.find_all('a', href=True):
+            if '_uploads/wiki/' in a_tag['href']:
+                anexos.append(a_tag['href'])
+                
+        # Junta os anexos ao final do texto para a IA do Gemini poder referenciá-los
+        if anexos:
+            conteudo += "\n\n[LINKS DE ANEXOS/IMAGENS]:\n" + "\n".join(anexos)
+            
+        # 4. Grava no nosso "Cérebro IA"
+        with self.engine.begin() as conn:
+            query_upsert = text("""
+                INSERT INTO base_conhecimento (
+                    nr_documento, origem, titulo, categoria, subcategoria, conteudo, status
+                ) VALUES (
+                    :nr, 'WIKI_HELPDESK', :tit, 'WIKI', 'DICAS DE SUPORTE', :cont, 'APROVADO'
+                )
+                ON CONFLICT (origem, nr_documento) DO UPDATE 
+                SET titulo = EXCLUDED.titulo,
+                    conteudo = EXCLUDED.conteudo,
+                    atualizado_em = CURRENT_TIMESTAMP
+            """)
+            conn.execute(query_upsert, {
+                "nr": id_wiki, "tit": titulo, "cont": conteudo
+            })
