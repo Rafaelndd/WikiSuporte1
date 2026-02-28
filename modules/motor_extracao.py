@@ -102,7 +102,7 @@ class MotorExtracao:
             time.sleep(3)
             # Para raspagem profunda de wikis (todas as páginas), você pode implementar um loop
             # Exemplo: for p in range(1, 4): self.driver.get(f"{URL_WIKI}?pg={p}") ...
-            # Aqui enviamos a página atual para o Oráculo (Se você implementou processar_html_wikis)
+            # Aqui enviamos a página atual para o PSY - Assistente WikiSuporte (Se você implementou processar_html_wikis)
             try:
                 self.oraculo.processar_html_wikis(self.driver.page_source)
             except AttributeError:

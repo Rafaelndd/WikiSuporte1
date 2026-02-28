@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import pandas as pd
 from sqlalchemy import text
+from config import Config
 
 # Importa a conexão com o banco que já temos no sistema
 from modules.database import get_connection
@@ -16,7 +17,7 @@ class OraculoLogistica:
         Extrai a escala de plantões e cruza com os Analistas EPSY no banco de dados.
         Baseado no HTML de <tr class="small">
         """
-        print("🤖 [Oráculo] A processar HTML de Plantões...")
+        print("🤖 [PSY - Assistente WikiSuporte] A processar HTML de Plantões...")
         soup = BeautifulSoup(html_content, 'html.parser')
         linhas = soup.find_all('tr', class_='small')
         
@@ -60,13 +61,13 @@ class OraculoLogistica:
                     except Exception as e:
                         print(f"⚠️ Erro ao processar linha de plantão ({nome_plantonista}): {e}")
                         
-        print(f"✅ [Oráculo] Escala atualizada: {sucesso} plantões inseridos com sucesso!")
+        print(f"✅ [PSY - Assistente WikiSuporte] Escala atualizada: {sucesso} plantões inseridos com sucesso!")
 
     def processar_html_manuais(self, html_content):
         """
         Raspa a tabela de manuais. Ignora ficheiros que sejam vídeos (YouTube).
         """
-        print("🤖 [Oráculo] A processar HTML de Manuais...")
+        print("🤖 [PSY - Assistente WikiSuporte] A processar HTML de Manuais...")
         soup = BeautifulSoup(html_content, 'html.parser')
         linhas = soup.find_all('tr', class_='small')
         
@@ -98,14 +99,14 @@ class OraculoLogistica:
                             conn.execute(query_insert, {"t": titulo, "c": categoria, "s": subcategoria, "l": href})
                             sucesso += 1
                             
-        print(f"✅ [Oráculo] Biblioteca de Manuais atualizada: {sucesso} documentos em PDF extraídos!")
+        print(f"✅ [PSY - Assistente WikiSuporte] Biblioteca de Manuais atualizada: {sucesso} documentos em PDF extraídos!")
 
     def processar_html_releases(self, html_content):
         """
         Extrai as Notas de Atualização e utiliza Expressões Regulares para encontrar 
         os números de chamados corrigidos, cruzando-os com a base ativa.
         """
-        print("🤖 [Oráculo] A caçar Correções nos Releases...")
+        print("🤖 [PSY - Assistente WikiSuporte] A caçar Correções nos Releases...")
         soup = BeautifulSoup(html_content, 'html.parser')
         
         # Encontra o bloco de texto de atualização
@@ -135,13 +136,13 @@ class OraculoLogistica:
                         sucesso += 1
                     except: pass
                     
-        print(f"✅ [Oráculo] Varredura de Código finalizada: {sucesso} possíveis chamados corrigidos pela Tecnuv identificados.")
+        print(f"✅ [PSY - Assistente WikiSuporte] Varredura de Código finalizada: {sucesso} possíveis chamados corrigidos pela Tecnuv identificados.")
 
     def processar_html_tickets(self, html_content):
         """
         Extrai os tickets que os clientes abrem contra a EPSY e amarra ao usuário responsável.
         """
-        print("🤖 [Oráculo] A processar HTML da Fila de Tickets...")
+        print("🤖 [PSY - Assistente A processar HTML da Fila de Tickets...")
         soup = BeautifulSoup(html_content, 'html.parser')
         
         # A tabela de tickets costuma ter um <tbody> sob o thead_gray
@@ -182,15 +183,38 @@ class OraculoLogistica:
                     except Exception as e:
                         pass # Ignora cabeçalhos ou linhas corrompidas
                         
-        print(f"✅ [Oráculo] Tickets atualizados: {sucesso} tickets sincronizados com a base EPSY.")
+        print(f"✅ [PSY - Assistente WikiSuporte] Tickets atualizados: {sucesso} tickets sincronizados com a base EPSY.")
 
-# --- FUNÇÃO PARA TESTES LOCAIS (Simulação) ---
-if __name__ == "__main__":
-    print("Iniciando testes do Oráculo Logístico...")
-    robo = OraculoLogistica()
-    
-    # Exemplo de como você vai chamar isto futuramente quando tiver os HTMLs salvos localmente ou via Selenium:
-    # with open("plantoes.html", "r", encoding="utf-8") as f:
-    #     robo.processar_html_plantoes(f.read())
-    
-    print("Módulo OraculoLogistica pronto para ser importado pelo motor Selenium!")
+
+    def sincronizar_vinculos_goto(self):
+        """
+        Vare a tabela do GoTo e vincula os telefones aos clientes usando a chave LGPD.
+        Deve ser chamada automaticamente após cadastrar um novo cliente ou subir um CSV.
+        """
+        print("🔄 [Automático] Iniciando sincronização de vínculos GoTo (LGPD)...")
+        
+        # O text() do SQLAlchemy prepara a query para receber variáveis seguras
+        sql_update = text("""
+            UPDATE atendimentos_goto ag
+            SET id_cliente = ct.id_cliente
+            FROM clientes_telefones ct
+            WHERE 
+                ag.participantes LIKE '%' || pgp_sym_decrypt(ct.numero_criptografado::bytea, :chave_lgpd) || '%'
+                AND ag.id_cliente IS NULL;
+        """)
+        
+        try:
+            # Executa a query injetando a chave secreta do config.py
+            resultado = self.session.execute(sql_update, {"chave_lgpd": Config.LGPD_SECRET_KEY})
+            self.session.commit() # Salva a transação!
+            
+            # resultado.rowcount nos diz exatamente quantas linhas foram "amarradas"
+            linhas_afetadas = resultado.rowcount
+            print(f"✅ Vínculos sincronizados! {linhas_afetadas} ligações órfãs foram conectadas a clientes.")
+            
+            return linhas_afetadas
+            
+        except Exception as e:
+            self.session.rollback() # Evita o efeito dominó se der erro
+            print(f"❌ Erro crítico ao sincronizar clientes GoTo: {e}")
+            return 0
