@@ -82,7 +82,7 @@ class HistoricoInteracao(Base):
 # ==========================================
 
 class UsuarioDashboard(Base):
-    __tablename__ = 'usuarios_dashboard'
+    __tablename__ = 'usuarios'
     id = Column(Integer, primary_key=True)
     nome = Column(String(100), nullable=False)
     perfil = Column(Integer, nullable=False) # 1-Analista, 2-Coord, 3-Admin
@@ -93,7 +93,7 @@ class UsuarioDashboard(Base):
 class LogAuditoria(Base):
     __tablename__ = 'logs_auditoria_sistema'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    usuario_id = Column(Integer, ForeignKey('usuarios_dashboard.id'), nullable=False)
+    usuario_id = Column(Integer, ForeignKey('usuarios.id'), nullable=False)
     acao = Column(String(100), nullable=False)
     detalhes = Column(Text, nullable=True)
     data_hora = Column(DateTime, default=datetime.now)

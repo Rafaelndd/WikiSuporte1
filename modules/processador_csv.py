@@ -190,3 +190,23 @@ def processar_csv_multi360(arquivo: io.BytesIO) -> pd.DataFrame:
         return df_limpo
     except Exception as e:
         raise ValueError(f"Falha estrutural ao processar o CSV do Multi360. Detalhes: {e}")
+
+    
+# =====================================================================
+# 2. A MÁGICA AUTOMÁTICA DA TEIA DE ARANHA (LGPD)
+# =====================================================================
+    with st.spinner("🕸️ Sincronizando ligações e chats órfãos do passado..."):
+                        
+    # Dispara a varredura para o GoTo (Ligações)
+        linhas_goto = oraculo.sincronizar_vinculos_goto()
+                        
+    # Dispara a varredura para o Multi360 (WhatsApp)
+        linhas_multi360 = oraculo.sincronizar_vinculos_multi360()
+                        
+        total_linhas = linhas_goto + linhas_multi360
+                      
+        if total_linhas > 0:
+            st.info(f"🚀 Incrível! O sistema vinculou **{linhas_goto} ligações** e **{linhas_multi360} chats** antigos a este cliente.")
+        else:
+            st.info("Nenhum atendimento antigo pendente foi encontrado para este telefone específico.")
+# =====================================================================

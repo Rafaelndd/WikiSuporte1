@@ -34,7 +34,7 @@ def verificar_login(username, senha_digitada):
     try:
         with engine.connect() as conn:
             # Garante que apenas utilizadores ATIVOS possam fazer login
-            query = text("SELECT id, password_hash, perfil FROM usuarios_dashboard WHERE nome ILIKE :u AND ativo = TRUE")
+            query = text("SELECT id, password_hash, perfil FROM usuarios WHERE nome ILIKE :u AND ativo = TRUE")
             resultado = conn.execute(query, {"u": username}).fetchone()
             
             if resultado:

@@ -25,7 +25,7 @@ def criar_usuario(username, senha, perfil):
         engine = get_connection()
         with engine.begin() as conn:
             # Query atualizada para incluir a coluna 'perfil'
-            query = text("INSERT INTO usuarios_dashboard (username, password_hash, perfil) VALUES (:u, :h, :p)")
+            query = text("INSERT INTO usuarios (username, password_hash, perfil) VALUES (:u, :h, :p)")
             # O .lower() garante a padronização no banco de dados
             conn.execute(query, {"u": username, "h": senha_hash, "p": perfil.lower()})
         print(f"✅ Usuário '{username}' criado com sucesso sob o perfil de '{perfil.lower()}'!")

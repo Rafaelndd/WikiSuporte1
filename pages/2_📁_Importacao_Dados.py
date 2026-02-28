@@ -163,11 +163,27 @@ with aba2:
             
             if btn_vincular:
                 if cnpj_limpo and telefone_limpo:
-                    # IMPLEMENTAÇÃO FUTURA DO BD
-                    # novo_vinculo = ClienteTelefone(cnpj=cnpj_limpo, telefone=telefone_limpo)
-                    # session.add(novo_vinculo); session.commit()
+                    
+                    # 1. AQUI OCORRE O SEU INSERT NO BANCO (Salvando o cliente e o telefone criptografado)
+                    # Exemplo: oraculo.salvar_novo_vinculo_cliente(cnpj_limpo, telefone_limpo)
+                    
                     st.success(f"✅ Sucesso! Telefone {telefone_limpo} vinculado ao CNPJ {cnpj_limpo}.")
                     registrar_log_auditoria(usuario_id, "VINCULO_CRM", f"Vinculou tel {telefone_limpo} ao CNPJ {cnpj_limpo}")
+                    
+                    # =====================================================================
+                    # 2. A MÁGICA AUTOMÁTICA DA TEIA DE ARANHA (LGPD)
+                    # =====================================================================
+                    with st.spinner("🕸️ Sincronizando ligações órfãs do passado..."):
+                        # NOTA: Substitua 'oraculo' pelo nome da variável de conexão/classe do banco 
+                        # que você instanciou no topo do seu app.py (ex: db, conexao, motor, etc.)
+                        linhas_afetadas = oraculo.sincronizar_vinculos_goto()
+                        
+                    if linhas_afetadas > 0:
+                        st.info(f"🚀 Incrível! O sistema encontrou e vinculou automaticamente **{linhas_afetadas}** ligações antigas a este novo cliente.")
+                    else:
+                        st.info("Nenhum atendimento antigo pendente foi encontrado para este telefone específico.")
+                    # =====================================================================
+
                 else:
                     st.warning("⚠️ Por favor, preencha tanto o CNPJ quanto o Telefone.")
 

@@ -1,5 +1,7 @@
 import time
 import os
+import re
+import logging
 from dotenv import load_dotenv
 from datetime import datetime
 from selenium import webdriver
@@ -100,7 +102,7 @@ class MotorExtracao:
                 titulo_release = self.driver.find_element(By.CLASS_NAME, "msg1-noticia").text
                 texto_release = textarea.get_attribute("value") 
                 
-                import re
+    
                 chamados_citados = re.findall(r'\((\d+)\)', texto_release)
                 
                 print(f"✅ Versão: {titulo_release} | Chamados Corrigidos: {chamados_citados}")
@@ -113,14 +115,66 @@ class MotorExtracao:
         except Exception as e:
             print(f"❌ Erro ao ler os Releases: {e}")
 
+    def extrair_todos_os_tickets(self):
+        print("\n📥 Acessando Fila de Tickets (Iniciando Deep Scraping)...")
+        # URL base sem a paginação
+        url_base_tickets = "https://postogestor.com.br/helpdesk/?path=sistema/tickets" 
+        
+        try:
+            # 1. Acede à página inicial de tickets
+            self.driver.get(url_base_tickets)
+            
+            # 2. Aguarda o botão "Buscar" (id="btnBusca") estar clicável e clica para forçar o carregamento
+            print("⏳ Pressionando o botão de Busca para carregar a tabela completa...")
+            btn_busca = WebDriverWait(self.driver, 15).until(
+                EC.element_to_be_clickable((By.ID, "btnBusca"))
+            )
+            btn_busca.click()
+            
+            # Dá um tempo para o AJAX/JavaScript da página preencher a tabela
+            time.sleep(4) 
+            
+            # 3. Descobre o total de páginas de forma dinâmica (Lendo o HTML)
+            html_atual = self.driver.page_source
+            
+            # Procura pelo padrão: Nº de páginas:<font ...>5</font>
+            match_paginas = re.search(r'Nº de páginas:.*?<font[^>]*>(\d+)</font>', html_atual, re.DOTALL)
+            
+            if match_paginas:
+                total_paginas = int(match_paginas.group(1))
+                print(f"📊 Sucesso! O Fantasma detetou {total_paginas} páginas de Tickets.")
+            else:
+                total_paginas = 1
+                print("⚠️ Não foi possível ler a paginação no HTML. O robô vai raspar apenas a página 1.")
+                
+            # 4. O Loop de Paginação (O salto de página em página)
+            for pagina_atual in range(1, total_paginas + 1):
+                print(f"📄 Extraindo Página {pagina_atual} de {total_paginas}...")
+                
+                # Se não for a primeira página, o robô navega alterando o URL
+                if pagina_atual > 1:
+                    url_paginada = f"{url_base_tickets}&pg={pagina_atual}"
+                    self.driver.get(url_paginada)
+                    # Aguarda a tabela recarregar
+                    time.sleep(4) 
+                    
+                # 5. Envia o HTML da página atual para o BeautifulSoup (Oráculo) mastigar e guardar no Banco
+                html_pagina = self.driver.page_source
+                self.oraculo.processar_html_tickets(html_pagina)
+                
+            print("✅ Varredura Profunda de Tickets concluída com sucesso!")
+            
+        except Exception as e:
+            print(f"❌ Erro ao tentar paginar os Tickets: {e}")
+
+
     # 2. AGORA, AJUSTE A FUNÇÃO PRINCIPAL:
     def raspar_todas_as_fontes(self):
         try:
             # 1. Releases (Página Home) - LÓGICA NOVA COM CLIQUES
-            print("\n📥 Acessando Home (Releases)...")
-            self.driver.get("https://postogestor.com.br/helpdesk/home") # Use sua URL_HOME real
+            print("\n📥 Acessando Home (Releases)...")            
+            self.driver.get("https://postogestor.com.br/helpdesk/home")
             time.sleep(3) 
-            
             # Em vez de mandar o HTML cego para o oráculo, mandamos o motor clicar nas janelas!
             self.extrair_releases()
             
@@ -130,9 +184,8 @@ class MotorExtracao:
             time.sleep(3)
             self.oraculo.processar_html_plantoes(self.driver.page_source)
             
-            # 3. Tickets da EPSY
-            print("\n📥 Acessando Fila de Tickets...")
-            self.driver.get(URL_TICKETS)
+            # 3. Tickets da EPSY (Nova Lógica com Paginação)
+            self.extrair_todos_os_tickets()
             time.sleep(3)
             self.oraculo.processar_html_tickets(self.driver.page_source)
             

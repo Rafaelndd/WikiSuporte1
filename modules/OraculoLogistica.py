@@ -1,9 +1,10 @@
-import re
+import re 
 from bs4 import BeautifulSoup
 from datetime import datetime
 import pandas as pd
 from sqlalchemy import text
 from config import Config
+
 
 # Importa a conexão com o banco que já temos no sistema
 from modules.database import get_connection
@@ -29,7 +30,7 @@ class OraculoLogistica:
             for linha in linhas:
                 tds = linha.find_all('td')
                 if len(tds) >= 5:
-                    nome_plantonista = tds[1].text.strip()
+                    nome_analista_epsy = tds[1].text.strip()
                     entrada_str = tds[2].text.strip() # Formato: 02/02/2026 / 18:00:00
                     saida_str = tds[3].text.strip()
                     
@@ -41,25 +42,25 @@ class OraculoLogistica:
                         dt_entrada = datetime.strptime(entrada_limpa, "%d/%m/%Y %H:%M:%S")
                         dt_saida = datetime.strptime(saida_limpa, "%d/%m/%Y %H:%M:%S")
                         
-                        # Tenta encontrar o ID do analista logado na tabela usuarios_dashboard usando o primeiro nome
-                        primeiro_nome = nome_plantonista.split()[0]
-                        query_user = text("SELECT id FROM usuarios_dashboard WHERE nome ILIKE :busca LIMIT 1")
+                        # Tenta encontrar o ID do analista logado na tabela usuarios usando o primeiro nome
+                        primeiro_nome = nome_analista_epsy.split()[0]
+                        query_user = text("SELECT id FROM usuarios WHERE nome ILIKE :busca LIMIT 1")
                         user_id = conn.execute(query_user, {"busca": f"%{primeiro_nome}%"}).scalar()
                         
                         # Insere o plantão no banco
                         query_insert = text("""
-                            INSERT INTO plantoes_epsy (nome_plantonista, id_usuario_epsy, data_hora_entrada, data_hora_saida) 
+                            INSERT INTO plantoes_epsy (nome_analista_epsy, id_analista_epsy, data_hora_entrada, data_hora_saida) 
                             VALUES (:nome, :uid, :entrada, :saida)
                         """)
                         conn.execute(query_insert, {
-                            "nome": nome_plantonista, 
-                            "uid": user_id, # Pode ser None se for alguém da Tecnuv, mas a tabela aceita
+                            "nome": nome_analista_epsy, 
+                            "uid": user_id, 
                             "entrada": dt_entrada, 
                             "saida": dt_saida
                         })
                         sucesso += 1
                     except Exception as e:
-                        print(f"⚠️ Erro ao processar linha de plantão ({nome_plantonista}): {e}")
+                        print(f"⚠️ Erro ao processar linha de plantão ({nome_analista_epsy}): {e}")
                         
         print(f"✅ [PSY - Assistente WikiSuporte] Escala atualizada: {sucesso} plantões inseridos com sucesso!")
 
@@ -138,53 +139,152 @@ class OraculoLogistica:
                     
         print(f"✅ [PSY - Assistente WikiSuporte] Varredura de Código finalizada: {sucesso} possíveis chamados corrigidos pela Tecnuv identificados.")
 
+
+
     def processar_html_tickets(self, html_content):
         """
-        Extrai os tickets que os clientes abrem contra a EPSY e amarra ao usuário responsável.
+        Extrai os tickets da EPSY fazendo Deep Scraping para capturar dados ocultos no 'data-content'.
         """
-        print("🤖 [PSY - Assistente A processar HTML da Fila de Tickets...")
+        print("🤖 [PSY - Assistente] A processar HTML da Fila de Tickets...")
         soup = BeautifulSoup(html_content, 'html.parser')
         
-        # A tabela de tickets costuma ter um <tbody> sob o thead_gray
-        linhas = soup.find_all('tr', class_='small') # Ajuste a class baseando-se no HTML real
+        # Encontra todas as linhas de tabela
+        linhas = soup.find_all('tr')
         
         sucesso = 0
         with self.engine.begin() as conn:
             for linha in linhas:
                 tds = linha.find_all('td')
-                if len(tds) >= 7:
-                    try:
-                        id_ticket = int(tds[0].text.strip())
-                        cliente = tds[1].text.strip()
-                        assunto = tds[2].text.strip()
-                        data_ab_str = tds[3].text.strip()
-                        operador = tds[4].text.strip()
-                        status = tds[5].text.strip()
+                
+                # Ignora cabeçalhos ou linhas de paginação curtas
+                if len(tds) < 7:
+                    continue
+                    
+                try:
+                    # ==========================================
+                    # 1. DADOS BÁSICOS (Visíveis na Tabela)
+                    # ==========================================
+                    id_ticket_str = tds[0].text.strip()
+                    if not id_ticket_str.isdigit():
+                        continue # Não é uma linha de ticket válida
                         
-                        # Extrai o Chamado Vinculado (Se houver)
-                        chamado_vinc_str = tds[6].text.strip()
-                        chamado_vinc = int(chamado_vinc_str) if chamado_vinc_str.isdigit() else None
-                        
-                        # Busca o ID da EPSY
-                        primeiro_nome = operador.split()[0]
-                        user_id = conn.execute(text("SELECT id FROM usuarios_dashboard WHERE nome ILIKE :b LIMIT 1"), {"b": f"%{primeiro_nome}%"}).scalar()
-                        
-                        query_insert = text("""
-                            INSERT INTO tickets_epsy (id_ticket, cliente_nome, assunto, status, operador_nome, id_usuario_epsy, chamado_vinculado)
-                            VALUES (:idt, :cli, :ass, :st, :op, :uid, :cv)
-                            ON CONFLICT (id_ticket) DO UPDATE 
-                            SET status = :st, chamado_vinculado = :cv, operador_nome = :op
-                        """)
-                        conn.execute(query_insert, {
-                            "idt": id_ticket, "cli": cliente, "ass": assunto, 
-                            "st": status, "op": operador, "uid": user_id, "cv": chamado_vinc
-                        })
-                        sucesso += 1
-                    except Exception as e:
-                        pass # Ignora cabeçalhos ou linhas corrompidas
-                        
-        print(f"✅ [PSY - Assistente WikiSuporte] Tickets atualizados: {sucesso} tickets sincronizados com a base EPSY.")
+                    nr_ticket = int(id_ticket_str)
+                    cliente_nome = tds[1].text.strip()
+                    assunto = tds[2].text.strip()
+                    nome_analista_epsy = tds[4].text.strip()
+                    status_atual = tds[5].text.strip()
+                    
+                    # Extrai o Chamado Vinculado (se houver)
+                    chamado_vinc_str = tds[6].text.strip()
+                    chamado_vinculado = int(chamado_vinc_str) if chamado_vinc_str.isdigit() else None
+                    
+                    # Trata a Data de Abertura convertendo a String Brasileira para Formato Banco
+                    data_ab_str = tds[3].text.strip()
+                    data_abertura = None
+                    if data_ab_str:
+                        try:
+                            data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M:%S")
+                        except ValueError:
+                            pass
 
+                    # ==========================================
+                    # 2. RESOLUÇÃO INTELIGENTE DO ANALISTA
+                    # ==========================================
+                    primeiro_nome = nome_analista_epsy.split()[0] if nome_analista_epsy else ''
+                    id_analista_epsy = None
+                    if primeiro_nome:
+                        id_analista_epsy = conn.execute(
+                            text("SELECT id FROM usuarios WHERE nome ILIKE :b LIMIT 1"), 
+                            {"b": f"%{primeiro_nome}%"}
+                        ).scalar()
+
+                    # ==========================================
+                    # 3. O COFRE SECRETO (Deep Scraping no data-content)
+                    # ==========================================
+                    tempo_aberto_str = None
+                    avaliacao = None
+                    data_ultima_interacao = None
+                    ultima_mensagem = None
+                    
+                    # Procura a âncora que esconde o pop-up com as métricas detalhadas
+                    icone_info = linha.find('a', class_='dcontexto')
+                    
+                    if icone_info and icone_info.has_attr('data-content'):
+                        # Aqui pegamos o HTML que estava "escondido"
+                        popover_html = icone_info['data-content']
+                        
+                        # Regex para Tempo Aberto
+                        m_tempo = re.search(r'Ticket ficou aberto por:.*?>([^<]+)</font>', popover_html, re.IGNORECASE)
+                        if m_tempo: tempo_aberto_str = m_tempo.group(1).strip()
+                            
+                        # Regex para Última Interação / Alteração
+                        m_interacao = re.search(r'Última Alteração:.*?(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})', popover_html, re.IGNORECASE)
+                        if m_interacao:
+                            try:
+                                data_ultima_interacao = datetime.strptime(m_interacao.group(1).strip(), "%d/%m/%Y %H:%M:%S")
+                            except ValueError:
+                                pass
+                                
+                        # Regex para a Última Mensagem (Removendo os <br> perdidos)
+                        m_msg = re.search(r'Última Mensagem:</font><br><font[^>]*>(.*?)</font>', popover_html, re.IGNORECASE | re.DOTALL)
+                        if m_msg:
+                            # Troca as quebras de linha HTML por " | " para ficar bonito no Banco
+                            msg_limpa = re.sub(r'<br\s*/?>', ' | ', m_msg.group(1)) 
+                            ultima_mensagem = msg_limpa.strip()
+                            
+                        # Regex para Avaliação
+                        m_ava = re.search(r'Avaliação:.*?>([^<]+)', popover_html, re.IGNORECASE)
+                        if m_ava: avaliacao = m_ava.group(1).strip()
+
+                    # ==========================================
+                    # 4. UPSERT NO BANCO DE DADOS (Blindado contra NULLs)
+                    # ==========================================
+                    query_insert = text("""
+                        INSERT INTO tickets_epsy (
+                            nr_ticket, cliente_nome, assunto, data_abertura, 
+                            nome_analista_epsy, id_analista_epsy, status_atual, chamado_vinculado,
+                            tempo_aberto_str, avaliacao, data_ultima_interacao, ultima_mensagem
+                        )
+                        VALUES (
+                            :nr_ticket, :cliente_nome, :assunto, :data_abertura, 
+                            :nome_analista_epsy, :id_analista_epsy, :status_atual, :chamado_vinculado,
+                            :tempo_aberto_str, :avaliacao, :data_ultima_interacao, :ultima_mensagem
+                        )
+                        ON CONFLICT (nr_ticket) DO UPDATE 
+                        SET 
+                            status_atual = EXCLUDED.status_atual,
+                            chamado_vinculado = EXCLUDED.chamado_vinculado,
+                            nome_analista_epsy = EXCLUDED.nome_analista_epsy,
+                            id_analista_epsy = EXCLUDED.id_analista_epsy,
+                            tempo_aberto_str = EXCLUDED.tempo_aberto_str,
+                            avaliacao = EXCLUDED.avaliacao,
+                            data_ultima_interacao = EXCLUDED.data_ultima_interacao,
+                            ultima_mensagem = EXCLUDED.ultima_mensagem,
+                            atualizado_em = CURRENT_TIMESTAMP
+                    """)
+                    
+                    conn.execute(query_insert, {
+                        "nr_ticket": nr_ticket, 
+                        "cliente_nome": cliente_nome, 
+                        "assunto": assunto, 
+                        "data_abertura": data_abertura, 
+                        "nome_analista_epsy": nome_analista_epsy, 
+                        "id_analista_epsy": id_analista_epsy, 
+                        "status_atual": status_atual, 
+                        "chamado_vinculado": chamado_vinculado, 
+                        "tempo_aberto_str": tempo_aberto_str, 
+                        "avaliacao": avaliacao, 
+                        "data_ultima_interacao": data_ultima_interacao, 
+                        "ultima_mensagem": ultima_mensagem
+                    })
+                    sucesso += 1
+                    
+                except Exception as e:
+                    # Em caso de linha extremamente corrompida, ele salta e não para a extração
+                    # print(f"⚠️ Erro ao processar ticket na linha: {e}")
+                    pass 
+                    
+        print(f"✅ [PSY - Assistente WikiSuporte] Página processada. +{sucesso} tickets sincronizados.")
 
     def sincronizar_vinculos_goto(self):
         """
@@ -217,4 +317,34 @@ class OraculoLogistica:
         except Exception as e:
             self.session.rollback() # Evita o efeito dominó se der erro
             print(f"❌ Erro crítico ao sincronizar clientes GoTo: {e}")
+            return 0
+
+
+    def sincronizar_vinculos_multi360(self):
+        """
+        Varre a tabela do Multi360 e vincula os telefones aos clientes usando a chave LGPD.
+        """
+        print("🔄 [Automático] Iniciando sincronização de vínculos Multi360 (LGPD)...")
+        
+        sql_update = text("""
+            UPDATE atendimentos_multi360 am
+            SET id_cliente = ct.id_cliente
+            FROM clientes_telefones ct
+            WHERE 
+                -- Como o número vem limpo, o LIKE funciona perfeitamente com o dado descriptografado
+                am.numero LIKE '%' || pgp_sym_decrypt(ct.numero_criptografado::bytea, :chave_lgpd) || '%'
+                AND am.id_cliente IS NULL;
+        """)
+        
+        try:
+            resultado = self.session.execute(sql_update, {"chave_lgpd": Config.LGPD_SECRET_KEY})
+            self.session.commit()
+            
+            linhas_afetadas = resultado.rowcount
+            print(f"✅ Vínculos Multi360 sincronizados! {linhas_afetadas} chats órfãos foram conectados.")
+            return linhas_afetadas
+            
+        except Exception as e:
+            self.session.rollback()
+            print(f"❌ Erro crítico ao sincronizar clientes Multi360: {e}")
             return 0

@@ -32,7 +32,7 @@ def configurar_banco_e_migrar():
         
         # 1. Força a criação da tabela central corretamente
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS usuarios_dashboard (
+            CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
                 nome VARCHAR(150) UNIQUE NOT NULL,
                 email VARCHAR(150) UNIQUE,
@@ -49,7 +49,7 @@ def configurar_banco_e_migrar():
         tabelas_antigas = ["chamados_tecnuv", "atendimentos_multi360", "atendimentos_goto"]
         for tb in tabelas_antigas:
             try:
-                conn.execute(text(f"ALTER TABLE {tb} ADD COLUMN IF NOT EXISTS id_usuario_epsy INTEGER REFERENCES usuarios_dashboard(id);"))
+                conn.execute(text(f"ALTER TABLE {tb} ADD COLUMN IF NOT EXISTS id_usuario_epsy INTEGER REFERENCES usuarios(id);"))
                 conn.commit()
             except Exception as e:
                 conn.rollback() # Limpa o erro se a tabela não existir
@@ -60,7 +60,7 @@ def configurar_banco_e_migrar():
             try:
                 # Insere ou atualiza o usuário
                 query_insert = text("""
-                    INSERT INTO usuarios_dashboard (nome, email, perfil, ramal, password_hash, ativo)
+                    INSERT INTO usuarios (nome, email, perfil, ramal, password_hash, ativo)
                     VALUES (:nome, :email, :perfil, :ramal, :password_hash, TRUE)
                     ON CONFLICT (nome) DO UPDATE 
                     SET password_hash = :password_hash, perfil = :perfil
@@ -77,7 +77,7 @@ def configurar_banco_e_migrar():
                 
                 user_id_row = result.fetchone()
                 if not user_id_row:
-                    user_id_row = conn.execute(text("SELECT id FROM usuarios_dashboard WHERE nome = :nome"), {"nome": u["nome"]}).fetchone()
+                    user_id_row = conn.execute(text("SELECT id FROM usuarios WHERE nome = :nome"), {"nome": u["nome"]}).fetchone()
                 user_id = user_id_row[0]
                 
                 # Amarração apenas para os analistas EPSY
