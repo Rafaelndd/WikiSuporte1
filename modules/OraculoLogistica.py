@@ -143,52 +143,56 @@ class OraculoLogistica:
 
     def processar_html_tickets(self, html_content):
         """
-        Extrai os tickets da EPSY fazendo Deep Scraping para capturar dados ocultos no 'data-content'.
+        Extrai os tickets da EPSY fazendo Deep Scraping no HTML fornecido.
         """
-        print("🤖 [PSY - Assistente] A processar HTML da Fila de Tickets...")
         soup = BeautifulSoup(html_content, 'html.parser')
         
-        # Encontra todas as linhas de tabela
+        # Encontra as linhas da tabela ignorando o cabeçalho
         linhas = soup.find_all('tr')
         
         sucesso = 0
+        erros = 0
         with self.engine.begin() as conn:
             for linha in linhas:
                 tds = linha.find_all('td')
                 
-                # Ignora cabeçalhos ou linhas de paginação curtas
+                # O HTML mostra que a tabela tem cerca de 8 colunas[cite: 5]. Se tiver menos, é lixo.
                 if len(tds) < 7:
                     continue
                     
                 try:
                     # ==========================================
-                    # 1. DADOS BÁSICOS (Visíveis na Tabela)
+                    # 1. DADOS BÁSICOS (Limpando sujeira do HTML)
                     # ==========================================
-                    id_ticket_str = tds[0].text.strip()
-                    if not id_ticket_str.isdigit():
-                        continue # Não é uma linha de ticket válida
+                    id_bruto = tds[0].text.strip()
+                    # Extrai apenas os números (Resolve a armadilha do ID)
+                    id_limpo = re.sub(r'\D', '', id_bruto)
+                    
+                    if not id_limpo:
+                        continue 
                         
-                    nr_ticket = int(id_ticket_str)
+                    nr_ticket = int(id_limpo)
                     cliente_nome = tds[1].text.strip()
                     assunto = tds[2].text.strip()
                     nome_analista_epsy = tds[4].text.strip()
                     status_atual = tds[5].text.strip()
                     
-                    # Extrai o Chamado Vinculado (se houver)
-                    chamado_vinc_str = tds[6].text.strip()
-                    chamado_vinculado = int(chamado_vinc_str) if chamado_vinc_str.isdigit() else None
+                    chamado_vinc_str = re.sub(r'\D', '', tds[6].text.strip())
+                    chamado_vinculado = int(chamado_vinc_str) if chamado_vinc_str else None
                     
-                    # Trata a Data de Abertura convertendo a String Brasileira para Formato Banco
                     data_ab_str = tds[3].text.strip()
                     data_abertura = None
                     if data_ab_str:
                         try:
                             data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M:%S")
                         except ValueError:
-                            pass
+                            # Tenta fallback para formato sem segundos se der erro
+                            try:
+                                data_abertura = datetime.strptime(data_ab_str, "%d/%m/%Y %H:%M")
+                            except: pass
 
                     # ==========================================
-                    # 2. RESOLUÇÃO INTELIGENTE DO ANALISTA
+                    # 2. MATCH DO ANALISTA
                     # ==========================================
                     primeiro_nome = nome_analista_epsy.split()[0] if nome_analista_epsy else ''
                     id_analista_epsy = None
@@ -199,45 +203,41 @@ class OraculoLogistica:
                         ).scalar()
 
                     # ==========================================
-                    # 3. O COFRE SECRETO (Deep Scraping no data-content)
+                    # 3. O COFRE SECRETO (Extração dentro do ícone 'i')
                     # ==========================================
                     tempo_aberto_str = None
                     avaliacao = None
                     data_ultima_interacao = None
                     ultima_mensagem = None
                     
-                    # Procura a âncora que esconde o pop-up com as métricas detalhadas
+                    # O ícone com a classe dcontexto que você mapeou [cite: 20]
                     icone_info = linha.find('a', class_='dcontexto')
                     
-                    if icone_info and icone_info.has_attr('data-content'):
-                        # Aqui pegamos o HTML que estava "escondido"
-                        popover_html = icone_info['data-content']
+                    if icone_info:
+                        html_interno = str(icone_info)
                         
                         # Regex para Tempo Aberto
-                        m_tempo = re.search(r'Ticket ficou aberto por:.*?>([^<]+)</font>', popover_html, re.IGNORECASE)
-                        if m_tempo: tempo_aberto_str = m_tempo.group(1).strip()
+                        m_tempo = re.search(r'Ticket ficou aberto por:</font>.*?<font[^>]*>(.*?)</font>', html_interno, re.IGNORECASE | re.DOTALL)
+                        if m_tempo: tempo_aberto_str = m_tempo.group(1).replace('<br>', '').strip()
                             
-                        # Regex para Última Interação / Alteração
-                        m_interacao = re.search(r'Última Alteração:.*?(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})', popover_html, re.IGNORECASE)
+                        # Regex para Data Interação (Ex: João as 07/11/2022 09:05:30) [cite: 24]
+                        m_interacao = re.search(r'Última Alteração:</font>.*?<font[^>]*>.*?(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_interacao:
                             try:
                                 data_ultima_interacao = datetime.strptime(m_interacao.group(1).strip(), "%d/%m/%Y %H:%M:%S")
-                            except ValueError:
-                                pass
+                            except: pass
                                 
-                        # Regex para a Última Mensagem (Removendo os <br> perdidos)
-                        m_msg = re.search(r'Última Mensagem:</font><br><font[^>]*>(.*?)</font>', popover_html, re.IGNORECASE | re.DOTALL)
+                        # Regex para Mensagem (pega tudo até o próximo </font>) [cite: 24, 25]
+                        m_msg = re.search(r'Última Mensagem:</font>.*?<font[^>]*>(.*?)</font>', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_msg:
-                            # Troca as quebras de linha HTML por " | " para ficar bonito no Banco
-                            msg_limpa = re.sub(r'<br\s*/?>', ' | ', m_msg.group(1)) 
-                            ultima_mensagem = msg_limpa.strip()
+                            ultima_mensagem = re.sub(r'<br\s*/?>', ' | ', m_msg.group(1)).strip()
                             
-                        # Regex para Avaliação
-                        m_ava = re.search(r'Avaliação:.*?>([^<]+)', popover_html, re.IGNORECASE)
+                        # Regex para Avaliação (A armadilha da imagem: 5star.png) [cite: 27]
+                        m_ava = re.search(r'Avaliação:</font>.*?<img[^>]*src="[^"]*?(\d)star\.png"', html_interno, re.IGNORECASE | re.DOTALL)
                         if m_ava: avaliacao = m_ava.group(1).strip()
 
                     # ==========================================
-                    # 4. UPSERT NO BANCO DE DADOS (Blindado contra NULLs)
+                    # 4. UPSERT
                     # ==========================================
                     query_insert = text("""
                         INSERT INTO tickets_epsy (
@@ -264,28 +264,21 @@ class OraculoLogistica:
                     """)
                     
                     conn.execute(query_insert, {
-                        "nr_ticket": nr_ticket, 
-                        "cliente_nome": cliente_nome, 
-                        "assunto": assunto, 
-                        "data_abertura": data_abertura, 
-                        "nome_analista_epsy": nome_analista_epsy, 
-                        "id_analista_epsy": id_analista_epsy, 
-                        "status_atual": status_atual, 
-                        "chamado_vinculado": chamado_vinculado, 
-                        "tempo_aberto_str": tempo_aberto_str, 
-                        "avaliacao": avaliacao, 
-                        "data_ultima_interacao": data_ultima_interacao, 
+                        "nr_ticket": nr_ticket, "cliente_nome": cliente_nome, "assunto": assunto, 
+                        "data_abertura": data_abertura, "nome_analista_epsy": nome_analista_epsy, 
+                        "id_analista_epsy": id_analista_epsy, "status_atual": status_atual, 
+                        "chamado_vinculado": chamado_vinculado, "tempo_aberto_str": tempo_aberto_str, 
+                        "avaliacao": avaliacao, "data_ultima_interacao": data_ultima_interacao, 
                         "ultima_mensagem": ultima_mensagem
                     })
                     sucesso += 1
                     
                 except Exception as e:
-                    # Em caso de linha extremamente corrompida, ele salta e não para a extração
-                    # print(f"⚠️ Erro ao processar ticket na linha: {e}")
-                    pass 
+                    erros += 1
+                    # AQUI ESTÁ A LUZ: Se der erro, ele vai gritar no terminal em vez de se esconder!
+                    print(f"⚠️ Erro ao processar ticket ID {id_bruto}: {e}")
                     
-        print(f"✅ [PSY - Assistente WikiSuporte] Página processada. +{sucesso} tickets sincronizados.")
-
+        print(f"✅ [PSY - Assistente WikiSuporte] Página processada. +{sucesso} tickets salvos | {erros} ignorados.")
     def sincronizar_vinculos_goto(self):
         """
         Vare a tabela do GoTo e vincula os telefones aos clientes usando a chave LGPD.
