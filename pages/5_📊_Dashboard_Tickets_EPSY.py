@@ -24,14 +24,14 @@ def carregar_tickets_cruzados():
     except: return pd.DataFrame()
 
 st.title("📊 Dashboard Analítico - Tickets EPSY")
-st.markdown("Monitorização de tickets de clientes integrados com chamados Tecnuv.")
+st.markdown("Visualize e analise os tickets da equipe EPSY, com filtros avançados por status e analista responsável. Acompanhe o volume de tickets por analista e identifique gargalos na fila de atendimento. Utilize os gráficos para insights rápidos sobre a distribuição dos tickets.")
 
 df_raw = carregar_tickets_cruzados()
 if df_raw.empty:
-    st.warning("Nenhum ticket encontrado. O Bot de Logística importará os dados em breve.")
+    st.warning("WikiSuporte - Nenhum ticket encontrado no sistema.")
     st.stop()
 
-with st.expander("⚙️ Filtros da Fila", expanded=True):
+with st.expander("⚙️ Filtros", expanded=True):
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         status_filtro = st.selectbox("Status do Ticket:", ["Todos"] + sorted(df_raw['status'].dropna().unique().tolist()))

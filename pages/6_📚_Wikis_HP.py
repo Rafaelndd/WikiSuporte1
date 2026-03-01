@@ -11,11 +11,11 @@ def carregar_wikis():
     try: return pd.read_sql("SELECT * FROM wikis_tecnuv ORDER BY data_criacao DESC", engine)
     except: return pd.DataFrame()
 
-st.title("📚 Central de Wikis (Tecnuv)")
+st.title("📚 Wikis Helpdesk")
 df_wikis = carregar_wikis()
 
 if df_wikis.empty:
-    st.warning("Base de conhecimento vazia. O Bot Logístico realizará a varredura.")
+    st.warning("Wikis não encontradas.")
     st.stop()
 
 with st.expander("🔍 Pesquisa", expanded=True):
@@ -25,7 +25,7 @@ df = df_wikis.copy()
 if termo_busca:
     df = df[df['titulo'].str.contains(termo_busca, case=False, na=False) | df['tipo_erro'].str.contains(termo_busca, case=False, na=False)]
 
-st.subheader(f"📖 Artigos Encontrados ({len(df)})")
+st.subheader(f"📖 Wikis ({len(df)})")
 for _, row in df.iterrows():
     with st.expander(f"📑 {row['titulo']} | Versão: {row['versao']}"):
         st.markdown(f"**🔴 Erro:** {row['tipo_erro']}")

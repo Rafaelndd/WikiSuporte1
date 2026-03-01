@@ -96,7 +96,10 @@ def tela_login() -> None:
     st.markdown("""<style>[data-testid="stSidebarNav"] {display: none;}</style>""", unsafe_allow_html=True)
 
     with st.sidebar:
-        try: st.image("mascote/psy_no_dashboard.png", use_container_width=True)
+        try: 
+            c_side1, c_side2, c_side3 = st.columns([1, 2, 1])
+            with c_side2:
+                st.image("mascote/psy_braco_cruzado_aposto.png", width=150)
         except: pass
         
         st.markdown("## 👋 Bem-vindo(a) ao WikiSuporte")
@@ -146,6 +149,9 @@ def tela_login() -> None:
     with col2:
         st.write("")
         st.write("")
+        c_login1, c_login2, c_login3 = st.columns([1, 2, 1])
+        with c_login2:
+            st.image("mascote/psy_no_dashbsoard.png", width=200)
         st.markdown("<h1 style='text-align: center;'>🔐 WikiSuporte - Login</h1>", unsafe_allow_html=True)
         
         with st.form("form_login"):
