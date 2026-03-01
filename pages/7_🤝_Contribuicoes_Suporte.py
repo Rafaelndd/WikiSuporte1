@@ -74,7 +74,8 @@ with aba_ranking:
 # ABA 2: NOVA CONTRIBUIÇÃO (Regra da Fila)
 # ==========================================
 with aba_nova:
-    st.markdown("### Enviar Nova Solução / Workaround")
+    st.image("mascote/psy_sorriso.png", width=100)
+    st.markdown("### Compartilhe seu Conhecimento com a Equipe!")
     
     with st.form("form_contribuicao", clear_on_submit=True):
         titulo = st.text_input("📌 Título da Contribuição", placeholder="Ex: Erro X na Balança Toledo - Solução")
@@ -201,12 +202,12 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
 # ABA 5: MOTOR DE BUSCA GEMINI (Interface)
 # ==========================================
 with aba_gemini:
-    st.subheader("🤖 PSY Assistente (Motor Gemini RAG)")
+    st.subheader("🤖 PSY Assistente Virtual WikiSuporte")
     st.markdown("O seu assistente inteligente treinado com **Manuais, Wikis e Contribuições da Equipe**.")
     
-    pergunta = st.text_input("Faça uma pergunta sobre o PostoGestor:", placeholder="Ex: Como configuro o TEF Sitef no caixa compartilhado?")
+    pergunta = st.text_input("Faça uma pergunta sobre o PostoGestor:", placeholder="Ex: Como instalar o PostgreSQL 17?")
     
-    if st.button("🔍 Perguntar ao Oráculo"):
+    if st.button("🔍 Perguntar ao PSY"):
         if pergunta:
             with st.spinner("Consultando as centenas de Manuais e Wikis na nossa Base de Dados..."):
                 # TODO: Na próxima etapa, conectaremos o backend do LangChain/GoogleGenAI aqui!

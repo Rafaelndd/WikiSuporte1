@@ -238,8 +238,7 @@ def tela_home() -> None:
         st.write("Utilize o menu lateral para navegar entre as diferentes seções do sistema, como a gestão de clientes, visualização de atendimentos e relatórios de desempenho.")
         st.info("💡 Dica: Em smartphones ou telas menores, toque no ícone > no canto superior esquerdo para abrir o menu.")
         
-    with col2:
-        st.success("🛡️ Perfil: **{perfil_usuario.title()}**")
+
 
 # ==========================================
 # 6. CONTROLADOR DE FLUXO PRINCIPAL
