@@ -468,39 +468,57 @@ class OraculoBot:
                 logging.warning(f"Chamado {nr} não localizado em nenhuma busca.")
 
     def executar_busca_especifica(self, nr_chamado):
-        """Busca o Chamado aplicando o filtro 'Selecionar Todos' para driblar o bug da Tecnuv."""
+        """Busca o Chamado aplicando o filtro 'Selecionar Todos' e preenchendo o ID correto."""
         try:
             self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
             self.fechar_modal_se_existir()
             
-            # Limpa tudo
-            self.driver.find_element(By.CSS_SELECTOR, "a.limpa_filtros").click()
-            time.sleep(2)
+            # 1. Limpa todos os filtros para evitar resíduos de buscas anteriores
+            try:
+                btn_limpar = WebDriverWait(self.driver, 3).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "a.limpa_filtros"))
+                )
+                btn_limpar.click()
+                time.sleep(2)
+            except:
+                pass
 
-            # Clica no Filtro de Status
+            # 2. Informa o número do chamado SEM espaços ou caracteres especiais (ID CORRETO DO HTML)
+            numero_limpo = str(nr_chamado).strip()
+            campo = self.wait.until(EC.presence_of_element_located((By.ID, "chamado")))
+            campo.clear()
+            campo.send_keys(numero_limpo)
+
+            # 3. Clica no Filtro de Status para abrir o menu dropdown
             btn_status = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@title='Status']")))
             btn_status.click()
             time.sleep(1)
             
-            # Clica em SELECIONAR TODOS
+            # 4. Clica em SELECIONAR TODOS
             chk_all = self.driver.find_element(By.XPATH, "//input[@value='multiselect-all']")
             if not chk_all.is_selected():
                 chk_all.find_element(By.XPATH, "./parent::label").click()
+                time.sleep(0.5)
+            
+            # Clica de novo no botão Status para fechar o menu e não atrapalhar o clique de buscar
             btn_status.click()
 
-            # Preenche o número e busca
-            campo = self.driver.find_element(By.NAME, "form[nr_chamado]")
-            campo.clear()
-            campo.send_keys(str(nr_chamado))
+            # 5. Clica no botão de Buscar
             self.driver.find_element(By.ID, "btnBusca").click()
-            time.sleep(3)
+            
+            # 6. Aguarda o carregamento do resultado (4 segundos para garantir que a tabela atualize)
+            time.sleep(4)
 
-            links = self.driver.find_elements(By.XPATH, f"//a[contains(@href, '/id/{nr_chamado}')]")
+            # 7. Verifica se o link com o número exato do chamado apareceu no resultado
+            links = self.driver.find_elements(By.XPATH, f"//a[contains(@href, '/id/{numero_limpo}')]")
             if links:
-                links[0].click()
+                links[0].click() # Clica e entra nos detalhes do chamado
                 return True
+                
             return False
-        except:
+            
+        except Exception as e:
+            logging.error(f"Erro na execução da busca específica para o chamado {nr_chamado}: {e}")
             return False
 
     def deep_scrape_finalizacao(self, nr_chamado):
