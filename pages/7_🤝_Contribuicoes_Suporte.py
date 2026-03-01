@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import text
 from modules.database import get_connection
+import os
+import time
 
 try:
     from modules.auditoria import registrar_log_auditoria
@@ -18,6 +20,10 @@ if not st.session_state.get('autenticado'):
 
 usuario_logado_id = st.session_state.get('usuario_id')
 perfil_logado = str(st.session_state.get('perfil', 'analista')).lower()
+
+# Cria a pasta de uploads no servidor se não existir
+UPLOAD_DIR = "uploads_wiki"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ==========================================
 # 2. CABEÇALHO E ABAS
@@ -81,24 +87,73 @@ with aba_nova:
         with col2: subcategoria = st.text_input("📁 Subcategoria", placeholder="Ex: Contas a Pagar")
             
         conteudo = st.text_area("🧠 Conteúdo", height=200)
+        
+        # O novo campo de Upload de Arquivos
+        st.markdown("📎 **Anexar Evidências ou Manuais**")
+        arquivo_anexo = st.file_uploader("Formatos suportados: PDF, TXT, CSV, XLSX, XML, SQL, Imagens (PNG/JPG)", type=["pdf", "txt", "csv", "xlsx", "xml", "sql", "png", "jpg", "jpeg"])
+        
         btn_salvar = st.form_submit_button("🚀 Salvar Contribuição", type="primary")
         
         if btn_salvar:
             if not titulo or not categoria or not conteudo:
                 st.warning("⚠️ Por favor, preencha os campos obrigatórios: Título, Categoria e Conteúdo.")
             else:
+                texto_extraido = ""
+                caminho_db = None
+                
+                # FASE DE EXTRAÇÃO E SALVAMENTO DO ARQUIVO
+                if arquivo_anexo is not None:
+                    with st.spinner("Processando anexo e extraindo dados para o banco..."):
+                        nome_arquivo = f"{int(time.time())}_{arquivo_anexo.name.replace(' ', '_')}"
+                        caminho_fisico = os.path.join(UPLOAD_DIR, nome_arquivo)
+                        
+                        # Salva fisicamente
+                        with open(caminho_fisico, "wb") as f:
+                            f.write(arquivo_anexo.getbuffer())
+                        caminho_db = caminho_fisico
+                        
+                        # Extrai o texto
+                        ext = arquivo_anexo.name.split('.')[-1].lower()
+                        try:
+                            if ext in ['txt', 'sql', 'xml', 'csv']:
+                                texto_extraido = arquivo_anexo.getvalue().decode('utf-8', errors='ignore')
+                            elif ext == 'pdf':
+                                import PyPDF2
+                                leitor = PyPDF2.PdfReader(arquivo_anexo)
+                                texto_extraido = " ".join([page.extract_text() for page in leitor.pages if page.extract_text()])
+                            elif ext in ['xlsx', 'xls']:
+                                df_temp = pd.read_excel(arquivo_anexo)
+                                texto_extraido = df_temp.to_string()
+                            elif ext in ['png', 'jpg', 'jpeg']:
+                                import google.generativeai as genai
+                                from PIL import Image
+                                from dotenv import load_dotenv
+                                load_dotenv()
+                                genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+                                img = Image.open(arquivo_anexo)
+                                model_vision = genai.GenerativeModel('gemini-2.5-flash')
+                                resp_ocr = model_vision.generate_content(["Transcreva exatamente todo o texto técnico, códigos ou erros desta imagem.", img])
+                                texto_extraido = f"[TEXTO LIDO DO PRINT PELA IA]:\n{resp_ocr.text}"
+                        except Exception as e:
+                            st.warning(f"O arquivo foi salvo para download, mas a extração automática de texto falhou: {e}")
+
+                conteudo_final = conteudo.strip()
+                if texto_extraido:
+                    conteudo_final += f"\n\n--- DADOS DO ANEXO ---\n{texto_extraido}"
+
                 try:
                     with engine.begin() as conn:
                         status_inicial = "APROVADO" if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolvedor'] else "PENDENTE"
                         
                         query = text("""
-                            INSERT INTO base_conhecimento (origem, titulo, categoria, subcategoria, conteudo, id_analista_autor, status)
-                            VALUES ('CONHECIMENTO_SUPORTE', :tit, :cat, :subcat, :cont, :autor, :status)
+                            INSERT INTO base_conhecimento (origem, titulo, categoria, subcategoria, conteudo, id_analista_autor, status, caminho_anexo)
+                            VALUES ('CONHECIMENTO_SUPORTE', :tit, :cat, :subcat, :cont, :autor, :status, :anexo)
                         """)
                         conn.execute(query, {
                             "tit": titulo.strip(), "cat": categoria.strip().upper(),
                             "subcat": subcategoria.strip().upper() if subcategoria else "GERAL",
-                            "cont": conteudo.strip(), "autor": usuario_logado_id, "status": status_inicial
+                            "cont": conteudo_final, "autor": usuario_logado_id, "status": status_inicial,
+                            "anexo": caminho_db
                         })
                         
                     if status_inicial == "PENDENTE":
@@ -107,7 +162,7 @@ with aba_nova:
                         st.success("✅ Contribuição salva com sucesso!")
                         
                     registrar_log_auditoria(usuario_logado_id, "NOVA_CONTRIBUICAO", f"Submeteu: {titulo[:30]}...")
-                    import time; time.sleep(2); st.rerun()
+                    time.sleep(2); st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erro no banco de dados: {e}")
 
@@ -117,8 +172,9 @@ with aba_nova:
 with aba_minhas:
     st.subheader("📚 Minhas Contribuições para o Suporte")
     with engine.connect() as conn:
+        # Adicionado caminho_anexo na query
         query_minhas = text("""
-            SELECT id, titulo, categoria, status, motivo_rejeicao, conteudo
+            SELECT id, titulo, categoria, status, motivo_rejeicao, conteudo, caminho_anexo
             FROM base_conhecimento 
             WHERE origem = 'CONHECIMENTO_SUPORTE' AND id_analista_autor = :autor
             ORDER BY criado_em DESC
@@ -130,6 +186,12 @@ with aba_minhas:
             cor_status = "🟢" if row['status'] == "APROVADO" else "🟡" if row['status'] == "PENDENTE" else "🔴"
             with st.expander(f"{cor_status} {row['titulo']} (Status: {row['status']})"):
                 st.write(f"**Categoria:** {row['categoria']}")
+                
+                # Exibe botão de download se houver anexo
+                if row['caminho_anexo'] and os.path.exists(row['caminho_anexo']):
+                    with open(row['caminho_anexo'], "rb") as f:
+                        st.download_button("📎 Baixar Anexo da Contribuição", f, file_name=os.path.basename(row['caminho_anexo']), key=f"dl_minha_{row['id']}")
+                
                 if row['status'] == 'REJEITADO':
                     st.error(f"**Motivo da Rejeição:** {row['motivo_rejeicao']}")
                     st.warning("Você deve recriar a dica na Aba 'Nova Contribuição' com os ajustes solicitados e, em seguida, excluir este registro.")
@@ -138,7 +200,7 @@ with aba_minhas:
                             with engine.begin() as conn_del:
                                 conn_del.execute(text("DELETE FROM base_conhecimento WHERE id = :id"), {"id": row['id']})
                             registrar_log_auditoria(usuario_logado_id, "EXCLUIU_REJEITADO", f"ID: {row['id']}")
-                            st.success("Excluído com sucesso!"); import time; time.sleep(1); st.rerun()
+                            st.success("Excluído com sucesso!"); time.sleep(1); st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao excluir: {e}")
                 else:
@@ -155,8 +217,9 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
     with aba_fila:
         st.subheader("⚖️ Avaliação de Contribuições")
         with engine.connect() as conn:
+            # Adicionado caminho_anexo na query
             query_fila = text("""
-                SELECT b.id, b.titulo, b.categoria, b.conteudo, u.nome AS autor
+                SELECT b.id, b.titulo, b.categoria, b.conteudo, b.caminho_anexo, u.nome AS autor
                 FROM base_conhecimento b
                 JOIN usuarios u ON b.id_analista_autor = u.id
                 WHERE b.origem = 'CONHECIMENTO_SUPORTE' AND b.status = 'PENDENTE'
@@ -167,6 +230,12 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
             for index, row in df_fila.iterrows():
                 with st.expander(f"⏳ {row['titulo']} (Autor: {row['autor']})"):
                     st.write(f"**Categoria:** {row['categoria']}")
+                    
+                    # Exibe botão de download se houver anexo
+                    if row['caminho_anexo'] and os.path.exists(row['caminho_anexo']):
+                        with open(row['caminho_anexo'], "rb") as f:
+                            st.download_button("📎 Ver Anexo Original", f, file_name=os.path.basename(row['caminho_anexo']), key=f"dl_fila_{row['id']}")
+                            
                     st.info(row['conteudo'])
                     c1, c2 = st.columns(2)
                     with c1:
@@ -174,7 +243,7 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
                             with engine.begin() as conn_apr:
                                 conn_apr.execute(text("UPDATE base_conhecimento SET status = 'APROVADO' WHERE id = :id"), {"id": row['id']})
                             registrar_log_auditoria(usuario_logado_id, "APROVOU_DICA", f"ID: {row['id']}")
-                            st.success("Aprovado!"); import time; time.sleep(1); st.rerun()
+                            st.success("Aprovado!"); time.sleep(1); st.rerun()
                     with c2:
                         motivo = st.text_input("Motivo da Rejeição:", key=f"motivo_{row['id']}")
                         if st.button("❌ Rejeitar", key=f"rej_{row['id']}"):
@@ -183,7 +252,7 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
                                 with engine.begin() as conn_rej:
                                     conn_rej.execute(text("UPDATE base_conhecimento SET status = 'REJEITADO', motivo_rejeicao = :m WHERE id = :id"), {"m": motivo, "id": row['id']})
                                 registrar_log_auditoria(usuario_logado_id, "REJEITOU_DICA", f"ID: {row['id']}")
-                                st.success("Devolvido ao autor!"); import time; time.sleep(1); st.rerun()
+                                st.success("Devolvido ao autor!"); time.sleep(1); st.rerun()
         else:
             st.success("✅ Não há contribuições pendentes no momento. Ótimo trabalho, equipe! Continue contribuindo para fortalecer nosso suporte!")
 
@@ -204,11 +273,9 @@ with aba_gemini:
                 
                 # ==========================================
                 # 🛑 FASE 0: INTERCEPTADOR SEMÂNTICO (CACHE)
-                # Verifica se a mesma pergunta já foi feita para não gastar API
                 # ==========================================
                 tem_no_cache = False
                 with engine.connect() as conn:
-                    # Remove acentos do BD e da pergunta para uma busca tolerante a erros
                     mapa_origem = 'áàâãäéèêëíìîïóòôõöúùûüçñ'
                     mapa_destino = 'aaaaaeeeeiiiiooooouuuucn'
                     query_cache = text(f"""
@@ -270,8 +337,9 @@ with aba_gemini:
                             filtros_sql = " OR ".join(clausulas_or)
                             score_sql = " + ".join(clausulas_score)
                             
+                            # Adicionado caminho_anexo na query da RAG
                             query_rag = text(f"""
-                                SELECT titulo, origem, conteudo, ({score_sql}) as pontuacao_relevancia
+                                SELECT titulo, origem, conteudo, caminho_anexo, ({score_sql}) as pontuacao_relevancia
                                 FROM base_conhecimento 
                                 WHERE status = 'APROVADO' AND ({filtros_sql})
                                 ORDER BY pontuacao_relevancia DESC
@@ -281,7 +349,7 @@ with aba_gemini:
                             resultados = conn.execute(query_rag, params).fetchall()
                             for r in resultados:
                                 contextos_db.append(f"📚 FONTE: {r[0]} ({r[1]})\nCONTEÚDO: {r[2]}")
-                                resultados_puros.append({"titulo": r[0], "origem": r[1], "conteudo": r[2], "score": r[3]})
+                                resultados_puros.append({"titulo": r[0], "origem": r[1], "conteudo": r[2], "anexo": r[3], "score": r[4]})
                     
                     texto_contexto = "\n\n---\n\n".join(contextos_db)
                     
@@ -332,6 +400,9 @@ with aba_gemini:
                                 st.info("📑 **Documentos que fundamentaram a resposta:**")
                                 for doc in resultados_puros:
                                     with st.expander(f"📄 {doc['titulo']} ({doc['origem']}) - Score: {doc['score']}"):
+                                        if doc['anexo'] and os.path.exists(doc['anexo']):
+                                            with open(doc['anexo'], "rb") as f:
+                                                st.download_button("📎 Baixar Anexo", f, file_name=os.path.basename(doc['anexo']), key=f"dl_busca_ia_{doc['titulo']}")
                                         st.write(doc['conteudo'])
                             
                             try:
@@ -348,6 +419,9 @@ with aba_gemini:
                             if resultados_puros:
                                 for doc in resultados_puros:
                                     with st.expander(f"📄 {doc['titulo']} ({doc['origem']}) - Score: {doc['score']}"):
+                                        if doc['anexo'] and os.path.exists(doc['anexo']):
+                                            with open(doc['anexo'], "rb") as f:
+                                                st.download_button("📎 Baixar Anexo", f, file_name=os.path.basename(doc['anexo']), key=f"dl_busca_fallback_{doc['titulo']}")
                                         st.write(doc['conteudo'])
                             else:
                                 st.write("⚠️ Nenhum documento oficial encontrado para esta dúvida.")
@@ -359,6 +433,9 @@ with aba_gemini:
                         if resultados_puros:
                             for doc in resultados_puros:
                                 with st.expander(f"📄 {doc['titulo']} ({doc['origem']}) - Score: {doc['score']}"):
+                                    if doc['anexo'] and os.path.exists(doc['anexo']):
+                                        with open(doc['anexo'], "rb") as f:
+                                            st.download_button("📎 Baixar Anexo", f, file_name=os.path.basename(doc['anexo']), key=f"dl_busca_analista_{doc['titulo']}")
                                     st.write(doc['conteudo'])
                         else:
                             st.warning("⚠️ Nenhum documento oficial encontrado para esta dúvida. Tente reformular a pergunta ou consulte um colega da equipe.")
