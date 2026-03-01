@@ -3,6 +3,7 @@ import bcrypt
 import random
 from datetime import datetime, timedelta
 from sqlalchemy import text
+from typing import Tuple, Optional
 from modules.database import get_connection
 
 # Tenta importar a função de auditoria (Ajuste o caminho se necessário)
@@ -10,7 +11,7 @@ try:
     from modules.auditoria import registrar_log_auditoria
 except ImportError:
     # Fallback caso o ficheiro não exista ainda
-    def registrar_log_auditoria(user_id, acao, detalhe): pass
+    def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
 # ==========================================
 # 1. CONFIGURAÇÃO GLOBAL E ESTILO
@@ -28,7 +29,7 @@ if 'termos_aceitos' not in st.session_state:
 # ==========================================
 # 3. FUNÇÕES DE SEGURANÇA E BANCO DE DADOS
 # ==========================================
-def verificar_login(username, senha_digitada):
+def verificar_login(username: str, senha_digitada: str) -> Tuple[bool, Optional[int], Optional[str]]:
     """Valida as credenciais comparando o Hash bcrypt no banco de dados."""
     engine = get_connection()
     try:
@@ -49,11 +50,11 @@ def verificar_login(username, senha_digitada):
                 if bcrypt.checkpw(senha_digitada.encode('utf-8'), senha_hash_banco):
                     return True, usuario_id, perfil
     except Exception as e:
-        st.error(f"Ocorreu um erro de comunicação com o banco de dados: {e}")
+        st.error(f"WikiSuporte encontrou um erro durante a autenticação:{e}")
     
     return False, None, None
 
-def verificar_aceite_termos(usuario_id):
+def verificar_aceite_termos(usuario_id: int) -> bool:
     """Verifica nos logs de auditoria se o utilizador já aceitou os termos no passado."""
     engine = get_connection()
     try:
@@ -61,10 +62,10 @@ def verificar_aceite_termos(usuario_id):
             query = text("SELECT 1 FROM logs_auditoria_sistema WHERE usuario_id = :u AND acao = 'ACEITE_TERMOS' LIMIT 1")
             resultado = conn.execute(query, {"u": usuario_id}).fetchone()
             return bool(resultado)
-    except Exception as e:
+    except Exception:
         return False
 
-def obter_saudacao():
+def obter_saudacao() -> str:
     """Retorna a saudação correta baseada no fuso horário do utilizador."""
     hora_atual = datetime.now().hour
     if 5 <= hora_atual < 12: return "Bom dia"
@@ -78,10 +79,10 @@ if st.session_state['autenticado']:
     agora = datetime.now()
     ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
     
-    # Se passou mais de 15 minutos sem interação, desloga o utilizador
-    if agora - ultimo_acesso > timedelta(minutes=15):
+    # Se passou mais de 50 minutos sem interação, desloga o utilizador
+    if agora - ultimo_acesso > timedelta(minutes=50):
         st.session_state.clear() 
-        st.warning("⏱️ A sua sessão expirou por inatividade (15 minutos de proteção). Faça login novamente.")
+        st.warning("⏱️ Sessão expirada por inatividade. Por favor, faça login novamente para continuar.")
         st.stop()
     else:
         st.session_state['ultimo_acesso'] = agora
@@ -89,25 +90,56 @@ if st.session_state['autenticado']:
 # ==========================================
 # 5. TELAS (VIEWS) DO SISTEMA
 # ==========================================
-def tela_login():
+def tela_login() -> None:
     """Interface de Login (Com bloqueio de menu lateral)."""
     # Esconde as páginas do menu lateral para quem não tem login
     st.markdown("""<style>[data-testid="stSidebarNav"] {display: none;}</style>""", unsafe_allow_html=True)
 
     with st.sidebar:
-        try: st.image("mascote/psy_braco_cruzado_aposto.png", use_container_width=True)
+        try: st.image("mascote/psy_no_dashboard.png", use_container_width=True)
         except: pass
         
         st.markdown("## 👋 Bem-vindo(a) ao WikiSuporte")
-        st.info("**Versão 1.0.0** (Beta)")
+        st.info("**Versão 1.0 - Beta**\n\nDesenvolvido para analistas de suporte e gestores do suporte")
         
-        st.markdown("### 🤖 O que é o sistema?")
-        st.markdown("O WikiSuporte é uma central de inteligência desenvolvida para gerir, analisar e proteger os dados dos atendimentos. Garantimos segurança e conformidade total com a LGPD.")
+        st.markdown("### 🤖 O que é a WikiSuporte?")
+        st.markdown("A WikiSuporte centraliza informações e organiza atendimentos, ajudando a equipe de suporte a trabalhar com mais agilidade, controle e qualidade no atendimento ao cliente.")
         
-        frases = ["A persistência realiza o impossível.", "Falar é barato. Mostre-me o código.", "A melhor forma de prever o futuro é inventá-lo."]
+        frases = [
+            "“Conhecereis a verdade, e a verdade vos libertará.” — Jesus Cristo",
+            "“A persistência realiza o impossível.” — Confúcio",
+            "“Só sei que nada sei.” — Sócrates",
+            "“A qualidade nunca é um acidente; é sempre o resultado de um esforço inteligente.” — John Ruskin",
+            "“Você não precisa ser grande para começar, mas precisa começar para ser grande.” — Zig Ziglar",
+            "“A educação é a arma mais poderosa que você pode usar para mudar o mundo.” — Nelson Mandela",
+            "“O sucesso é a soma de pequenos esforços repetidos dia após dia.” — Robert Collier",
+            "“A melhor maneira de prever o futuro é criá-lo.” — Peter Drucker",
+            "“O trabalho em equipe é o combustível que permite a pessoas comuns alcançarem resultados incomuns.” — Andrew Carnegie",
+            "“Aprender é a única coisa de que a mente nunca se cansa.” — Leonardo da Vinci",
+            "“A disciplina é a ponte entre metas e realizações.” — Jim Rohn",
+            "“Se vi mais longe, foi por estar sobre ombros de gigantes.” — Isaac Newton",
+            "“Grandes realizações são possíveis quando se dá importância aos pequenos começos.” — Lao Tsé",
+            "“O entusiasmo move o mundo.” — Arthur Balfour",
+            "“A excelência não é um ato, mas um hábito.” — Aristóteles",
+            "“A união faz a força.” — Esopo",
+            "“O homem que move montanhas começa carregando pequenas pedras.” — Confúcio",
+            "“Nunca é tarde para ser aquilo que se poderia ter sido.” — George Eliot",
+            "“A única maneira de fazer um excelente trabalho é amar o que você faz.” — Steve Jobs",
+            "“A paciência e a perseverança têm o efeito mágico de fazer as dificuldades desaparecerem.” — John Quincy Adams",
+            "“O aprendizado contínuo é o mínimo requisito para o sucesso.” — Brian Tracy",
+            "“Quem quer fazer algo encontra um meio; quem não quer encontra uma desculpa.” — Benjamin Franklin",
+            "“A força não provém da capacidade física, mas de uma vontade indomável.” — Mahatma Gandhi",
+            "“Não encontre defeitos, encontre soluções.” — Henry Ford",
+            "“O sucesso normalmente vem para quem está ocupado demais para procurar por ele.” — Henry David Thoreau",
+            "“O talento vence jogos, mas o trabalho em equipe ganha campeonatos.” — Michael Jordan",
+            "“A simplicidade é o último grau de sofisticação.” — Leonardo da Vinci",
+            "“Você se torna aquilo que acredita.” — Oprah Winfrey",
+            "“Coragem é resistência ao medo, domínio do medo, e não ausência do medo.” — Mark Twain",
+            "“A melhoria contínua é melhor do que a perfeição adiada.” — Mark Twain"
+        ]
         st.success(f"💡 **Pensamento do dia:**\n\n_{random.choice(frases)}_")
         st.divider()
-        st.caption("WikiSuporte | Desenvolvido e pensado por Rafael D. Nascimento | © 2026.")
+        st.caption("© 2026 WikiSuporte — Plataforma de gestão e centralização de atendimentos de suporte, desenvolvida por Rafael D. Nascimento. Todos os direitos reservados.")
 
     # Formulário centralizado
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -117,9 +149,9 @@ def tela_login():
         st.markdown("<h1 style='text-align: center;'>🔐 WikiSuporte - Login</h1>", unsafe_allow_html=True)
         
         with st.form("form_login"):
-            usuario = st.text_input("👤 Usuário", placeholder="Digite o seu nome de usuário")
+            usuario = st.text_input("👤 Usuário", placeholder="Insira o seu nome de usuário")
             senha = st.text_input("🔑 Senha", type="password")
-            btn_login = st.form_submit_button("Entrar no WikiSuporte", use_container_width=True)
+            btn_login = st.form_submit_button("Acessar", use_container_width=True)
             
         if btn_login:
             if usuario and senha:
@@ -132,20 +164,20 @@ def tela_login():
                     st.session_state['termos_aceitos'] = verificar_aceite_termos(user_id)
                     st.session_state['ultimo_acesso'] = datetime.now() 
                     
-                    registrar_log_auditoria(user_id, "LOGIN", "Login realizado com sucesso.")
-                    st.success("Autenticação bem sucedida!")
+                    registrar_log_auditoria(user_id, "LOGIN", "Usuário autenticou-se com sucesso.")
+                    st.success("Login bem-sucedido! Redirecionando...")
                     st.rerun() 
                 else:
-                    st.error("Usuário inativo ou senha incorreta.")
+                    st.error("Usuário ou senha incorretos. Por favor, tente novamente.")
             else:
-                st.warning("Preencha todos os campos para continuar.")
+                st.warning("Por favor, preencha ambos os campos de usuário e senha para acessar o sistema.")
 
-def tela_termos_uso():
+def tela_termos_uso() -> None:
     """Tela de bloqueio LGPD. O utilizador não passa daqui sem aceitar."""
     st.markdown("""<style>[data-testid="stSidebar"] {display: none;}</style>""", unsafe_allow_html=True)
     
-    st.title("WikiSuporte - Termo de Uso e Confidencialidade")
-    st.warning("⚠️ **Atenção:** Este é um ambiente restrito e protegido. O acesso e uso deste sistema estão sujeitos a termos de confidencialidade e proteção de dados. Leia atentamente.")
+    st.title("WikiSuporte - Termo de Uso e Confidencialidade 📜")
+    st.warning("⚠️ **Atenção:** Ambiente restrito e protegido. O acesso e uso deste sistema estão condicionados às políticas de confidencialidade e proteção de dados vigentes. Leia atentamente antes de prosseguir.")
     
     st.markdown("""
     ### 📜 Proteção de Dados (LGPD)
@@ -166,17 +198,16 @@ def tela_termos_uso():
     
     aceito = st.checkbox("Eu li, compreendo e concordo com os termos de uso e confidencialidade descritos acima.")
     
-    if st.button("Assinar Termo e Confirmar Acesso", type="primary"):
+    if st.button("Aceitar Termos de Uso", type="primary"):
         if aceito:
             st.session_state['termos_aceitos'] = True
             registrar_log_auditoria(st.session_state.get('usuario_id'), "ACEITE_TERMOS", "Usuário leu e aceitou os termos da LGPD.")
             st.rerun() 
         else:
-            st.error("Você deve marcar a caixa de seleção aceitando os termos para utilizar o WikiSuporte.")
+            st.error("Você deve aceitar os termos de uso para acessar o sistema. Por favor, marque a caixa de seleção para prosseguir.")
 
-def tela_home():
+def tela_home() -> None:
     """Página Inicial após login e aceite dos termos."""
-    
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
     perfil_usuario = str(st.session_state.get('perfil', 'analista')).lower()
     
@@ -197,12 +228,12 @@ def tela_home():
     
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.write("Bem-vindo(a) à sua central de operações.")
-        st.write("Utilize o **menu lateral esquerdo** para navegar entre as páginas e aceder aos módulos de relatórios, robôs de raspagem ou painéis de utilizadores.")
-        st.info("💡 **Dica de UX:** Se estiver a utilizar um telemóvel ou ecrã pequeno, clique no ícone `>` no canto superior esquerdo para abrir o menu.")
+        st.write("Bem-vindo(a) à WikiSuporte, Uma plataforma de gestão e centralização de atendimentos de suporte, desenvolvida para analistas de suporte e gestores do suporte.")
+        st.write("Utilize o menu lateral para navegar entre as diferentes seções do sistema, como a gestão de clientes, visualização de atendimentos e relatórios de desempenho.")
+        st.info("💡 Dica: Em smartphones ou telas menores, toque no ícone > no canto superior esquerdo para abrir o menu.")
         
     with col2:
-        st.success("🛡️ **Conformidade Ativa**\n\nO seu acesso está a ser auditado para proteção da sua operação e dos dados dos clientes (LGPD).")
+        st.success("🛡️ Perfil: **{perfil_usuario.title()}**")
 
 # ==========================================
 # 6. CONTROLADOR DE FLUXO PRINCIPAL
