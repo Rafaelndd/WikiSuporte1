@@ -11,7 +11,7 @@ except ImportError:
 # ==========================================
 # 1. CONFIGURAÇÕES DA PÁGINA E SEGURANÇA
 # ==========================================
-st.set_page_config(page_title="WikiSuporte - Hub de Conhecimento", page_icon="🏆", layout="wide")
+st.set_page_config(page_title="WS - Central de Conhecimento", page_icon="🏆", layout="wide")
 
 if not st.session_state.get('autenticado'): 
     st.switch_page("app.py")
@@ -22,25 +22,25 @@ perfil_logado = str(st.session_state.get('perfil', 'analista')).lower()
 # ==========================================
 # 2. CABEÇALHO E ABAS
 # ==========================================
-st.title("🏆 Hub de Conhecimento & Gamificação")
-st.markdown("Compartilhe o seu conhecimento, suba no ranking da equipa e acesse o motor de busca unificado!")
+st.title("🤝 Central de Conhecimento do Suporte")
+st.markdown("Respostas rápidas, documentação organizada e conhecimento sempre atualizado!")
 
 # Define as abas dependendo do perfil (ADICIONADA A NOVA ABA 6: ARQUIVO PSY)
 if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolvedor']:
     aba_ranking, aba_nova, aba_minhas, aba_fila, aba_gemini, aba_arquivo = st.tabs([
-        "🏅 Ranking e Troféus", "📝 Nova Dica", "📚 Minhas Contribuições", "⚖️ Fila de Aprovação", "🤖 Busca PSY", "📖 Arquivo PSY"
+        "🏅 Ranking e Troféus", "📝 Adicionar Contribuição", "📚 Minhas Contribuições", "⚖️ Fila de Avaliação de Contribuições", "🤖 Pesquisar com PSY IA", "📖 Histórico das pesquisas"
     ])
 else:
     aba_ranking, aba_nova, aba_minhas, aba_gemini, aba_arquivo = st.tabs([
-        "🏅 Ranking e Troféus", "📝 Nova Dica", "📚 Minhas Contribuições", "🤖 Busca PSY", "📖 Arquivo PSY"
+        "🏅 Ranking e Troféus", "📝 Adicionar Contribuição", "📚 Minhas Contribuições", "🤖 Pesquisar com PSY IA", "📖 Histórico das pesquisas"
     ])
 
 # ==========================================
 # ABA 1: GAMIFICAÇÃO E RANKING
 # ==========================================
 with aba_ranking:
-    st.subheader("Leaderboard - Os Mestres do Suporte")
-    st.info("💡 Cada contribuição aprovada vale **50 XP**. Compartilhe soluções e conquiste os troféus de Ouro, Prata e Bronze!")
+    st.subheader("🏅 Ranking dos Contribuidores de Suporte")
+    st.info("Sua contribuição é a força vital do nosso suporte! Cada contribuição aprovada vale pontos, e os melhores recebem troféus simbólicos. Participe, contribua e suba no pódio do conhecimento!")
     
     engine = get_connection()
     with engine.connect() as conn:
@@ -67,25 +67,25 @@ with aba_ranking:
             df_ranking.insert(0, "Troféu", trofeus)
             st.dataframe(df_ranking, use_container_width=True, hide_index=True)
         else:
-            st.write("Ainda não temos campeões no ranking. Seja o primeiro!")
+            st.write("Nenhuma contribuição aprovada ainda. Seja o primeiro a contribuir para o conhecimento do suporte!")
 
 # ==========================================
 # ABA 2: NOVA CONTRIBUIÇÃO (Regra da Fila)
 # ==========================================
 with aba_nova:
-    st.markdown("### Enviar Nova Solução / Workaround")
+    st.markdown("### 📝 Adicionar Nova Contribuição para a Base de Conhecimento")
     with st.form("form_contribuicao", clear_on_submit=True):
-        titulo = st.text_input("📌 Título da Contribuição", placeholder="Ex: Erro X na Balança Toledo - Solução")
+        titulo = st.text_input("📌 Título", placeholder="Ex: Instalação de Certificado Digital...")
         col1, col2 = st.columns(2)
-        with col1: categoria = st.text_input("📂 Categoria", placeholder="Ex: DICAS TECNUV")
-        with col2: subcategoria = st.text_input("📁 Subcategoria", placeholder="Ex: BALANÇAS")
+        with col1: categoria = st.text_input("📂 Categoria", placeholder="Ex: Financeiro")
+        with col2: subcategoria = st.text_input("📁 Subcategoria", placeholder="Ex: Contas a Pagar")
             
-        conteudo = st.text_area("🧠 Passo a Passo da Solução", height=200)
-        btn_salvar = st.form_submit_button("🚀 Submeter para Avaliação", type="primary")
+        conteudo = st.text_area("🧠 Conteúdo", height=200)
+        btn_salvar = st.form_submit_button("🚀 Salvar Contribuição", type="primary")
         
         if btn_salvar:
             if not titulo or not categoria or not conteudo:
-                st.warning("⚠️ Preencha Título, Categoria e Conteúdo.")
+                st.warning("⚠️ Por favor, preencha os campos obrigatórios: Título, Categoria e Conteúdo.")
             else:
                 try:
                     with engine.begin() as conn:
@@ -102,9 +102,9 @@ with aba_nova:
                         })
                         
                     if status_inicial == "PENDENTE":
-                        st.success("✅ Contribuição enviada! Ela está na fila para avaliação. Ganhará os seus XP assim que aprovada!")
+                        st.success("✅ Sua contribuição será analisada, se tudo estiver correto ela será aprovada automaticamente!")
                     else:
-                        st.success("✅ Contribuição salva e aprovada automaticamente!")
+                        st.success("✅ Contribuição salva com sucesso!")
                         
                     registrar_log_auditoria(usuario_logado_id, "NOVA_CONTRIBUICAO", f"Submeteu: {titulo[:30]}...")
                     import time; time.sleep(2); st.rerun()
@@ -115,7 +115,7 @@ with aba_nova:
 # ABA 3: MINHAS CONTRIBUIÇÕES
 # ==========================================
 with aba_minhas:
-    st.subheader("O Seu Histórico de Conhecimento")
+    st.subheader("📚 Minhas Contribuições para o Suporte")
     with engine.connect() as conn:
         query_minhas = text("""
             SELECT id, titulo, categoria, status, motivo_rejeicao, conteudo
@@ -133,7 +133,7 @@ with aba_minhas:
                 if row['status'] == 'REJEITADO':
                     st.error(f"**Motivo da Rejeição:** {row['motivo_rejeicao']}")
                     st.warning("Você deve recriar a dica na Aba 'Nova Contribuição' com os ajustes solicitados e, em seguida, excluir este registro.")
-                    if st.button(f"🗑️ Excluir Contribuição Rejeitada", key=f"del_{row['id']}"):
+                    if st.button(f"🗑️ Excluir Contribuição rejeitada", key=f"del_{row['id']}"):
                         try:
                             with engine.begin() as conn_del:
                                 conn_del.execute(text("DELETE FROM base_conhecimento WHERE id = :id"), {"id": row['id']})
@@ -144,9 +144,9 @@ with aba_minhas:
                 else:
                     st.write(row['conteudo'])
                     if row['status'] == 'APROVADO':
-                        st.caption("🔒 Registros aprovados não podem ser alterados/excluídos. Solicite à coordenação.")
+                        st.caption("🔒 WikiSuporte - Registros aprovados não podem ser alterados/excluídos. Solicite à coordenação.")
     else:
-        st.info("Você ainda não possui contribuições.")
+        st.info("Percebi que você ainda não contribuiu com nenhuma dica para o suporte. Sua experiência é valiosa para a equipe, compartilhe seu conhecimento e ajude a fortalecer nosso suporte!")
 
 # ==========================================
 # ABA 4: FILA DE APROVAÇÃO
@@ -185,22 +185,22 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
                                 registrar_log_auditoria(usuario_logado_id, "REJEITOU_DICA", f"ID: {row['id']}")
                                 st.success("Devolvido ao autor!"); import time; time.sleep(1); st.rerun()
         else:
-            st.success("🎉 Fila limpa!")
+            st.success("✅ Não há contribuições pendentes no momento. Ótimo trabalho, equipe! Continue contribuindo para fortalecer nosso suporte!")
 
 # ==========================================
 # ABA 5: MOTOR DE BUSCA HÍBRIDO (COM INTERCEPTADOR DE CACHE)
 # ==========================================
 with aba_gemini:
-    st.subheader("🤖 Motor de Busca PSY (Híbrido)")
-    st.markdown("Busque informações nos **Manuais, Wikis e Dicas da Equipe**.")
+    st.subheader("🤖 Pesquisar com o PSY - Nosso assistente virtual")
+    st.markdown("Digite sua dúvida e deixe o nosso assistente virtua PSY analisar a base de conhecimento oficial do suporte para te dar uma resposta rápida e precisa. Se a IA estiver indisponível, o sistema ativará o Motor a Combustão (SQL) para garantir que você tenha acesso às informações necessárias.")
     
-    pergunta = st.text_input("Digite sua pesquisa:", placeholder="Ex: Como configurar a balança Toledo?")
+    pergunta = st.text_input("Informe sua dúvida: ", placeholder="Ex: Como configurar o e-mail no PostoGestor?")
     
     if st.button("🔍 Buscar", type="primary"):
         if not pergunta.strip():
-            st.warning("Por favor, digite uma pergunta.")
+            st.warning("⚠️ Por favor, insira uma dúvida para que o PSY possa ajudar você. Quanto mais específica for a pergunta, melhor será a resposta!")
         else:
-            with st.spinner("Analisando cérebro neural..."):
+            with st.spinner("O assistente virtual PSY está analisando a base de conhecimento..."):
                 
                 # ==========================================
                 # 🛑 FASE 0: INTERCEPTADOR SEMÂNTICO (CACHE)
@@ -226,7 +226,7 @@ with aba_gemini:
                     
                     st.success(f"♻️ **Cache Ativado!** Você e **{nome_exibicao}** estão na mesma sintonia. Esta mesma dúvida foi resolvida pela IA hoje às {data_cache}.")
                     st.markdown(resposta_cache)
-                    st.caption("⚡ **Motor Elétrico Poupado:** 0 Tokens consumidos nesta busca.")
+                    st.caption("⚡ **Motor Elétrico:** O PSY detectou que esta pergunta já foi feita antes e trouxe a resposta diretamente do histórico, economizando recursos e tempo!")
                     tem_no_cache = True
                 
                 # Se NÃO tiver no cache, roda a IA normalmente
@@ -300,11 +300,11 @@ with aba_gemini:
                             if not gemini_api_key: raise ValueError("API Key não encontrada no arquivo .env.")
 
                             genai.configure(api_key=gemini_api_key)
-                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            model = genai.GenerativeModel('gemini-2.5-flash')
                             
                             if texto_contexto:
-                                prompt = f"""Você é o PSY, Especialista de Suporte do sistema PostoGestor.
-                                Faça um RESUMO DIRETO E OBJETIVO para responder à dúvida do usuário, usando EXCLUSIVAMENTE o contexto oficial abaixo.
+                                prompt = f"""Você é o PSY um assistente virtual inteligente, irá auxiliar analistas de suporte da empresa EPSY Sistemas, e será um Especialista de Suporte do sistema PostoGestor.
+                                Faça um RESUMO DIRETO, OBJETIVO e EXPLICATIVO para responder à dúvida do usuário, usando EXCLUSIVAMENTE o contexto oficial abaixo.
                                 Seja didático. Se houver passo a passo, use bullet points ou numeração.
                                 
                                 DÚVIDA DO USUÁRIO: "{pergunta}"
@@ -313,7 +313,7 @@ with aba_gemini:
                                 {texto_contexto}
                                 """
                             else:
-                                prompt = f"O usuário perguntou sobre: '{pergunta}'. Avise educadamente que após filtrar as palavras '{', '.join(palavras_chave)}', não encontrou nenhum manual na base oficial."
+                                prompt = f"O usuário perguntou sobre: '{pergunta}'. Avise educadamente que após filtrar as palavras '{', '.join(palavras_chave)}', não encontrou nenhum manual na base de conhecimento do suporte que pudesse responder a esta dúvida. Sugira que ele reformule a pergunta ou consulte um colega da equipe."
 
                             resposta_ia = model.generate_content(prompt)
                             
@@ -324,12 +324,12 @@ with aba_gemini:
                             except:
                                 t_prompt = t_resp = t_total = 0
                                 
-                            st.success("⚡ Resumo Inteligente (PSY):")
+                            st.success("⚡ Resposta gerada pelo assistente virtual PSY!")
                             st.markdown(resposta_ia.text)
                             st.caption(f"🔋 **Medidor de Tokens:** Gastou **{t_prompt}** p/ ler + **{t_resp}** p/ responder = **Total {t_total} Tokens**.")
                             
                             if resultados_puros:
-                                st.info("👇 Documentos originais consultados para gerar este resumo:")
+                                st.info("📑 **Documentos que fundamentaram a resposta:**")
                                 for doc in resultados_puros:
                                     with st.expander(f"📄 {doc['titulo']} ({doc['origem']}) - Score: {doc['score']}"):
                                         st.write(doc['conteudo'])
@@ -341,39 +341,39 @@ with aba_gemini:
                                         VALUES (:u, :p, :r, :tp, :tr, :tt)
                                     """), {"u": usuario_logado_id, "p": pergunta.strip(), "r": resposta_ia.text, "tp": t_prompt, "tr": t_resp, "tt": t_total})
                             except Exception as db_e:
-                                st.error(f"⚠️ Erro ao gravar histórico: {db_e}")
+                                st.error(f"⚠️ WikiSuporte - Erro ao registrar no banco de dados:{db_e}")
                                 
                         except ResourceExhausted:
-                            st.warning("⚠️ **Aviso Administrativo:** A IA Gemini atingiu a cota. O sistema ligou o **Motor a Combustão** (SQL)!")
+                            st.warning("⚠️ O PSY está um pouco cansado... Parece que atingimos o limite de uso da API do Gemini para hoje. \nMas não se preocupe, o Motor a Combustão (SQL) está aqui para garantir que você ainda tenha acesso às informações oficiais do suporte!")
                             if resultados_puros:
                                 for doc in resultados_puros:
                                     with st.expander(f"📄 {doc['titulo']} ({doc['origem']}) - Score: {doc['score']}"):
                                         st.write(doc['conteudo'])
                             else:
-                                st.write("Nenhum documento encontrado.")
+                                st.write("⚠️ Nenhum documento oficial encontrado para esta dúvida.")
                         except Exception as e:
                             st.error(f"❌ Erro na IA: {e}")
                     else:
                         # === FASE 4: ACESSO DE ANALISTAS (SÓ COMBUSTÃO) ===
-                        st.info("🔧 Motor a Combustão: A IA (PSY) está restrita aos Administradores. Aqui estão os manuais:")
+                        st.info("⚡ **Acesso ao PSY:** Percebi que seu perfil não tem acesso ao Motor Elétrico (IA) para esta busca, \nmas não se preocupe! O Motor a Combustão (SQL) encontrou os seguintes documentos oficiais relacionados à sua dúvida:")
                         if resultados_puros:
                             for doc in resultados_puros:
                                 with st.expander(f"📄 {doc['titulo']} ({doc['origem']}) - Score: {doc['score']}"):
                                     st.write(doc['conteudo'])
                         else:
-                            st.warning("Nenhum documento oficial encontrado.")
+                            st.warning("⚠️ Nenhum documento oficial encontrado para esta dúvida. Tente reformular a pergunta ou consulte um colega da equipe.")
 
 # ==========================================
 # ABA 6: ARQUIVO PSY (HISTÓRICO E RANKING DA EQUIPE)
 # ==========================================
 with aba_arquivo:
-    st.subheader("📖 Arquivo PSY (Memória Coletiva)")
-    st.markdown("Consulte as dúvidas já resolvidas pelo Motor Elétrico e descubra os temas mais quentes da nossa operação. As soluções aqui armazenadas servem de atalho para problemas recorrentes.")
+    st.subheader("📖 Histórico e Ranking da Equipe")
+    st.markdown("Aqui você pode consultar as últimas perguntas feitas ao PSY, as respostas geradas pela IA e os colegas que fizeram essas perguntas. \nAlém disso, temos um ranking dos assuntos mais buscados para você ficar por dentro das dúvidas mais comuns da equipe!")
     
     col_hist, col_rank = st.columns([2, 1])
     
     with col_hist:
-        st.markdown("#### 🕒 Últimas Respostas da IA")
+        st.markdown("#### 🔍 Últimas Perguntas e Respostas do PSY")
         with engine.connect() as conn:
             query_recentes = text("""
                 SELECT h.pergunta, h.resposta_ia, u.nome, to_char(h.criado_em, 'DD/MM/YYYY HH24:MI') as data_busca
@@ -389,10 +389,10 @@ with aba_arquivo:
                 with st.expander(f"👤 {nome_autor} buscou: {row['pergunta']} ({row['data_busca']})"):
                     st.markdown(row['resposta_ia'])
         else:
-            st.info("Nenhuma busca foi registrada no cérebro do PSY ainda.")
+            st.info("Ainda não há registros de buscas ao PSY. Faça uma pergunta na aba de pesquisa para começar a construir nosso histórico coletivo!")
             
     with col_rank:
-        st.markdown("#### 🔥 Assuntos Mais Buscados")
+        st.markdown("#### 🏆 Ranking dos Assuntos Mais Buscados")
         with engine.connect() as conn:
             query_ranking_buscas = text("""
                 SELECT pergunta as "Assunto", COUNT(id) as "Volume"
@@ -406,4 +406,4 @@ with aba_arquivo:
         if not df_ranking_buscas.empty:
             st.dataframe(df_ranking_buscas, use_container_width=True, hide_index=True)
         else:
-            st.write("Aguardando volume de buscas para gerar o ranking.")
+            st.write("Nenhuma busca registrada ainda. Seja o primeiro a fazer uma pergunta ao PSY e veja seu assunto aparecer aqui no ranking dos mais buscados!")
