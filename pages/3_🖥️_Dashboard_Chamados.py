@@ -223,14 +223,14 @@ with aba1:
     
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Volume de Chamados (Período)", total_chamados)
-    col2.metric("Chamados Ativos (Em Fila)", abertos, delta="Na Tecnuv/EPSY", delta_color="inverse")
+    col2.metric("Chamados Ativos (Em Fila)", abertos, delta="Na Fila", delta_color="inverse")
     col3.metric("Chamados Resolvidos", encerrados, delta="Encerrados")
     
     # Índice de Reincidência
     chamados_com_liberacao = len(df[df['classificacao_reincidencia'] != "Sem Liberação"])
     reincidentes = len(df[df['classificacao_reincidencia'] == "Reincidência"])
     taxa_reincidencia = (reincidentes / chamados_com_liberacao * 100) if chamados_com_liberacao > 0 else 0
-    col4.metric("Índice de Reincidência", f"{taxa_reincidencia:.1f}%", delta="Retrabalho após Liberação", delta_color="inverse")
+    col4.metric("Índice de Reincidência", f"{taxa_reincidencia:.1f}%", delta="Chamados com Reincidência", delta_color="inverse")
 
     st.divider()
     
@@ -251,8 +251,8 @@ with aba1:
 
     # NOVO: Tabela detalhada de reincidências
     if reincidentes > 0:
-        st.markdown("### 🚨 Detalhamento dos Chamados Reincidentes")
-        st.markdown("Lista de chamados que a desenvolvedora liberou correção, mas a EPSY relatou que o problema persistiu.")
+        st.markdown("### 🚨 Detalhamento dos Chamados com Reincidência")
+        st.markdown("Lista de chamados que foram liberados, mas apresentaram reincidência, indicando que o problema não foi resolvido mesmo após a liberação da desenvolvedora.")
         df_reincidentes = df[df['classificacao_reincidencia'] == "Reincidência"].copy()
         
         # Cria uma visualização limpa do motivo
@@ -265,13 +265,13 @@ with aba1:
 # ABA 2: AGING E GARGALOS (FILA COMPLETA)
 # ------------------------------------------
 with aba2:
-    st.subheader("⏳ Análise de Fila Ativa (Gargalos)")
-    st.markdown("Todos os chamados que **não estão encerrados nem cancelados**, listados pelo tempo total em aberto (do mais antigo para o mais novo).")
+    st.subheader("⏳ Análise de Tempo de Espera e Gargalos")
+    st.markdown("Tempo em aberto dos chamados por status e motivo, destacando os mais antigos e as principais causas de atraso.")
     
     df_abertos = df[df['is_aberto']].copy()
     
     if df_abertos.empty:
-        st.success("Não há chamados em aberto!")
+        st.success("Nenhum chamado ativo encontrado. Todos estão resolvidos ou cancelados — ótima organização da equipe!")
     else:
         # Categorização de Aging
         acima_30 = len(df_abertos[df_abertos['dias_aberto'] >= 30])
@@ -280,15 +280,15 @@ with aba2:
         acima_365 = len(df_abertos[df_abertos['dias_aberto'] >= 365])
         
         ca1, ca2, ca3, ca4 = st.columns(4)
-        ca1.metric("Atenção (≥ 30 Dias)", acima_30)
-        ca2.metric("Crítico (≥ 60 Dias)", acima_60)
-        ca3.metric("Extremo (≥ 90 Dias)", acima_90)
-        ca4.metric("Inaceitável (≥ 1 Ano)", acima_365)
+        ca1.metric("🟡 Chamados Ativos a Mais de 30 Dias (≥ 30 Dias)", acima_30)
+        ca2.metric("🟠 Atenção, Chamados Ativos a Mais de 60 Dias (≥ 60 Dias)", acima_60)
+        ca3.metric("🔴 Critico, Chamados Ativos a Mais de 90 Dias (≥ 90 Dias)", acima_90)
+        ca4.metric("⛔ Grave, Chamados Ativos a Mais de um ano (≥ 1 Ano)", acima_365)
         
         st.divider()
         
         # Tabela Integral da Fila
-        st.markdown("#### 📋 Todos os Chamados Ativos")
+        st.markdown("#### 📋 Tabela de Chamados Ativos")
         
         df_abertos_view = df_abertos[['nr_chamado', 'cliente_nome', 'usuario_epsy', 'atendente_tecnuv', 'status_atual', 'dias_aberto', 'erro_relatado']].copy()
         df_abertos_view.rename(columns={
@@ -308,7 +308,7 @@ with aba2:
             df_abertos_view.style.format({"Dias em Aberto": "{:.0f}"}).background_gradient(cmap='Reds', subset=['Dias em Aberto']), 
             hide_index=True, 
             use_container_width=True,
-            height=600 # Dá mais espaço vertical para ler
+            height=600
         )
 
 # ------------------------------------------
@@ -320,7 +320,7 @@ with aba3:
     df_ver = df[~df['versao_sistema'].isin(["Não Informada", "Não Informado", ""])].copy()
     
     if df_ver.empty:
-        st.info("Aguardando o robô extrair as versões dos chamados.")
+        st.info("O WikiSuporte não conseguiu identificar as versões dos sistemas nos chamados.")
     else:
         v1, v2 = st.columns([1, 1])
         
@@ -331,13 +331,13 @@ with aba3:
             st.plotly_chart(px.bar(versoes, x='Volume', y='Versão', orientation='h', color='Volume', color_continuous_scale='Reds'), use_container_width=True)
             
         with v2:
-            st.markdown("#### Eficiência da Desenvolvedora")
+            st.markdown("#### Tempo Médio até a 1ª Liberação da Desenvolvedora")
             tma_dev = df['tempo_ate_liberacao_dias'].mean()
-            st.metric("Tempo Médio até a 1ª Liberação da Tecnuv", f"{tma_dev:.1f} Dias" if pd.notna(tma_dev) else "N/A", help="Diferença entre a data de abertura e a primeira vez que a Tecnuv posta a mensagem de liberação.")
+            st.metric("Tempo Médio (Dias)", f"{tma_dev:.1f} Dias" if pd.notna(tma_dev) else "N/A", help="Tempo médio entre a abertura do chamado e a primeira liberação da desenvolvedora, indicando a agilidade na resposta inicial.")
             
         st.divider()
-        st.markdown("#### 🔍 Detalhamento de Erros por Versão")
-        st.markdown("Agrupamento dos chamados mostrando a Versão e o Assunto/Motivo específico relatado.")
+        st.markdown("#### 🔍 Detalhamento de Versões")
+        st.markdown("Visualize os chamados organizados por versão do sistema, com número, cliente e resumo do erro, facilitando a identificação rápida de padrões e problemas recorrentes em cada release.")
         
         # Cria a tabela exploratória Versão + Erro
         df_ver['Erro Resumido'] = df_ver['erro_relatado'].str[:150] + "..."
@@ -349,26 +349,26 @@ with aba3:
 # ABA 4: PERFORMANCE EPSY & OFENSORES
 # ------------------------------------------
 with aba4:
-    st.subheader("👥 Analistas EPSY & Clientes (Taxa de Demanda)")
+    st.subheader("👥 Análise de Performance")
     
     df_epsy = df[~df['usuario_epsy'].isin(["Não Informado", "Não Informada", ""])].copy()
     
     e1, e2 = st.columns([1, 1])
     
     with e1:
-        st.markdown("#### Ranking de Abertura (Analistas EPSY)")
+        st.markdown("#### 👤 Chamados Abertos por Analista EPSY")
         if df_epsy.empty:
-            st.info("Nomes dos Analistas EPSY não identificados.")
+            st.info("O WikiSuporte não conseguiu identificar os analistas EPSY responsáveis pelos chamados.")
         else:
             analistas = df_epsy["usuario_epsy"].value_counts().reset_index()
             analistas.columns = ['Analista EPSY', 'Volume de Chamados Abertos']
             st.plotly_chart(px.bar(analistas, x='Volume de Chamados Abertos', y='Analista EPSY', orientation='h', color='Volume de Chamados Abertos', color_continuous_scale='Blues'), use_container_width=True)
             
     with e2:
-        st.markdown("#### 🏢 Clientes Ofensores (Instabilidade)")
+        st.markdown("#### 🏢 Chamados Abertos por Cliente")
         df_cli = df[~df['cliente_nome'].isin(["Não Informado", "Não Informada", ""])]
         if df_cli.empty:
-            st.info("Nomes dos clientes não identificados.")
+            st.info("O WikiSuporte não conseguiu identificar os clientes nos chamados.")
         else:
             # Mostra o Cliente, o total e quantos estão em aberto
             clientes_agg = df_cli.groupby('cliente_nome').agg(
