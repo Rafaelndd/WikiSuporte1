@@ -91,160 +91,206 @@ if st.session_state['autenticado']:
 # 5. TELAS (VIEWS) DO SISTEMA
 # ==========================================
 def tela_login() -> None:
-    """Interface de Login (Com bloqueio de menu lateral)."""
-    # Esconde as páginas do menu lateral para quem não tem login
-    st.markdown("""<style>[data-testid="stSidebarNav"] {display: none;}</style>""", unsafe_allow_html=True)
+    """Interface de Login Segura e Centralizada."""
+    
+    # 🚨 MÁSCARA DE SEGURANÇA MÁXIMA: Oculta completamente a barra lateral e o botão de expandir
+    st.markdown("""
+        <style>
+            [data-testid="collapsedControl"] {display: none;}
+            [data-testid="stSidebar"] {display: none;}
+        </style>
+    """, unsafe_allow_html=True)
 
-    with st.sidebar:
-        try: 
-            c_side1, c_side2, c_side3 = st.columns([1, 2, 1])
-            with c_side2:
-                st.image("mascote/psy_braco_cruzado_aposto.png", width=150)
-        except: pass
-        
-        st.markdown("## 👋 Bem-vindo(a) ao WikiSuporte")
-        st.info("**Versão 1.0 - Beta**\n\nDesenvolvido para analistas de suporte e gestores do suporte")
-        
-        st.markdown("### 🤖 O que é a WikiSuporte?")
-        st.markdown("A WikiSuporte centraliza informações e organiza atendimentos, ajudando a equipe de suporte a trabalhar com mais agilidade, controle e qualidade no atendimento ao cliente.")
-        
+    # Espaçamento no topo
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    
+    # Layout em 3 colunas para centralizar o formulário no meio da tela
+    col_vazia1, col_centro, col_vazia2 = st.columns([1, 1.5, 1])
+
+    with col_centro:
+        # 1. ÁREA DE BRANDING (Logotipo e Título)
+        c_img1, c_img2, c_img3 = st.columns([1, 2, 1])
+        with c_img2:
+            try:
+                st.image("mascote/psy_no_dashbsoard.png", use_container_width=True)
+            except: pass
+            
+        st.markdown("<h2 style='text-align: center;'>WikiSuporte</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: gray;'>Gestão e Centralização de Atendimentos</p>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # 2. CAIXA DO FORMULÁRIO (Card com borda)
+        with st.container(border=True):
+            st.markdown("<h4 style='text-align: center;'>🔐 Acesso Restrito</h4>", unsafe_allow_html=True)
+            
+            with st.form("form_login"):
+                usuario = st.text_input("👤 Usuário", placeholder="Insira o seu nome de usuário")
+                senha = st.text_input("🔑 Senha", type="password", placeholder="••••••••")
+                st.markdown("<br>", unsafe_allow_html=True)
+                btn_login = st.form_submit_button("Acessar Sistema", type="primary", use_container_width=True)
+                
+            if btn_login:
+                if usuario and senha:
+                    sucesso, user_id, user_perfil = verificar_login(usuario, senha)
+                    if sucesso:
+                        st.session_state['autenticado'] = True
+                        st.session_state['usuario_id'] = user_id
+                        st.session_state['usuario_nome'] = usuario
+                        st.session_state['perfil'] = user_perfil 
+                        st.session_state['termos_aceitos'] = verificar_aceite_termos(user_id)
+                        st.session_state['ultimo_acesso'] = datetime.now() 
+                        
+                        registrar_log_auditoria(user_id, "LOGIN", "Usuário autenticou-se com sucesso.")
+                        st.success("✅ Login bem-sucedido! Redirecionando...")
+                        st.rerun() 
+                    else:
+                        st.error("❌ Usuário ou senha incorretos. Por favor, tente novamente.")
+                else:
+                    st.warning("⚠️ Por favor, preencha ambos os campos de usuário e senha.")
+
+        # 3. PENSAMENTO DO DIA (Rodapé)
+        st.markdown("<br>", unsafe_allow_html=True)
         frases = [
             "“Conhecereis a verdade, e a verdade vos libertará.” — Jesus Cristo",
             "“A persistência realiza o impossível.” — Confúcio",
-            "“Só sei que nada sei.” — Sócrates",
             "“A qualidade nunca é um acidente; é sempre o resultado de um esforço inteligente.” — John Ruskin",
             "“Você não precisa ser grande para começar, mas precisa começar para ser grande.” — Zig Ziglar",
-            "“A educação é a arma mais poderosa que você pode usar para mudar o mundo.” — Nelson Mandela",
             "“O sucesso é a soma de pequenos esforços repetidos dia após dia.” — Robert Collier",
-            "“A melhor maneira de prever o futuro é criá-lo.” — Peter Drucker",
             "“O trabalho em equipe é o combustível que permite a pessoas comuns alcançarem resultados incomuns.” — Andrew Carnegie",
-            "“Aprender é a única coisa de que a mente nunca se cansa.” — Leonardo da Vinci",
-            "“A disciplina é a ponte entre metas e realizações.” — Jim Rohn",
-            "“Se vi mais longe, foi por estar sobre ombros de gigantes.” — Isaac Newton",
-            "“Grandes realizações são possíveis quando se dá importância aos pequenos começos.” — Lao Tsé",
-            "“O entusiasmo move o mundo.” — Arthur Balfour",
             "“A excelência não é um ato, mas um hábito.” — Aristóteles",
-            "“A união faz a força.” — Esopo",
-            "“O homem que move montanhas começa carregando pequenas pedras.” — Confúcio",
-            "“Nunca é tarde para ser aquilo que se poderia ter sido.” — George Eliot",
             "“A única maneira de fazer um excelente trabalho é amar o que você faz.” — Steve Jobs",
-            "“A paciência e a perseverança têm o efeito mágico de fazer as dificuldades desaparecerem.” — John Quincy Adams",
-            "“O aprendizado contínuo é o mínimo requisito para o sucesso.” — Brian Tracy",
-            "“Quem quer fazer algo encontra um meio; quem não quer encontra uma desculpa.” — Benjamin Franklin",
-            "“A força não provém da capacidade física, mas de uma vontade indomável.” — Mahatma Gandhi",
-            "“Não encontre defeitos, encontre soluções.” — Henry Ford",
-            "“O sucesso normalmente vem para quem está ocupado demais para procurar por ele.” — Henry David Thoreau",
-            "“O talento vence jogos, mas o trabalho em equipe ganha campeonatos.” — Michael Jordan",
-            "“A simplicidade é o último grau de sofisticação.” — Leonardo da Vinci",
-            "“Você se torna aquilo que acredita.” — Oprah Winfrey",
-            "“Coragem é resistência ao medo, domínio do medo, e não ausência do medo.” — Mark Twain",
-            "“A melhoria contínua é melhor do que a perfeição adiada.” — Mark Twain"
+            "“O talento vence jogos, mas o trabalho em equipe ganha campeonatos.” — Michael Jordan"
         ]
         st.success(f"💡 **Pensamento do dia:**\n\n_{random.choice(frases)}_")
-        st.divider()
-        st.caption("© 2026 WikiSuporte — Plataforma de gestão e centralização de atendimentos de suporte, desenvolvida por Rafael D. Nascimento. Todos os direitos reservados.")
-
-    # Formulário centralizado
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.write("")
-        st.write("")
-        c_login1, c_login2, c_login3 = st.columns([1, 2, 1])
-        with c_login2:
-            st.image("mascote/psy_no_dashbsoard.png", width=200)
-        st.markdown("<h1 style='text-align: center;'>🔐 WikiSuporte - Login</h1>", unsafe_allow_html=True)
-        
-        with st.form("form_login"):
-            usuario = st.text_input("👤 Usuário", placeholder="Insira o seu nome de usuário")
-            senha = st.text_input("🔑 Senha", type="password")
-            btn_login = st.form_submit_button("Acessar", use_container_width=True)
-            
-        if btn_login:
-            if usuario and senha:
-                sucesso, user_id, user_perfil = verificar_login(usuario, senha)
-                if sucesso:
-                    st.session_state['autenticado'] = True
-                    st.session_state['usuario_id'] = user_id
-                    st.session_state['usuario_nome'] = usuario
-                    st.session_state['perfil'] = user_perfil 
-                    st.session_state['termos_aceitos'] = verificar_aceite_termos(user_id)
-                    st.session_state['ultimo_acesso'] = datetime.now() 
-                    
-                    registrar_log_auditoria(user_id, "LOGIN", "Usuário autenticou-se com sucesso.")
-                    st.success("Login bem-sucedido! Redirecionando...")
-                    st.rerun() 
-                else:
-                    st.error("Usuário ou senha incorretos. Por favor, tente novamente.")
-            else:
-                st.warning("Por favor, preencha ambos os campos de usuário e senha para acessar o sistema.")
+        st.caption("© 2026 WikiSuporte — Desenvolvido por Rafael D. Nascimento.")
 
 def tela_termos_uso() -> None:
     """Tela de bloqueio LGPD. O utilizador não passa daqui sem aceitar."""
-    st.markdown("""<style>[data-testid="stSidebar"] {display: none;}</style>""", unsafe_allow_html=True)
-    
-    st.title("WikiSuporte - Termo de Uso e Confidencialidade 📜")
-    st.warning("⚠️ **Atenção:** Ambiente restrito e protegido. O acesso e uso deste sistema estão condicionados às políticas de confidencialidade e proteção de dados vigentes. Leia atentamente antes de prosseguir.")
-    
+    # Oculta a barra lateral também na tela de LGPD
     st.markdown("""
-    ### 📜 Proteção de Dados (LGPD)
-    Este sistema processa dados pessoais e informações estratégicas protegidas pela **Lei Geral de Proteção de Dados (Lei nº 13.709/2018)**.
-    Ao acessar este sistema, WikiSuporte, você assume o compromisso de sigilo:
+        <style>
+            [data-testid="collapsedControl"] {display: none;}
+            [data-testid="stSidebar"] {display: none;}
+        </style>
+    """, unsafe_allow_html=True)
     
-    **1. Confidencialidade**
-    Os dados exibidos (nomes de clientes, históricos e mensagens) são confidenciais. É **terminantemente proibido**:
-    * Partilhar capturas de ecrã (prints) ou credenciais com terceiros.
-    * Armazenar exportações de dados em dispositivos pessoais.
-    
-    **2. Monitorização e Auditoria**
-    Para fins de segurança e *compliance*, **todas as ações realizadas neste sistema são registadas em logs de auditoria**.
-    
-    **3. Responsabilidade**
-    O acesso e uso deste sistema são da sua responsabilidade exclusiva.
-    """)
-    
-    aceito = st.checkbox("Eu li, compreendo e concordo com os termos de uso e confidencialidade descritos acima.")
-    
-    if st.button("Aceitar Termos de Uso", type="primary"):
-        if aceito:
-            st.session_state['termos_aceitos'] = True
-            registrar_log_auditoria(st.session_state.get('usuario_id'), "ACEITE_TERMOS", "Usuário leu e aceitou os termos da LGPD.")
-            st.rerun() 
-        else:
-            st.error("Você deve aceitar os termos de uso para acessar o sistema. Por favor, marque a caixa de seleção para prosseguir.")
+    col_vazia1, col_centro, col_vazia2 = st.columns([1, 3, 1])
+    with col_centro:
+        st.title("📜 Termo de Uso e Confidencialidade")
+        st.warning("⚠️ **Atenção:** Ambiente restrito e protegido. O acesso e uso deste sistema estão condicionados às políticas de confidencialidade vigentes.")
+        
+        with st.container(border=True):
+            st.markdown("""
+            ### Proteção de Dados (LGPD)
+            Este sistema processa dados pessoais e informações estratégicas protegidas pela **Lei nº 13.709/2018**.
+            
+            **1. Confidencialidade**
+            Os dados exibidos são confidenciais. É **terminantemente proibido**:
+            * Partilhar capturas de tela (prints) ou credenciais com terceiros.
+            * Armazenar exportações de dados em dispositivos pessoais.
+            
+            **2. Monitorização e Auditoria**
+            Para fins de segurança, todas as ações realizadas neste sistema são registadas em logs de auditoria.
+            """)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        aceito = st.checkbox("Eu li, compreendo e concordo com os termos de uso e confidencialidade descritos acima.")
+        
+        if st.button("Aceitar Termos e Entrar", type="primary", use_container_width=True):
+            if aceito:
+                st.session_state['termos_aceitos'] = True
+                registrar_log_auditoria(st.session_state.get('usuario_id'), "ACEITE_TERMOS", "Usuário leu e aceitou os termos da LGPD.")
+                st.rerun() 
+            else:
+                st.error("❌ É obrigatório marcar a caixa de seleção para aceitar os termos e prosseguir.")
 
 def tela_home() -> None:
-    """Página Inicial após login e aceite dos termos."""
+    """Hub de Lançamento (Launchpad) interativo Pós-Login."""
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
     perfil_usuario = str(st.session_state.get('perfil', 'analista')).lower()
+    data_atual = datetime.now().strftime("%d/%m/%Y")
     
     # --- CONSTRUÇÃO DA BARRA LATERAL (PÓS-LOGIN) ---
     st.sidebar.markdown(f"## 👤 {nome_usuario}")
     st.sidebar.markdown(f"### {obter_saudacao()}!")
     st.sidebar.caption(f"🛡️ Perfil: **{perfil_usuario.title()}**")
     st.sidebar.divider()
-    if st.sidebar.button("🚪 Sair do Sistema"):
+    if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
         registrar_log_auditoria(st.session_state.get('usuario_id'), "LOGOUT", "Usuário saiu do sistema.")
         st.session_state.clear()
         st.rerun()
     # -----------------------------------------------
 
-    # --- CORPO DA PÁGINA HOME ---
-    st.title(f"{obter_saudacao()}, {nome_usuario}! 👋")
-    st.markdown("---")
-    
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.write("Bem-vindo(a) à WikiSuporte, Uma plataforma de gestão e centralização de atendimentos de suporte, desenvolvida para analistas de suporte e gestores do suporte.")
-        st.write("Utilize o menu lateral para navegar entre as diferentes seções do sistema, como a gestão de clientes, visualização de atendimentos e relatórios de desempenho.")
-        st.info("💡 Dica: Em smartphones ou telas menores, toque no ícone > no canto superior esquerdo para abrir o menu.")
-        
+    # --- CORPO DA PÁGINA (LAUNCHPAD) ---
+    st.markdown(f"<h1>{obter_saudacao()}, {nome_usuario}! 👋</h1>", unsafe_allow_html=True)
+    st.caption(f"📅 Hoje é **{data_atual}** | 🏢 Ambiente Seguro WikiSuporte")
+    st.divider()
 
+    # Layout Principal
+    col_principal, col_lateral = st.columns([2.5, 1])
+
+    with col_principal:
+        st.markdown("### 🚀 O que vamos fazer hoje?")
+        st.write("A WikiSuporte centraliza a nossa operação. Escolha o seu destino abaixo:")
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Cards Visuais de Navegação com Botões Interativos
+        c_card1, c_card2, c_card3 = st.columns(3)
+        
+        with c_card1:
+            with st.container(border=True):
+                st.markdown("#### 🏠 Home")
+                st.caption("Visão geral, comunicados e avisos da equipe.")
+                st.markdown("<br>", unsafe_allow_html=True)
+                # O botão interativo que leva para a página 0
+                if st.button("Ir para Home", key="btn_home", type="primary", use_container_width=True):
+                    st.switch_page("pages/0_🏠_Home_WikiSuporte.py")
+                
+        with c_card2:
+            with st.container(border=True):
+                st.markdown("#### 📊 Dashboards")
+                st.caption("Acompanhe o desempenho da equipe e a telefonia.")
+                st.markdown("<br>", unsafe_allow_html=True)
+                # O botão interativo que leva para a página 1
+                if st.button("Ir para Dashboards", key="btn_dash", type="primary", use_container_width=True):
+                    st.switch_page("pages/1_📊_Dashboard_Atendimentos.py")
+                
+        with c_card3:
+            with st.container(border=True):
+                st.markdown("#### 📁 Importação")
+                st.caption("Alimente o banco de dados e faça a gestão do CRM.")
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # Validação visual de permissão baseada no perfil + Bloqueio do Botão
+                if perfil_usuario in ["desenvolvedor", "coordenação"]:
+                    # O botão interativo que leva para a página 2 (Apenas para gestão)
+                    if st.button("Ir para Importação", key="btn_imp", type="primary", use_container_width=True):
+                        st.switch_page("pages/2_📁_Importacao_Dados.py")
+                else:
+                    st.error("⛔ Acesso Restrito")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Mural de Atualizações
+        with st.container(border=True):
+            st.markdown("#### 📌 Atualizações do Sistema")
+            st.write("✅ **Telefonia:** Filtros de Caixa Postal e Transferências aplicados com sucesso aos KPIs.")
+            st.write("✅ **Segurança:** Anonimização (LGPD) ativa em todas as importações de planilhas.")
+
+    with col_lateral:
+        # Tenta carregar a mascote
+        try:
+            st.image("mascote/psy_braco_cruzado_aposto.png", use_container_width=True)
+        except:
+            pass
+
+        with st.container(border=True):
+            st.markdown("#### 💡 Dica Rápida")
+            st.write("Você também pode usar o menu lateral escondido à esquerda para navegar rapidamente entre as telas sem precisar voltar aqui!")
 
 # ==========================================
 # 6. CONTROLADOR DE FLUXO PRINCIPAL
 # ==========================================
-# A magia acontece aqui: A ordem das verificações define o que o utilizador vê.
-
 if not st.session_state['autenticado']:
     tela_login()
 elif not st.session_state['termos_aceitos']:

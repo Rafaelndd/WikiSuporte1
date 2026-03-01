@@ -121,7 +121,131 @@ if len(datas_selecionadas) == 2:
         df_wpp = df_wpp[(df_wpp['data_inicio'] >= data_inicio) & (df_wpp['data_inicio'] < data_fim)]
 
 # ==========================================
-# 5. CONSTRUÇÃO DAS ABAS PRINCIPAIS (UX UX/UI)
+# 4. TRATAMENTO DE DADOS (WPP & GOTO)
+# ==========================================
+
+# --- TRATAMENTO WHATSAPP ---
+if not df_wpp.empty:
+    df_wpp["TMA_HORAS"] = (df_wpp["data_finalizacao"] - df_wpp["data_inicio"]).dt.total_seconds() / 3600
+    if df_wpp['data_ultima_mensagem'].notna().any():
+        df_wpp["TEMPO_OCIOSO_HORAS"] = (df_wpp["data_finalizacao"] - df_wpp["data_ultima_mensagem"]).dt.total_seconds() / 3600
+    else:
+        df_wpp["TEMPO_OCIOSO_HORAS"] = 0.0
+
+    df_wpp["DIA"] = df_wpp["data_inicio"].dt.date
+    df_wpp["MES"] = df_wpp["data_inicio"].dt.to_period("M").astype(str)
+    df_wpp["HORA"] = df_wpp["data_inicio"].dt.hour
+    df_wpp["DIA_SEMANA"] = df_wpp["data_inicio"].dt.day_name()
+    
+    df_wpp["status"] = df_wpp.get("status", "").fillna("").astype(str)
+    df_wpp["FINALIZADO"] = df_wpp["status"].str.lower().str.contains("finalizado", na=False)
+    
+    # Prevenção caso a variável sla_finalizacao_horas não venha do filtro
+    sla_meta = locals().get('sla_finalizacao_horas', 24)
+    df_wpp["DENTRO_SLA"] = df_wpp["TMA_HORAS"] <= sla_meta
+
+    # SCORE COMPOSTO WPP
+    def normalizar(serie):
+        return (serie - serie.min()) / (serie.max() - serie.min() + 0.0001)
+
+    df_validos = df_wpp.dropna(subset=['atendente'])
+    if not df_validos.empty:
+        score_df = pd.DataFrame({
+            "Volume": df_validos.groupby("atendente").size(),
+            "TMA": df_validos.groupby("atendente")["TMA_HORAS"].mean(),
+            "Avaliacao": df_validos.groupby("atendente")["avaliacao"].mean(),
+            "Finalizacao": df_validos.groupby("atendente")["FINALIZADO"].mean()
+        }).fillna(0)
+        score_df["Score"] = (normalizar(score_df["Volume"]) * 0.30 + (1 - normalizar(score_df["TMA"])) * 0.30 + normalizar(score_df["Avaliacao"]) * 0.20 + normalizar(score_df["Finalizacao"]) * 0.20)
+    else:
+        score_df = pd.DataFrame()
+
+# --- TRATAMENTO TELEFONIA (GOTO) ---
+coluna_agente_tel = None
+
+if not df_tel.empty:
+    colunas_lower = {str(c).lower(): c for c in df_tel.columns}
+    
+    # =======================================================
+    # CORREÇÃO DEFINITIVA: FILTRO DE CAIXA POSTAL / SELF-CALL
+    # =======================================================
+    col_part = next((c for c in colunas_lower.values() if 'participante' in c.lower()), None)
+    
+    if col_part:
+        def is_ligacao_interna(valor):
+            """
+            Verifica se a string tem EXATAMENTE e APENAS o ramal repetido (ex: "5332: 5332").
+            Ignora se houver qualquer outro número, cliente ou transferência depois.
+            """
+            if pd.isna(valor): return False
+            
+            # Limpa espaços e um possível ponto e vírgula esquecido no final
+            texto_limpo = str(valor).strip().strip(';')
+            
+            # 1ª Regra de Segurança: Se tiver o separador de transferências (;), NÃO É caixa postal.
+            if ';' in texto_limpo:
+                return False
+                
+            # Divide o texto pelo sinal de dois pontos
+            partes = [p.strip() for p in texto_limpo.split(':')]
+            
+            # 2ª Regra de Segurança: Tem que ter exatamente 2 partes, elas têm que ser IDÊNTICAS, 
+            # ser compostas só de números, e ter 4 dígitos (formato de ramal).
+            if len(partes) == 2 and partes[0] == partes[1] and partes[0].isdigit() and len(partes[0]) == 4:
+                return True
+                
+            return False
+
+        # Aplica a função linha por linha de forma 100% segura
+        mascara_caixa_postal = df_tel[col_part].apply(is_ligacao_interna)
+        
+        # O símbolo (~) inverte a máscara: Mantém na tabela apenas o que NÃO é ligação interna
+        df_tel = df_tel[~mascara_caixa_postal].copy()
+
+    # Só continua o cálculo de UX e KPIs se a tabela não ficar vazia após o filtro
+    if not df_tel.empty:
+        df_tel['DIA'] = df_tel['data_chamada'].dt.date
+        
+        # 1. Ajuste do Tempo: Milissegundos para Minutos
+        if 'duracao_ms' in colunas_lower:
+            col_real_tempo = colunas_lower['duracao_ms']
+            df_tel['duracao_minutos'] = pd.to_numeric(df_tel[col_real_tempo], errors='coerce').fillna(0) / 60000.0
+        elif 'duracao' in colunas_lower:
+            col_real_tempo = colunas_lower['duracao']
+            df_tel['duracao_minutos'] = pd.to_numeric(df_tel[col_real_tempo], errors='coerce').fillna(0) / 60000.0
+        else:
+            df_tel['duracao_minutos'] = 0.0
+            
+        # 2. TRADUTOR DE STATUS (UX) - Entendendo o comportamento da chamada
+        if 'resultado' in colunas_lower:
+            col_res = colunas_lower['resultado']
+            df_tel['resultado_upper'] = df_tel[col_res].fillna("").astype(str).str.upper()
+            
+            def categorizar_chamada(status):
+                if "SUCESSO" in status: return "Atendida"
+                elif "PERDIDA" in status: return "Perdida (Tocou no Ramal)"
+                elif "PLANO DE DISCAGEM" in status: return "Abandonada na URA"
+                elif "INDETERMINADO" in status: return "Falha Técnica / Cancelada"
+                else: return "Outros"
+                
+            df_tel['Categoria_UX'] = df_tel['resultado_upper'].apply(categorizar_chamada)
+        else:
+            df_tel['Categoria_UX'] = "Não Informado"
+            
+        df_tel['Is_Atendida'] = (df_tel['Categoria_UX'] == "Atendida").astype(int)
+        df_tel['Is_Perdida_Ramal'] = (df_tel['Categoria_UX'] == "Perdida (Tocou no Ramal)").astype(int)
+
+        # 3. Ajuste do Agente Principal
+        if 'nome_analista_epsy' in colunas_lower:
+            coluna_agente_tel = colunas_lower['nome_analista_epsy']
+        elif 'usuario' in colunas_lower:
+            coluna_agente_tel = colunas_lower['usuario']
+            
+        if coluna_agente_tel:
+            df_tel[coluna_agente_tel] = df_tel[coluna_agente_tel].fillna("Não Identificado")
+
+# ==========================================
+# 5. CONSTRUÇÃO DAS ABAS PRINCIPAIS (UX/UI)
 # ==========================================
 aba_geral, aba_wpp, aba_telefonia = st.tabs(["👁️ Visão Unificada", "💬 WhatsApp (Multi360)", "📞 Ligações (GoTo)"])
 
@@ -132,8 +256,8 @@ with aba_geral:
     st.markdown("### 📈 Resumo da Operação")
     st.caption("Visão geral somando os esforços de todos os canais de atendimento.")
     
-    vol_wpp = len(df_wpp)
-    vol_tel = len(df_tel)
+    vol_wpp = len(df_wpp) if 'df_wpp' in locals() else 0
+    vol_tel = len(df_tel) if 'df_tel' in locals() else 0
     total_interacoes = vol_wpp + vol_tel
     
     perc_wpp = (vol_wpp / total_interacoes * 100) if total_interacoes > 0 else 0
@@ -147,8 +271,9 @@ with aba_geral:
     with st.container(border=True):
         c3.metric("Via Telefone", vol_tel, f"{perc_tel:.1f}% do total", delta_color="off")
     
-    tma_wpp_min = df_wpp['TMA_HORAS'].mean() * 60 if not df_wpp.empty else 0
-    tma_tel_min = df_tel['duracao_minutos'].mean() if not df_tel.empty else 0
+    tma_wpp_min = df_wpp['TMA_HORAS'].mean() * 60 if ('df_wpp' in locals() and not df_wpp.empty and 'TMA_HORAS' in df_wpp.columns) else 0
+    tma_tel_min = df_tel['duracao_minutos'].mean() if ('df_tel' in locals() and not df_tel.empty and 'duracao_minutos' in df_tel.columns) else 0
+    
     with st.container(border=True):
         c4.metric("Duração Média (Telefone)", f"{tma_tel_min:.1f} min", "Tempo na linha")
 
@@ -169,13 +294,14 @@ with aba_geral:
         with g2:
             st.markdown("#### Movimento Diário")
             trends = []
-            if not df_wpp.empty:
+            
+            if 'df_wpp' in locals() and not df_wpp.empty and 'DIA' in df_wpp.columns:
                 wpp_trend = df_wpp['DIA'].value_counts().reset_index()
                 wpp_trend.columns = ['Data', 'Volume']
                 wpp_trend['Canal'] = 'WhatsApp'
                 trends.append(wpp_trend)
                 
-            if not df_tel.empty:
+            if 'df_tel' in locals() and not df_tel.empty and 'DIA' in df_tel.columns:
                 tel_trend = df_tel['DIA'].value_counts().reset_index()
                 tel_trend.columns = ['Data', 'Volume']
                 tel_trend['Canal'] = 'Telefone'
@@ -183,7 +309,6 @@ with aba_geral:
                 
             if trends:
                 df_trend = pd.concat(trends)
-                # Trocado para gráfico de Área Suave (mais fácil de ler o volume)
                 fig_trend = px.area(df_trend, x='Data', y='Volume', color='Canal', color_discrete_map={"WhatsApp": "#25D366", "Telefone": "#007BFF"})
                 fig_trend.update_layout(margin=dict(t=20, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig_trend, use_container_width=True)
@@ -193,18 +318,17 @@ with aba_geral:
 # ABA 2: MULTI360 (WHATSAPP)
 # ------------------------------------------
 with aba_wpp:
-    if df_wpp.empty:
-        st.info("Nenhum dado do WhatsApp (Multi360) importado para o período.")
+    if 'df_wpp' not in locals() or df_wpp.empty or 'TMA_HORAS' not in df_wpp.columns:
+        st.info("Nenhum dado válido do WhatsApp (Multi360) importado para o período selecionado.")
     else:
-        # Nomes das abas traduzidos para "Gestorês"
         sub_exec, sub_indiv, sub_qual, sub_oper, sub_estrat = st.tabs(["📌 Resumo da Operação", "👤 Análise por Atendente", "⭐ Notas e Qualidade", "⚙️ Horários de Pico", "📊 Carga de Trabalho"])
 
         with sub_exec:
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Total de Conversas", len(df_wpp))
             col2.metric("Tempo Médio (TMA)", f"{round(df_wpp['TMA_HORAS'].mean(), 1)} Horas")
-            col3.metric("No Prazo Ideal (SLA)", f"{round(df_wpp['DENTRO_SLA'].mean()*100, 1)}%")
-            col4.metric("Nota Média dos Clientes", round(df_wpp["avaliacao"].mean(), 2))
+            col3.metric("No Prazo Ideal (SLA)", f"{round(df_wpp['DENTRO_SLA'].mean()*100, 1)}%" if 'DENTRO_SLA' in df_wpp.columns else "N/A")
+            col4.metric("Nota Média dos Clientes", round(df_wpp["avaliacao"].mean(), 2) if 'avaliacao' in df_wpp.columns else "N/A")
 
             st.divider()
             col_g1, col_g2 = st.columns(2)
@@ -217,62 +341,64 @@ with aba_wpp:
                 st.caption("Mostra se a equipa está a demorar mais ou menos tempo a fechar chamados a cada dia.")
                 
             with col_g2:
-                st.markdown("#### 🔥 Dias e Horários mais Críticos")
-                heatmap = df_wpp.pivot_table(index="DIA_SEMANA", columns="HORA", values="protocolo", aggfunc="count").fillna(0)
-                dias_ordem = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                heatmap = heatmap.reindex([d for d in dias_ordem if d in heatmap.index])
-                # Traduzindo dias
-                heatmap.index = heatmap.index.map({'Monday':'Seg', 'Tuesday':'Ter', 'Wednesday':'Qua', 'Thursday':'Qui', 'Friday':'Sex', 'Saturday':'Sáb', 'Sunday':'Dom'})
-                fig_heat = px.imshow(heatmap, aspect="auto", color_continuous_scale='Reds')
-                fig_heat.update_layout(margin=dict(t=20, b=0, l=0, r=0))
-                st.plotly_chart(fig_heat, use_container_width=True)
-                st.caption("Zonas mais escuras indicam o maior volume de mensagens. Ideal para organizar pausas.")
+                if 'DIA_SEMANA' in df_wpp.columns and 'HORA' in df_wpp.columns:
+                    st.markdown("#### 🔥 Dias e Horários mais Críticos")
+                    heatmap = df_wpp.pivot_table(index="DIA_SEMANA", columns="HORA", values="TMA_HORAS", aggfunc="count").fillna(0)
+                    dias_ordem = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    heatmap = heatmap.reindex([d for d in dias_ordem if d in heatmap.index])
+                    heatmap.index = heatmap.index.map({'Monday':'Seg', 'Tuesday':'Ter', 'Wednesday':'Qua', 'Thursday':'Qui', 'Friday':'Sex', 'Saturday':'Sáb', 'Sunday':'Dom'})
+                    fig_heat = px.imshow(heatmap, aspect="auto", color_continuous_scale='Reds')
+                    fig_heat.update_layout(margin=dict(t=20, b=0, l=0, r=0))
+                    st.plotly_chart(fig_heat, use_container_width=True)
+                    st.caption("Zonas mais escuras indicam o maior volume de mensagens. Ideal para organizar pausas.")
 
         with sub_indiv:
-            atendentes_lista = df_wpp["atendente"].dropna().unique().tolist()
-            if atendentes_lista:
-                st.markdown("### Selecione o Analista para visualizar o desempenho:")
-                atendente = st.selectbox("Escolha o membro da equipe:", atendentes_lista, label_visibility="collapsed")
-                df_at = df_wpp[df_wpp["atendente"] == atendente]
+            if 'atendente' in df_wpp.columns:
+                atendentes_lista = df_wpp["atendente"].dropna().unique().tolist()
+                if atendentes_lista:
+                    st.markdown("### Selecione o Analista para visualizar o desempenho:")
+                    atendente = st.selectbox("Escolha o membro da equipe:", atendentes_lista, label_visibility="collapsed")
+                    df_at = df_wpp[df_wpp["atendente"] == atendente]
 
-                with st.container(border=True):
-                    c_at1, c_at2, c_at3, c_at4 = st.columns(4)
-                    c_at1.metric("Conversas Assumidas", len(df_at))
-                    c_at2.metric("Tempo Médio do Analista", f"{round(df_at['TMA_HORAS'].mean(), 1)}h")
-                    c_at3.metric("Tempo sem Resposta", f"{round(df_at['TEMPO_OCIOSO_HORAS'].mean(), 1)}h", help="Tempo que o cliente ficou à espera da última resposta.")
-                    c_at4.metric("Nota de Desempenho", round(score_df.loc[atendente]["Score"] * 100, 1) if atendente in score_df.index else "N/A", "%")
+                    with st.container(border=True):
+                        c_at1, c_at2, c_at3, c_at4 = st.columns(4)
+                        c_at1.metric("Conversas Assumidas", len(df_at))
+                        c_at2.metric("Tempo Médio do Analista", f"{round(df_at['TMA_HORAS'].mean(), 1)}h")
+                        c_at3.metric("Tempo sem Resposta", f"{round(df_at['TEMPO_OCIOSO_HORAS'].mean(), 1)}h" if 'TEMPO_OCIOSO_HORAS' in df_at.columns else "N/A")
+                        c_at4.metric("Nota de Desempenho", round(score_df.loc[atendente]["Score"] * 100, 1) if 'score_df' in locals() and atendente in score_df.index else "N/A", "%")
 
-                c_graf1, c_graf2 = st.columns(2)
-                with c_graf1:
-                    prod_mensal = df_at.groupby("MES").size().reset_index(name="Volume")
-                    fig_prod = px.bar(prod_mensal, x="MES", y="Volume", title="Volume de Atendimentos por Mês", color_discrete_sequence=['#25D366'])
-                    st.plotly_chart(fig_prod, use_container_width=True)
-                with c_graf2:
-                    # Trocado o Scatter confuso por um Histograma das notas
-                    fig_notas = px.histogram(df_at, x="avaliacao", nbins=5, title="Frequência de Notas Recebidas", color_discrete_sequence=['#FFC107'])
-                    st.plotly_chart(fig_notas, use_container_width=True)
-                    st.caption("Quantas vezes o cliente deu nota 5, 4, etc.")
+                    c_graf1, c_graf2 = st.columns(2)
+                    with c_graf1:
+                        if 'MES' in df_at.columns:
+                            prod_mensal = df_at.groupby("MES").size().reset_index(name="Volume")
+                            fig_prod = px.bar(prod_mensal, x="MES", y="Volume", title="Volume de Atendimentos por Mês", color_discrete_sequence=['#25D366'])
+                            st.plotly_chart(fig_prod, use_container_width=True)
+                    with c_graf2:
+                        if 'avaliacao' in df_at.columns:
+                            fig_notas = px.histogram(df_at, x="avaliacao", nbins=5, title="Frequência de Notas Recebidas", color_discrete_sequence=['#FFC107'])
+                            st.plotly_chart(fig_notas, use_container_width=True)
+                            st.caption("Quantas vezes o cliente deu nota 5, 4, etc.")
 
         with sub_qual:
-            col_q1, col_q2 = st.columns([1, 1.5])
-            with col_q1:
-                st.markdown("#### 🏆 Ranking de Notas")
-                ranking_nota = df_wpp.groupby("atendente")["avaliacao"].mean().sort_values(ascending=False).reset_index()
-                st.dataframe(ranking_nota.style.format({'avaliacao': "{:.1f}"}), use_container_width=True, hide_index=True)
-            with col_q2:
-                # Trocado o Scatter por um Gráfico de Barras claro
-                fig_rank_notas = px.bar(ranking_nota, x="avaliacao", y="atendente", orientation='h', title="Média de Avaliação por Analista", color='avaliacao', color_continuous_scale='Greens')
-                fig_rank_notas.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
-                st.plotly_chart(fig_rank_notas, use_container_width=True)
+            if 'avaliacao' in df_wpp.columns and 'atendente' in df_wpp.columns:
+                col_q1, col_q2 = st.columns([1, 1.5])
+                with col_q1:
+                    st.markdown("#### 🏆 Ranking de Notas")
+                    ranking_nota = df_wpp.groupby("atendente")["avaliacao"].mean().sort_values(ascending=False).reset_index()
+                    st.dataframe(ranking_nota.style.format({'avaliacao': "{:.1f}"}), use_container_width=True, hide_index=True)
+                with col_q2:
+                    fig_rank_notas = px.bar(ranking_nota, x="avaliacao", y="atendente", orientation='h', title="Média de Avaliação por Analista", color='avaliacao', color_continuous_scale='Greens')
+                    fig_rank_notas.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
+                    st.plotly_chart(fig_rank_notas, use_container_width=True)
 
         with sub_oper:
             co1, co2 = st.columns(2)
             with co1:
-                vol_hora = df_wpp.groupby("HORA").size().reset_index(name="Volume")
-                fig_hora = px.bar(vol_hora, x="HORA", y="Volume", color='Volume', color_continuous_scale='Blues', title="Volume Total por Hora do Dia")
-                st.plotly_chart(fig_hora, use_container_width=True)
+                if 'HORA' in df_wpp.columns:
+                    vol_hora = df_wpp.groupby("HORA").size().reset_index(name="Volume")
+                    fig_hora = px.bar(vol_hora, x="HORA", y="Volume", color='Volume', color_continuous_scale='Blues', title="Volume Total por Hora do Dia")
+                    st.plotly_chart(fig_hora, use_container_width=True)
             with co2:
-                # Trocado o BoxPlot (Outliers) por um Histograma intuitivo
                 fig_hist_tma = px.histogram(df_wpp, x="TMA_HORAS", nbins=20, title="Quanto tempo demoram os chamados?", color_discrete_sequence=['#EF553B'])
                 fig_hist_tma.update_layout(xaxis_title="Horas para Finalizar", yaxis_title="Quantidade de Chamados")
                 st.plotly_chart(fig_hist_tma, use_container_width=True)
@@ -286,68 +412,139 @@ with aba_wpp:
                     fig_dept = px.bar(dept, x="TMA_HORAS", y="departamento", orientation='h', title="Qual setor demora mais a resolver?", color='TMA_HORAS', color_continuous_scale='Reds')
                     st.plotly_chart(fig_dept, use_container_width=True)
             with ce2:
-                pareto = df_wpp["atendente"].value_counts().reset_index().head(10)
-                pareto.columns = ["Analista", "Volume"]
-                fig_pareto = px.bar(pareto, x="Analista", y="Volume", title="Quem atende mais clientes? (Top 10 Volume)", color='Volume', color_continuous_scale='Purples')
-                st.plotly_chart(fig_pareto, use_container_width=True)
+                if 'atendente' in df_wpp.columns:
+                    pareto = df_wpp["atendente"].value_counts().reset_index().head(10)
+                    pareto.columns = ["Analista", "Volume"]
+                    fig_pareto = px.bar(pareto, x="Analista", y="Volume", title="Quem atende mais clientes? (Top 10 Volume)", color='Volume', color_continuous_scale='Purples')
+                    st.plotly_chart(fig_pareto, use_container_width=True)
 
 # ------------------------------------------
 # ABA 3: TELEFONIA (GOTO)
 # ------------------------------------------
 with aba_telefonia:
-    if df_tel.empty:
-        st.info("Nenhum dado de ligações (GoTo) importado para o período.")
+    if 'df_tel' not in locals() or df_tel.empty or 'duracao_minutos' not in df_tel.columns:
+        st.info("Nenhum dado válido de ligações (GoTo) importado para o período selecionado.")
     else:
-        tab_tel_geral, tab_tel_agentes = st.tabs(["📌 Resumo de Ligações", "👤 Desempenho da Equipe"])
+        tab_tel_geral, tab_tel_agentes = st.tabs(["📌 Resumo de Ligações e Status", "👤 Desempenho da Equipe e Transferências"])
         
         with tab_tel_geral:
-            st.markdown("### 📞 Métricas Globais de Voz")
+            st.markdown("### 📞 Raio-X das Ligações")
+            st.caption("Entenda não apenas quantas ligações recebemos, mas o que aconteceu com cada uma delas.")
+            
+            # Cálculos dos novos KPIs baseados no status real
+            vol_total = len(df_tel)
+            vol_atendidas = df_tel['Is_Atendida'].sum() if 'Is_Atendida' in df_tel.columns else 0
+            vol_perdidas_ramal = df_tel['Is_Perdida_Ramal'].sum() if 'Is_Perdida_Ramal' in df_tel.columns else 0
+            vol_ura = len(df_tel[df_tel['Categoria_UX'] == "Abandonada na URA"]) if 'Categoria_UX' in df_tel.columns else 0
             
             with st.container(border=True):
-                t_col1, t_col2, t_col3 = st.columns(3)
-                t_col1.metric("Total de Ligações", len(df_tel))
-                t_col2.metric("Duração Média por Chamada", f"{df_tel['duracao_minutos'].mean():.1f} minutos")
-                
-                total_horas_linha = df_tel['duracao_minutos'].sum() / 60
-                t_col3.metric("Tempo Total ao Telefone", f"{total_horas_linha:.1f} Horas", "Esforço da equipe")
+                t_col1, t_col2, t_col3, t_col4 = st.columns(4)
+                t_col1.metric("Total de Entradas", vol_total, "No PABX")
+                t_col2.metric("✅ Atendidas", vol_atendidas, f"{(vol_atendidas/vol_total*100):.1f}%" if vol_total > 0 else "0%", delta_color="normal")
+                t_col3.metric("⚠️ Perdidas no Ramal", vol_perdidas_ramal, "Tocou e foi ignorada", delta_color="inverse")
+                t_col4.metric("🚪 Abandonadas na URA", vol_ura, "Desistiu no Menu", delta_color="inverse")
             
             st.divider()
             
-            df_vol_dia_tel = df_tel['DIA'].value_counts().sort_index().reset_index()
-            df_vol_dia_tel.columns = ['Data', 'Volume']
-            fig_linha_tel = px.area(df_vol_dia_tel, x='Data', y='Volume', title="Fluxo Diário de Ligações", color_discrete_sequence=['#007BFF'])
-            fig_linha_tel.update_layout(margin=dict(t=30, b=0, l=0, r=0))
-            st.plotly_chart(fig_linha_tel, use_container_width=True)
+            cg_tel1, cg_tel2 = st.columns([2, 1.5])
+            
+            with cg_tel1:
+                if 'DIA' in df_tel.columns:
+                    df_vol_dia_tel = df_tel['DIA'].value_counts().sort_index().reset_index()
+                    df_vol_dia_tel.columns = ['Data', 'Volume']
+                    fig_linha_tel = px.area(df_vol_dia_tel, x='Data', y='Volume', title="Fluxo Diário de Entradas", color_discrete_sequence=['#007BFF'])
+                    fig_linha_tel.update_layout(margin=dict(t=30, b=0, l=0, r=0))
+                    st.plotly_chart(fig_linha_tel, use_container_width=True)
+            
+            with cg_tel2:
+                if 'Categoria_UX' in df_tel.columns:
+                    df_status = df_tel['Categoria_UX'].value_counts().reset_index()
+                    df_status.columns = ['Status', 'Quantidade']
+                    
+                    # Paleta de cores semântica (Verde=Sucesso, Vermelho=Perdida, Laranja=URA, Cinza=Erro)
+                    cores_status = {"Atendida": "#25D366", "Perdida (Tocou no Ramal)": "#EF553B", "Abandonada na URA": "#FFA15A", "Falha Técnica / Cancelada": "#B6E880", "Outros": "#AB63FA"}
+                    
+                    fig_status = px.pie(df_status, values='Quantidade', names='Status', hole=0.45, title="Desfecho das Chamadas", color='Status', color_discrete_map=cores_status)
+                    fig_status.update_layout(margin=dict(t=30, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                    fig_status.update_traces(textposition='inside', textinfo='percent')
+                    st.plotly_chart(fig_status, use_container_width=True)
 
         with tab_tel_agentes:
             if coluna_agente_tel:
-                st.markdown("### 👤 Produtividade ao Telefone")
-                
+                # Agrupamento Master com todos os dados
                 df_agentes_tel = df_tel.groupby(coluna_agente_tel).agg(
-                    Volume=('DIA', 'count'),
+                    Total_Direcionado=('DIA', 'count'),
+                    Atendidas=('Is_Atendida', 'sum'),
+                    Perdidas_Ramal=('Is_Perdida_Ramal', 'sum'),
                     TMA_Minutos=('duracao_minutos', 'mean'),
                     Tempo_Total_Minutos=('duracao_minutos', 'sum')
-                ).reset_index().sort_values('Volume', ascending=False)
+                ).reset_index().sort_values('Atendidas', ascending=False)
+                
+                # --- A MÁGICA DA SEPARAÇÃO (Sem quebrar o código) ---
+                # Identifica rótulos que NÃO SÃO analistas usando palavras-chave do nosso script do banco
+                termos_sistema = ['Transferência', 'Ramal', 'Sistema', 'Abandono', 'Não Identificado', 'Retenção']
+                mascara_sistema = df_agentes_tel[coluna_agente_tel].astype(str).str.contains('|'.join(termos_sistema), case=False, na=False)
+                
+                # Divide o Dataframe em dois: Um só de Pessoas, outro só de Rotas/Sistemas
+                df_equipe_real = df_agentes_tel[~mascara_sistema].copy()
+                df_sistema_rotas = df_agentes_tel[mascara_sistema].copy()
+                
+                # ----------------------------------------------------
+                # BLOCO 1: APENAS A EQUIPE REAL (Analistas)
+                # ----------------------------------------------------
+                st.markdown("### 👤 Desempenho Real da Equipe")
+                st.caption("Visão isolada dos analistas. Veja claramente os atendimentos efetivos separados das chamadas não atendidas.")
                 
                 c_tel1, c_tel2 = st.columns(2)
-                
                 with c_tel1:
-                    fig_tel_vol = px.bar(df_agentes_tel.head(10), x='Volume', y=coluna_agente_tel, orientation='h', title="Top 10: Quem faz mais ligações?", color='Volume', color_continuous_scale='Blues')
+                    fig_tel_vol = px.bar(df_equipe_real.head(10), x='Atendidas', y=coluna_agente_tel, orientation='h', title="Top 10: Atendimentos Efetivos", color='Atendidas', color_continuous_scale='Blues')
                     fig_tel_vol.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
                     st.plotly_chart(fig_tel_vol, use_container_width=True)
-                    
                 with c_tel2:
-                    df_tma_agente = df_agentes_tel.sort_values('TMA_Minutos', ascending=False).head(10)
-                    fig_tel_tma = px.bar(df_tma_agente, x='TMA_Minutos', y=coluna_agente_tel, orientation='h', title="Top 10: Quem tem as ligações mais longas?", color='TMA_Minutos', color_continuous_scale='Reds')
-                    fig_tel_tma.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
-                    st.plotly_chart(fig_tel_tma, use_container_width=True)
+                    df_perdidas = df_equipe_real.sort_values('Perdidas_Ramal', ascending=False).head(10)
+                    fig_tel_perd = px.bar(df_perdidas, x='Perdidas_Ramal', y=coluna_agente_tel, orientation='h', title="🚨 Alerta: Chamadas Não Atendidas", color='Perdidas_Ramal', color_continuous_scale='Reds')
+                    fig_tel_perd.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
+                    st.plotly_chart(fig_tel_perd, use_container_width=True)
                 
-                st.markdown("#### 📋 Dados Detalhados por Analista")
-                # Renomeando colunas do dataframe para exibição
-                df_exibicao_tel = df_agentes_tel.rename(columns={coluna_agente_tel: "Analista", "TMA_Minutos": "Duração Média (Min)", "Tempo_Total_Minutos": "Horas Totais na Linha"})
-                df_exibicao_tel['Horas Totais na Linha'] = df_exibicao_tel['Horas Totais na Linha'] / 60
-                st.dataframe(df_exibicao_tel.style.format({'Duração Média (Min)': "{:.1f}", 'Horas Totais na Linha': "{:.1f}h"}), use_container_width=True, hide_index=True)
-            else:
-                st.info("O sistema não conseguiu identificar o nome dos agentes no arquivo do GoTo. Verifique se as colunas estão corretas.")
+                st.markdown("#### 📋 Produtividade por Analista")
+                # Prepara os nomes das colunas com extrema clareza
+                df_exibicao_equipe = df_equipe_real.rename(columns={
+                    coluna_agente_tel: "Analista", 
+                    "Total_Direcionado": "Chamadas Direcionadas",
+                    "Atendidas": "Atendimentos Efetivos",
+                    "Perdidas_Ramal": "Não Atendeu (Perdidas)",
+                    "TMA_Minutos": "Duração Média (Min)", 
+                    "Tempo_Total_Minutos": "Horas Totais na Linha"
+                })
+                df_exibicao_equipe['Horas Totais na Linha'] = df_exibicao_equipe['Horas Totais na Linha'] / 60
+                
+                st.dataframe(df_exibicao_equipe.style.format({
+                    'Duração Média (Min)': "{:.1f}", 
+                    'Horas Totais na Linha': "{:.1f}h"
+                }).background_gradient(subset=['Não Atendeu (Perdidas)'], cmap='Reds'), use_container_width=True, hide_index=True)
 
-registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD", "Acessou o dashboard de atendimentos Multi360 e Goto")
+                # ----------------------------------------------------
+                # BLOCO 2: APENAS SISTEMA E TRANSFERÊNCIAS
+                # ----------------------------------------------------
+                if not df_sistema_rotas.empty:
+                    st.divider()
+                    st.markdown("### 🔄 Monitoramento de Transferências e Sistema")
+                    st.caption("Volume de chamadas que ficaram no limbo de transferências, caíram na URA ou tocaram em ramais em análise.")
+                    
+                    df_exibicao_rotas = df_sistema_rotas.rename(columns={
+                        coluna_agente_tel: "Origem / Status do Sistema", 
+                        "Total_Direcionado": "Total de Registros"
+                    })
+                    
+                    # Removemos as colunas de TMA e Atendidas porque não fazem sentido para transferências
+                    df_exibicao_rotas = df_exibicao_rotas[["Origem / Status do Sistema", "Total de Registros"]]
+                    
+                    st.dataframe(df_exibicao_rotas, use_container_width=True, hide_index=True)
+
+            else:
+                st.info("O sistema não conseguiu identificar o nome dos agentes no arquivo do GoTo.")
+
+try:
+    registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD", "Acessou o dashboard de atendimentos Multi360 e Goto")
+except:
+    pass
