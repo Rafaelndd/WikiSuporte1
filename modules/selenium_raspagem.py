@@ -141,63 +141,39 @@ class OraculoBot:
             return False
 
     def configurar_filtros(self):
-        """
-        Ajusta paginação e aplica os status um a um para evitar bugs do site.
-        """
-        try:
-            self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
-            
-            # Limpeza de Filtros/Cache
+            """
+            Nova Lógica (Smart Scrape): Não aplica filtros de status! 
+            Apenas limpa a tela para pegar a visão nativa de "Ativos" da Tecnuv e aplica paginação 500.
+            """
             try:
-                btn_limpar = WebDriverWait(self.driver, 3).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "a.limpa_filtros"))
-                )
-                btn_limpar.click()
-                time.sleep(2)
-            except TimeoutException:
-                pass
-
-            # Paginação 500
-            try:
-                select_pag = self.driver.find_element(By.XPATH, "//select[contains(@name, 'per_page')]")
-                select_pag.click()
-                self.driver.find_element(By.XPATH, "//option[@value='500']").click()
-                time.sleep(1)
-            except: pass 
-
-            # Seleção de Status (Lista Conversada)
-            btn_status = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@title='Status']")))
-            btn_status.click()
-            time.sleep(1) 
-
-            status_desejados = [
-                "Em aberto", "Encerrado", "Cancelado", "Em analise", 
-                "Pendente representante", "Pendente tecnuv", "Em Desenvolvimento", 
-                "Em Fila de Desenvolvimento", "Em Andamento", 
-                "Aguardando Liberacao de Versao", "Aguardando Avaliacao", 
-                "Enviado Para Qualidade", "Retorno Qualidade"
-            ]
-            
-            checkboxes = self.driver.find_elements(By.XPATH, "//ul[contains(@class, 'multiselect-container')]//input[@type='checkbox']")
-            
-            for check in checkboxes:
-                valor_exato = check.get_attribute("value")
-                if valor_exato == "multiselect-all": continue 
+                self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
                 
-                is_selected = check.is_selected()
-                if valor_exato in status_desejados and not is_selected:
-                    check.find_element(By.XPATH, "./parent::label").click()
-                elif valor_exato not in status_desejados and is_selected:
-                    check.find_element(By.XPATH, "./parent::label").click()
-            
-            btn_status.click()
-            self.driver.find_element(By.ID, "btnBusca").click()
-            logging.info("Filtros aplicados com sucesso.")
-            time.sleep(5) 
-            return True
-        except Exception as e:
-            logging.error(f"Erro ao configurar filtros: {e}")
-            return False
+                # Limpeza de Filtros/Cache
+                try:
+                    btn_limpar = WebDriverWait(self.driver, 3).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, "a.limpa_filtros"))
+                    )
+                    btn_limpar.click()
+                    time.sleep(2)
+                except TimeoutException:
+                    pass
+
+                # Paginação 500
+                try:
+                    select_pag = self.driver.find_element(By.XPATH, "//select[contains(@name, 'per_page')]")
+                    select_pag.click()
+                    self.driver.find_element(By.XPATH, "//option[@value='500']").click()
+                    time.sleep(1)
+                except: pass 
+
+                # Apenas clica em Buscar para garantir que a tabela carregue
+                self.driver.find_element(By.ID, "btnBusca").click()
+                logging.info("Filtros limpos. O PSY está visualizando a fila nativa de Ativos da Tecnuv.")
+                time.sleep(5) 
+                return True
+            except Exception as e:
+                logging.error(f"Erro ao configurar filtros: {e}")
+                return False
 
     def varrer_tabela(self):
         """
@@ -221,10 +197,6 @@ class OraculoBot:
                     try:
                         tds = linha.find_elements(By.TAG_NAME, "td")
                         
-                        # ==========================================
-                        # 🛡️ CORREÇÃO 1: A VACINA DE ÍNDICES
-                        # Para acessar tds[10], a linha precisa ter no mínimo 11 elementos!
-                        # ==========================================
                         if len(tds) < 11: 
                             continue
                         
@@ -233,7 +205,6 @@ class OraculoBot:
                         if "TECNUV SISTEMAS" in cliente_tabela.upper():
                             continue
                         
-                        # Pega o número diretamente da 1ª coluna
                         nr_chamado_str = tds[0].text.strip()
                         if not nr_chamado_str.isdigit():
                             continue 
@@ -241,28 +212,17 @@ class OraculoBot:
                         nr_chamado = int(nr_chamado_str)
                         link = f"https://postogestor.com.br/helpdesk/sistema/tecnuv/editar/id/{nr_chamado}"
                         
-                        # ==========================================
-                        # 🛡️ CORREÇÃO 2: O PREDADOR DE DATAS (RegEx)
-                        # ==========================================
                         data_alt_web = None
                         try:
                             html_coluna_10 = tds[10].get_attribute("innerHTML")
                             if "dcontexto" in html_coluna_10:
                                 import re
                                 from datetime import datetime
-                                
-                                # Caça qualquer data/hora no formato dd/mm/yyyy hh:mm:ss (ou sem segundos)
                                 datas_encontradas = re.findall(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}(?::\d{2})?)', html_coluna_10)
-                                
                                 if datas_encontradas:
-                                    # A "Última Alteração" é geralmente a última data listada no balão
                                     ultima_data_str = datas_encontradas[-1] 
-                                    
-                                    try:
-                                        data_alt_web = datetime.strptime(ultima_data_str, "%d/%m/%Y %H:%M:%S")
-                                    except ValueError:
-                                        # Se a Tecnuv não mandar os segundos, tentamos sem eles
-                                        data_alt_web = datetime.strptime(ultima_data_str, "%d/%m/%Y %H:%M")
+                                    try: data_alt_web = datetime.strptime(ultima_data_str, "%d/%m/%Y %H:%M:%S")
+                                    except ValueError: data_alt_web = datetime.strptime(ultima_data_str, "%d/%m/%Y %H:%M")
                         except Exception as e:
                             logging.warning(f"Falha ao processar a RegEx do chamado {nr_chamado}: {e}")
 
@@ -316,23 +276,17 @@ class OraculoBot:
                     except: pass
 
                     novo = ChamadoTecnuv(
-                        nr_chamado=nr_chamado,
-                        status_atual=item["status_web"],
-                        ultima_alteracao_tecnuv=item["data_alt_web"],
-                        ticket_vinculado=item["ticket_vinculado"],
-                        setor=item["setor"],
-                        situacao=item["situacao"],
-                        prioridade=item["prioridade"],
-                        data_abertura=dt_abertura
+                        nr_chamado=nr_chamado, status_atual=item["status_web"],
+                        ultima_alteracao_tecnuv=item["data_alt_web"], ticket_vinculado=item["ticket_vinculado"],
+                        setor=item["setor"], situacao=item["situacao"],
+                        prioridade=item["prioridade"], data_abertura=dt_abertura
                     )
                     session.add(novo)
                     precisa_raspar = True
                 else:
                     if chamado_db.status_atual != item["status_web"]:
                         log_status = HistoricoTransicaoStatus(
-                            nr_chamado=nr_chamado,
-                            status_anterior=chamado_db.status_atual,
-                            status_novo=item["status_web"]
+                            nr_chamado=nr_chamado, status_anterior=chamado_db.status_atual, status_novo=item["status_web"]
                         )
                         session.add(log_status)
                         chamado_db.status_atual = item["status_web"]
@@ -347,32 +301,25 @@ class OraculoBot:
                     self.fechar_modal_se_existir()
                     
                     sucesso = self.deep_scrape_chamado_atual(nr_chamado)
-                    if sucesso:
-                        sucesso_count += 1
-                    else:
-                        falhas_lista.append(nr_chamado)
+                    if sucesso: sucesso_count += 1
+                    else: falhas_lista.append(nr_chamado)
 
             logging.info("====== RELATÓRIO DE VARREDURA (FASE 2) ======")
             logging.info(f"✅ Chamados lidos com sucesso: {sucesso_count}")
             if falhas_lista:
                 logging.warning(f"❌ Chamados com erro de leitura (Acesso Restrito/Falha): {len(falhas_lista)}")
-                logging.warning(f"📋 Números com erro: {', '.join(map(str, falhas_lista))}")
-            else:
-                logging.info("Nenhum erro de leitura detectado.")
             logging.info("=============================================")
-
-            logging.info("Sincronização completa de todas as páginas finalizada.")
 
             # --- LÓGICA DE ÓRFÃOS: QUEM SUMIU DA FILA? ---
             ids_vistos = [item["nr_chamado"] for item in chamados_coletados]
             
             chamados_orfaos = session.query(ChamadoTecnuv).filter(
-                ChamadoTecnuv.status_atual.notin_(["Encerrado", "Cancelado"]),
+                ChamadoTecnuv.status_atual.notin_(["Encerrado", "Cancelado", "ANALISADO/ARQUIVO"]),
                 ChamadoTecnuv.nr_chamado.notin_(ids_vistos)
             ).all()
 
             if chamados_orfaos:
-                logging.info(f"Detectados {len(chamados_orfaos)} chamados que sumiram da fila ativa. Verificando se foram finalizados...")
+                logging.info(f"🚨 O PSY detectou {len(chamados_orfaos)} chamados ÓRFÃOS (sumiram da fila ativa). Caçando o paradeiro deles...")
                 self.processar_chamados_orfaos(chamados_orfaos)
 
         finally:
@@ -380,27 +327,24 @@ class OraculoBot:
 
     def deep_scrape_chamado_atual(self, nr_chamado):
         """
-        Extrai os detalhes profundos, incluindo a NOVA VERSÃO DO SISTEMA.
-        Retorna True se sucesso, False se falhar (ex: sem acesso).
+        Extrai detalhes profundos, Versão do Sistema, Previsão, Cobranças e Vínculos.
         """
         session = self.Session()
         try:
+            # Importação Local Segura para as novas tabelas
+            try: from models import CobrancaChamado, ClienteVinculadoChamado
+            except: pass
+            
             WebDriverWait(self.driver, 4).until(EC.presence_of_element_located((By.XPATH, "//label[contains(text(), 'Num. Chamado:')]")))
             
             def get_val(label_text):
-                try: 
-                    xpath = f"//label[normalize-space(text())='{label_text}']/following-sibling::span"
-                    return self.driver.find_element(By.XPATH, xpath).text.strip()
+                try: return self.driver.find_element(By.XPATH, f"//label[normalize-space(text())='{label_text}']/following-sibling::span").text.strip()
                 except: return "Não Informado"
 
-            try:
-                campo_versao = self.driver.find_element(By.ID, "tecnuv_versao_abertura")
-                versao = campo_versao.get_attribute("value").strip()
-            except:
-                versao = "Não Informada"
+            try: versao = self.driver.find_element(By.ID, "tecnuv_versao_abertura").get_attribute("value").strip()
+            except: versao = "Não Informada"
 
-            try:
-                html_motivo = self.driver.find_element(By.ID, "tecnuv_motivo").get_attribute("innerHTML").strip()
+            try: html_motivo = self.driver.find_element(By.ID, "tecnuv_motivo").get_attribute("innerHTML").strip()
             except: html_motivo = ""
 
             chamado = session.query(ChamadoTecnuv).filter_by(nr_chamado=nr_chamado).first()
@@ -411,21 +355,61 @@ class OraculoBot:
                 chamado.versao_sistema = versao 
                 chamado.motivo_abertura_html = html_motivo
                 chamado.assunto_html = html_motivo
+                
+                # 1. Nova Captura: Previsão de Conclusão
+                previsao_str = get_val("Previsão de conclusão:")
+                if previsao_str and previsao_str != "Não Informado":
+                    try:
+                        from datetime import datetime
+                        chamado.previsao_conclusao = datetime.strptime(previsao_str, "%d/%m/%Y").date()
+                    except: pass
+
+                # 2. Nova Captura: Cobranças do Chamado
+                session.query(CobrancaChamado).filter_by(nr_chamado=nr_chamado).delete()
+                blocos_cobranca = self.driver.find_elements(By.XPATH, "//div[contains(@style, '#EA4335')]")
+                for cob in blocos_cobranca:
+                    try:
+                        import re
+                        from datetime import datetime
+                        header = cob.find_element(By.TAG_NAME, "label").text
+                        match = re.search(r'Usuário:\s*(.*?)\s*-\s*Data:\s*(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}:\d{2})', header)
+                        if match:
+                            usu = match.group(1).strip()
+                            dt = datetime.strptime(match.group(2), "%d/%m/%Y %H:%M:%S")
+                            texto_msg = cob.find_element(By.CLASS_NAME, "msgMd").text
+                            cli_match = re.search(r'pelo cliente\s+(.*?)\s+-', texto_msg)
+                            cli_nome = cli_match.group(1).strip() if cli_match else "Não Identificado"
+                            
+                            nova_cob = CobrancaChamado(nr_chamado=nr_chamado, data_cobranca=dt, analista_epsy=usu, cliente_solicitante=cli_nome, texto_bruto_cobranca=texto_msg)
+                            session.add(nova_cob)
+                    except Exception as e:
+                        logging.warning(f"Erro ao ler cobrança: {e}")
+
+                # 3. Nova Captura: Clientes Vinculados
+                session.query(ClienteVinculadoChamado).filter_by(nr_chamado=nr_chamado).delete()
+                try:
+                    list_vinc = self.driver.find_element(By.ID, "list-vinculo")
+                    textos = list_vinc.text.split('\n')
+                    import re
+                    for t in textos:
+                        if t.strip():
+                            cnpj_match = re.search(r'\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}', t)
+                            cnpj = cnpj_match.group(0) if cnpj_match else None
+                            session.add(ClienteVinculadoChamado(nr_chamado=nr_chamado, nome_cliente=t.strip(), cnpj_cliente=cnpj))
+                except: pass
 
             session.commit()
-            logging.info(f"[OK] Detalhes do chamado {nr_chamado} sincronizados (Versão: {versao}).")
+            logging.info(f"[OK] Detalhes (Versão, Cobranças, Vínculos) sincronizados - Chamado {nr_chamado}.")
             return True
             
         except TimeoutException:
             session.rollback()
-            logging.warning(f"[BLOQUEADO] Chamado {nr_chamado} não abriu. Provável restrição de acesso (Outra representante).")
+            logging.warning(f"[BLOQUEADO] Chamado {nr_chamado} não abriu.")
             return False
-            
         except Exception as e:
             session.rollback()
             logging.error(f"[ERRO] Falha no Deep Scrape do chamado {nr_chamado}: {str(e)}")
             return False
-            
         finally:
             session.close()
 
@@ -448,7 +432,6 @@ class OraculoBot:
                 return
 
             logging.info(f"Iniciando Auto-Cura para {len(chamados_falhos)} chamados (Varredura Retroativa)...")
-            
             sucesso_count = 0
             falhas_lista = []
             
@@ -463,17 +446,13 @@ class OraculoBot:
                     self.fechar_modal_se_existir()
                     
                     sucesso = self.deep_scrape_chamado_atual(chamado.nr_chamado)
-                    if sucesso:
-                        sucesso_count += 1
-                    else:
-                        falhas_lista.append(chamado.nr_chamado)
+                    if sucesso: sucesso_count += 1
+                    else: falhas_lista.append(chamado.nr_chamado)
 
             logging.info("====== RELATÓRIO DE AUTO-CURA (FASE 3) ======")
             logging.info(f"✅ Chamados recuperados com sucesso: {sucesso_count}")
-            if falhas_lista:
-                logging.warning(f"❌ Chamados impossíveis de ler (Acesso restrito permanente): {len(falhas_lista)}")
+            if falhas_lista: logging.warning(f"❌ Chamados impossíveis de ler: {len(falhas_lista)}")
             logging.info("=============================================")
-                        
         finally:
             session.close()
 
@@ -481,22 +460,15 @@ class OraculoBot:
         """Busca o paradeiro de chamados que não apareceram na fila normal."""
         for chamado in lista_orfaos:
             nr = chamado.nr_chamado
-            logging.info(f"Rastreando chamado órfão {nr}...")
-            
-            # Nível 1: Busca apenas Cancelados/Encerrados
-            encontrado = self.executar_busca_especifica(nr, filtros=["Encerrado", "Cancelado"])
-            
-            # Nível 2: Se não achou, busca sem filtro nenhum (Global)
-            if not encontrado:
-                encontrado = self.executar_busca_especifica(nr, filtros=[])
-            
+            logging.info(f"Rastreando chamado órfão {nr} (Selecionando TODOS os status)...")
+            encontrado = self.executar_busca_especifica(nr)
             if encontrado:
                 self.deep_scrape_finalizacao(nr)
             else:
-                logging.warning(f"Chamado {nr} não localizado em nenhuma busca. Pode ter sido movido de setor.")
+                logging.warning(f"Chamado {nr} não localizado em nenhuma busca.")
 
-    def executar_busca_especifica(self, nr_chamado, filtros):
-        """Realiza a pesquisa no site usando o campo nr_chamado."""
+    def executar_busca_especifica(self, nr_chamado):
+        """Busca o Chamado aplicando o filtro 'Selecionar Todos' para driblar o bug da Tecnuv."""
         try:
             self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
             self.fechar_modal_se_existir()
@@ -505,17 +477,16 @@ class OraculoBot:
             self.driver.find_element(By.CSS_SELECTOR, "a.limpa_filtros").click()
             time.sleep(2)
 
-            # Aplica filtros se houver
-            if filtros:
-                btn_status = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@title='Status']")))
-                btn_status.click()
-                time.sleep(1)
-                checkboxes = self.driver.find_elements(By.XPATH, "//ul[contains(@class, 'multiselect-container')]//input[@type='checkbox']")
-                for check in checkboxes:
-                    if check.get_attribute("value") in filtros:
-                        if not check.is_selected():
-                            check.find_element(By.XPATH, "./parent::label").click()
-                btn_status.click()
+            # Clica no Filtro de Status
+            btn_status = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@title='Status']")))
+            btn_status.click()
+            time.sleep(1)
+            
+            # Clica em SELECIONAR TODOS
+            chk_all = self.driver.find_element(By.XPATH, "//input[@value='multiselect-all']")
+            if not chk_all.is_selected():
+                chk_all.find_element(By.XPATH, "./parent::label").click()
+            btn_status.click()
 
             # Preenche o número e busca
             campo = self.driver.find_element(By.NAME, "form[nr_chamado]")
@@ -524,7 +495,6 @@ class OraculoBot:
             self.driver.find_element(By.ID, "btnBusca").click()
             time.sleep(3)
 
-            # Verifica se apareceu o link do chamado
             links = self.driver.find_elements(By.XPATH, f"//a[contains(@href, '/id/{nr_chamado}')]")
             if links:
                 links[0].click()
@@ -534,44 +504,41 @@ class OraculoBot:
             return False
 
     def deep_scrape_finalizacao(self, nr_chamado):
-        """Extrai a ÚLTIMA interação para registrar o fim do chamado."""
+        """Extrai a ÚLTIMA interação para registrar o fim ou ocultamento do chamado."""
         session = self.Session()
         try:
-            # Aguarda o histórico carregar
             self.wait.until(EC.presence_of_element_located((By.XPATH, "//legend[contains(text(), 'Histórico')]")))
             
-            # Coleta todos os blocos de mensagens (pelo seu HTML, são col-md-11)
             blocos = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'col-md-11')]")
             if not blocos: return
 
-            # Pegamos o ÚLTIMO bloco (a interação de finalização)
             ultimo = blocos[-1]
             header = ultimo.find_element(By.TAG_NAME, "label").text
             corpo = ultimo.find_element(By.CLASS_NAME, "msgMd").text.strip()
             
-            # Status atual na tela (Label Status:)
             status_site = self.driver.find_element(By.XPATH, "//label[contains(text(), 'Status:')]/following-sibling::span").text.strip()
 
-            # Regex para Usuário e Data
+            import re
+            from datetime import datetime
             match = re.search(r'Usuário:\s*(.*?)\s*-\s*Data:\s*(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}:\d{2})', header)
             
             chamado = session.query(ChamadoTecnuv).filter_by(nr_chamado=nr_chamado).first()
-            if chamado and match:
-                usuario = match.group(1).strip()
-                data_dt = datetime.strptime(match.group(2), "%d/%m/%Y %H:%M:%S")
-                
+            if chamado:
                 chamado.status_atual = status_site
                 chamado.assunto_encerramento = corpo
                 
-                if "ENCERRADO" in status_site.upper():
-                    chamado.data_encerramento = data_dt
-                    chamado.usuario_encerramento = usuario
-                elif "CANCELADO" in status_site.upper():
-                    chamado.data_cancelamento = data_dt
-                    chamado.usuario_cancelamento = usuario
-                
+                if match:
+                    usuario = match.group(1).strip()
+                    data_dt = datetime.strptime(match.group(2), "%d/%m/%Y %H:%M:%S")
+                    if "ENCERRADO" in status_site.upper():
+                        chamado.data_encerramento = data_dt
+                        chamado.usuario_encerramento = usuario
+                    elif "CANCELADO" in status_site.upper():
+                        chamado.data_cancelamento = data_dt
+                        chamado.usuario_cancelamento = usuario
+
                 session.commit()
-                logging.info(f"Chamado {nr_chamado} finalizado com sucesso no banco via {status_site}.")
+                logging.info(f"Status do Órfão {nr_chamado} atualizado no banco via {status_site}.")
         except Exception as e:
             logging.error(f"Erro ao extrair finalização do {nr_chamado}: {e}")
         finally:
@@ -583,13 +550,12 @@ class OraculoBot:
 
 
 # ==============================================================================
-# CIRURGIA: O CÉREBRO DO PSY Assistente WikiSuporte (LIGAÇÃO COM O STREAMLIT)
+# CIRURGIA: O CÉREBRO DO PSY Assistente WikiSuporte
 # ==============================================================================
 
 def iniciar_psy_assistente_wikisuporte_bot():
     """
-    Mantém o robô ativo em segundo plano, escutando o arquivo 'robo_state.json' 
-    gerado pelo painel do Streamlit. Respeita intervalos e execuções manuais.
+    Mantém o robô ativo em segundo plano. Intervalo padrão otimizado para 30 minutos.
     """
     logging.info("🤖 PSY Assistente WikiSuporte do OraculoBot Iniciado. Aguardando comandos do Painel WikiSuporte...")
     
@@ -598,39 +564,33 @@ def iniciar_psy_assistente_wikisuporte_bot():
             estado = ler_estado_robo()
             agora = datetime.now()
             
-            # 1. Trava de Segurança: Se já houver algo em andamento, dorme.
             if estado.get("em_andamento", False):
                 time.sleep(30)
                 continue
 
-            # 2. Verifica se o Modo Automático está ligado no painel
             auto_ativo = estado.get("auto_ativo", False)
             if not auto_ativo:
-                time.sleep(60) # Dorme 1 minuto e checa o painel novamente
+                time.sleep(60) 
                 continue
                 
-            # 3. Cálculo de Intervalo (O Relógio Atómico)
-            intervalo_minutos = estado.get("intervalo", 60)
+            # ATUALIZAÇÃO: Intervalo padrão reajustado para 30 minutos para visão em tempo real
+            from datetime import timedelta
+            intervalo_minutos = estado.get("intervalo", 30)
             ultima_exec_str = estado.get("ultima_execucao")
             
             executar_agora = False
             
-            if not ultima_exec_str:
-                executar_agora = True # Primeira execução da vida
+            if not ultima_exec_str: executar_agora = True
             else:
                 try:
                     ultima_exec = datetime.fromisoformat(ultima_exec_str)
                     proxima_exec = ultima_exec + timedelta(minutes=intervalo_minutos)
-                    if agora >= proxima_exec:
-                        executar_agora = True
-                except:
-                    executar_agora = True # Fallback se o JSON corromper
+                    if agora >= proxima_exec: executar_agora = True
+                except: executar_agora = True 
                     
-            # 4. A Execução
             if executar_agora:
-                logging.info(f"🚀 Iniciando ciclo automático programado (Intervalo: {intervalo_minutos} min).")
+                logging.info(f"🚀 Iniciando ciclo automático (Intervalo: {intervalo_minutos} min).")
                 
-                # Bloqueia o painel (avisando aos coordenadores que está rodando)
                 estado["em_andamento"] = True
                 salvar_estado_robo(estado)
                 
@@ -644,25 +604,20 @@ def iniciar_psy_assistente_wikisuporte_bot():
                 except Exception as e_bot:
                     logging.error(f"Erro durante execução do bot: {e_bot}")
                 finally:
-                    # Libera o painel e marca a hora que terminou
                     estado = ler_estado_robo()
                     estado["ultima_execucao"] = datetime.now().isoformat()
                     estado["em_andamento"] = False
                     salvar_estado_robo(estado)
-                    
                     logging.info("💤 Ciclo finalizado. Robô a dormir até o próximo intervalo.")
                     
         except Exception as e:
-            logging.error(f"Erro crítico no Cérebro do PSY Assistente WikiSuporte: {e}")
-            # Destrava em caso de erro fatal para não prender o painel do Streamlit
+            logging.error(f"Erro crítico no Cérebro do PSY: {e}")
             estado = ler_estado_robo()
             if estado.get("em_andamento"):
                 estado["em_andamento"] = False
                 salvar_estado_robo(estado)
         
-        # Dorme 60 segundos antes de checar as regras do painel novamente
         time.sleep(60)
 
 if __name__ == "__main__":
-    # Se rodar o arquivo diretamente no terminal, ele acorda o Vigilante.
     iniciar_psy_assistente_wikisuporte_bot()

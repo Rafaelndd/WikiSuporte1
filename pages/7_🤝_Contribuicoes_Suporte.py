@@ -484,3 +484,5 @@ with aba_arquivo:
             st.dataframe(df_ranking_buscas, use_container_width=True, hide_index=True)
         else:
             st.write("Nenhuma busca registrada ainda. Seja o primeiro a fazer uma pergunta ao PSY e veja seu assunto aparecer aqui no ranking dos mais buscados!")
+
+

@@ -418,3 +418,33 @@ CREATE TRIGGER trg_atualiza_conhecimento
     BEFORE UPDATE ON base_conhecimento 
     FOR EACH ROW 
     EXECUTE PROCEDURE update_modified_column();
+
+
+-- 1. Excluímos as tabelas antigas com segurança (CASCADE garante que as constraints antigas sumam)
+DROP TABLE IF EXISTS cobrancas_chamados CASCADE;
+DROP TABLE IF EXISTS clientes_vinculados_chamado CASCADE;
+
+-- 2. Recriamos a tabela de Clientes Vinculados
+CREATE TABLE clientes_vinculados_chamado (
+    id SERIAL PRIMARY KEY,
+    nr_chamado INTEGER NOT NULL,
+    nome_cliente VARCHAR(255) NOT NULL,
+    cnpj_cliente VARCHAR(25), -- Para quando a Tecnuv enviar o CNPJ junto com o nome
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vinculados_chamado FOREIGN KEY (nr_chamado) REFERENCES chamados_tecnuv(nr_chamado) ON DELETE CASCADE
+);
+
+-- 3. Recriamos a tabela de Cobranças
+CREATE TABLE cobrancas_chamados (
+    id SERIAL PRIMARY KEY,
+    nr_chamado INTEGER NOT NULL,
+    data_cobranca TIMESTAMP,
+    analista_epsy VARCHAR(100), -- Ex: "Emil"
+    cliente_solicitante VARCHAR(255), -- Ex: "TORRE ALTA COMERCIO DE COMBUSTIVEIS LTDA"
+    texto_bruto_cobranca TEXT, -- Salvamos o texto original do HTML por segurança e auditoria
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_cobrancas_chamado FOREIGN KEY (nr_chamado) REFERENCES chamados_tecnuv(nr_chamado) ON DELETE CASCADE
+);
+
+-- 4. Adicionamos a coluna de Previsão na tabela principal (se ainda não existir)
+ALTER TABLE chamados_tecnuv ADD COLUMN IF NOT EXISTS previsao_conclusao DATE;

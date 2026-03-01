@@ -1,7 +1,7 @@
 import os
 import sys
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, DateTime, Date, Integer, BigInteger, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 
 # 1. Ajuste de Caminho: Garante que o Python encontre os módulos vizinhos
@@ -43,11 +43,17 @@ class ChamadoTecnuv(Base):
     usuario_encerramento = Column(String(100), nullable=True)
     assunto_encerramento = Column(Text, nullable=True)
     
+    # NOVA COLUNA: Previsão de Conclusão lida dos detalhes do chamado
+    previsao_conclusao = Column(Date, nullable=True)
+    
     ultima_alteracao_tecnuv = Column(DateTime, nullable=True)
     ultima_verificacao_robo = Column(DateTime, default=datetime.now)
 
+    # RELACIONAMENTOS (Atualizados para incluir Cobranças e Clientes Vinculados)
     transicoes = relationship("HistoricoTransicaoStatus", back_populates="chamado", cascade="all, delete-orphan")
     interacoes = relationship("HistoricoInteracao", back_populates="chamado", cascade="all, delete-orphan")
+    cobrancas = relationship("CobrancaChamado", back_populates="chamado", cascade="all, delete-orphan")
+    clientes_vinculados = relationship("ClienteVinculadoChamado", back_populates="chamado", cascade="all, delete-orphan")
 
 
 class HistoricoTransicaoStatus(Base):
@@ -76,6 +82,37 @@ class HistoricoInteracao(Base):
     __table_args__ = (
         UniqueConstraint('nr_chamado', 'data_interacao', 'usuario', name='uix_chamado_msg_autor'),
     )
+
+
+# ==========================================
+# NOVOS MODELOS: EXTRAS DO CHAMADO (VÍNCULOS E COBRANÇAS)
+# ==========================================
+
+class ClienteVinculadoChamado(Base):
+    __tablename__ = "clientes_vinculados_chamado"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nr_chamado = Column(BigInteger, ForeignKey("chamados_tecnuv.nr_chamado", ondelete="CASCADE"), nullable=False)
+    nome_cliente = Column(String(255), nullable=False)
+    cnpj_cliente = Column(String(25), nullable=True)
+    criado_em = Column(DateTime, default=datetime.now)
+
+    chamado = relationship("ChamadoTecnuv", back_populates="clientes_vinculados")
+
+
+class CobrancaChamado(Base):
+    __tablename__ = "cobrancas_chamados"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nr_chamado = Column(BigInteger, ForeignKey("chamados_tecnuv.nr_chamado", ondelete="CASCADE"), nullable=False)
+    data_cobranca = Column(DateTime, nullable=True)
+    analista_epsy = Column(String(100), nullable=True)
+    cliente_solicitante = Column(String(255), nullable=True)
+    texto_bruto_cobranca = Column(Text, nullable=True)
+    criado_em = Column(DateTime, default=datetime.now)
+
+    chamado = relationship("ChamadoTecnuv", back_populates="cobrancas")
+
 
 # ==========================================
 # MODELOS DE SEGURANÇA E AUDITORIA (LGPD)
