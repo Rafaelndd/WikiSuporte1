@@ -9,6 +9,28 @@ load_dotenv()
 # ==========================================
 # IDENTIDADE VISUAL DO TERMINAL (ASCII ART)
 # ==========================================
+# 🛡️ BLINDAGEM DE INFRAESTRUTURA DOS LOGS
+# ==========================================
+# 1. Força o terminal do Windows a aceitar Emojis (UTF-8) sem dar erro de encoding
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+# 2. Configura o Logger com force=True para destruir handlers duplicados e evitar o "Eco"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True,  # 👈 Isto é a mágica que mata as mensagens repetidas!
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+        # Se você salva em arquivo também, adicione a linha abaixo:
+        # logging.FileHandler("oraculo_log.txt", encoding='utf-8') 
+    ]
+)
 
 
 def executar_oraculo():
