@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import re
 from sqlalchemy import text
 from datetime import datetime, timedelta
-import re
 from bs4 import BeautifulSoup
-
 from modules.database import get_connection
 
 try:
@@ -114,20 +113,20 @@ def classificar_reincidencia_e_tempo(df_interacoes_chamado, data_abertura, statu
 # ==========================================
 # 3. INTERFACE E CARREGAMENTO
 # ==========================================
-st.title("🖥️ Dashboard Analítico - Chamados Tecnuv (EPSY)")
-st.markdown("Auditoria de Suporte: Fila, EPSY, Bugs por Versão, Gargalos e Retrabalho da Desenvolvedora.")
+st.title("🖥️ Dashboard Chamados")
+st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, reincidências e desempenho da desenvolvedora.")
 
 df_raw = carregar_dados_tecnuv()
 df_int = carregar_interacoes()
 
 if df_raw.empty:
-    st.warning("Nenhum chamado encontrado. Verifique se o OraculoBot já realizou a raspagem profunda.")
+    st.warning("WikiSuporte ainda não se conectou ao banco de dados. Entre em contato com o desenvolvedor para resolver o problema.")
     st.stop()
 
 # ==========================================
 # 4. PAINEL DE CONTROLO E FILTROS (NA TELA PRINCIPAL)
 # ==========================================
-with st.expander("⚙️ Painel de Controlo e Filtros Globais", expanded=True):
+with st.expander("⚙️ Filtros: ", expanded=True):
     col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
     
     with col_f1:
@@ -138,16 +137,16 @@ with st.expander("⚙️ Painel de Controlo e Filtros Globais", expanded=True):
         
     with col_f2:
         lista_analistas = ["Todos"] + sorted([a for a in df_raw['usuario_epsy'].unique() if a and str(a).strip() != "Não Informado"])
-        analista_filtro = st.selectbox("👤 Analista EPSY:", options=lista_analistas, help="Filtra pela coluna de Usuário EPSY gravada no banco.")
+        analista_filtro = st.selectbox("👤 Analista EPSY:", options=lista_analistas, help="Lista com todos analistas")
         
     with col_f3:
-        lista_status = ["Todos", "Fila Ativa (Abertos)", "Resolvidos (Encerrados)"]
-        status_filtro = st.selectbox("📌 Visão de Fila:", options=lista_status)
+        lista_status = ["Todos", "Chamados Ativos (Abertos)", "Resolvidos (Encerrados ou Cancelados)"]
+        status_filtro = st.selectbox("📌 Status do Chamado:", options=lista_status)
         
     with col_f4:
         st.write("")
         st.write("")
-        if st.button("🔄 Atualizar Banco", use_container_width=True):
+        if st.button("🔄 Atualizar", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
@@ -163,13 +162,13 @@ if analista_filtro != "Todos":
     df = df[df['usuario_epsy'] == analista_filtro]
 
 # Lógica robusta de fila ativa (Exclui Encerrados e Cancelados)
-if status_filtro == "Fila Ativa (Abertos)":
+if status_filtro == "Chamados Ativos (Abertos)":
     df = df[~df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)]
 elif status_filtro == "Resolvidos (Encerrados)":
     df = df[df['status_atual'].str.contains("Encerrado", case=False, na=False)]
 
 if df.empty:
-    st.info("Nenhum chamado corresponde aos filtros aplicados.")
+    st.info("Nenhum chamado encontrado com os filtros aplicados. Revise o período ou ajuste os critérios para refinar a busca.")
     st.stop()
 
 # ==========================================
@@ -208,10 +207,10 @@ df['tempo_ate_liberacao_dias'] = tempos_liberacao
 # ==========================================
 
 aba1, aba2, aba3, aba4 = st.tabs([
-    "🎯 Visão Executiva",
-    "⏳ Aging & Gargalos da Fila",
-    "🐛 Engenharia & Versões",
-    "👥 Performance EPSY & Clientes"
+    "🎯 Visão Geral",
+    "⏳ Tempo de espera e gargalos nos chamados com a desenvolvedora.",
+    "🐛 Detalhamento de Versões",
+    "👥 Chamados por Analistas EPSY & Clientes"
 ])
 
 # ------------------------------------------
@@ -223,8 +222,8 @@ with aba1:
     encerrados = total_chamados - abertos
     
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Volume Total (Período)", total_chamados)
-    col2.metric("Chamados Ativos (Fila)", abertos, delta="Na Tecnuv/EPSY", delta_color="inverse")
+    col1.metric("Volume de Chamados (Período)", total_chamados)
+    col2.metric("Chamados Ativos (Em Fila)", abertos, delta="Na Tecnuv/EPSY", delta_color="inverse")
     col3.metric("Chamados Resolvidos", encerrados, delta="Encerrados")
     
     # Índice de Reincidência
