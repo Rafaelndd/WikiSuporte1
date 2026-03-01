@@ -207,27 +207,24 @@ with aba_gemini:
                 # FASE 1: O MOTOR A COMBUSTÃO (SQL Direto)
                 # Sempre roda para extrair o contexto real da base
                 # ==========================================
-                palavras = [p for p in pergunta.replace("?", "").replace(",", "").split() if len(p) > 3]
+                # 1. Limpeza inteligente (Stopwords)
+                palavras_ignoradas = {'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'no', 'na', 'em', 'para', 'com', 'como', 'qual', 'quais', 'que', 'e'}
+                
+                # Separa as palavras, tira pontuação básica e converte para minúsculas
+                termos = pergunta.replace("?", "").replace(",", "").replace(".", "").split()
+                
+                # Filtra removendo as palavras inúteis, mas MANTÉM siglas como PIX, TEF, PDV
+                palavras = [p for p in termos if p.lower() not in palavras_ignoradas]
+                
                 contextos_db = []
                 resultados_puros = []
                 
                 if palavras:
                     with engine.connect() as conn:
-                        filtros_sql = " OR ".join([f"titulo ILIKE :p{i} OR conteudo ILIKE :p{i}" for i in range(len(palavras))])
+                        # 2. Mudança de OR para AND (Exige que todas as palavras-chave estejam no documento)
+                        # Combina título e conteúdo na mesma pesquisa para maior abrangência
+                        filtros_sql = " AND ".join([f"(titulo ILIKE :p{i} OR conteudo ILIKE :p{i})" for i in range(len(palavras))])
                         params = {f"p{i}": f"%{palavras[i]}%" for i in range(len(palavras))}
-                        
-                        query_rag = text(f"""
-                            SELECT titulo, origem, conteudo 
-                            FROM base_conhecimento 
-                            WHERE status = 'APROVADO' AND ({filtros_sql})
-                            LIMIT 5
-                        """)
-                        resultados = conn.execute(query_rag, params).fetchall()
-                        for r in resultados:
-                            contextos_db.append(f"📚 FONTE: {r[0]} ({r[1]})\nCONTEÚDO: {r[2]}")
-                            resultados_puros.append({"titulo": r[0], "origem": r[1], "conteudo": r[2]})
-                
-                texto_contexto = "\n\n---\n\n".join(contextos_db)
                 
                 # ==========================================
                 # FASE 2: VERIFICAÇÃO DE ACESSO AO MOTOR ELÉTRICO (IA)
