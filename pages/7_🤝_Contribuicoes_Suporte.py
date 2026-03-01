@@ -26,11 +26,16 @@ UPLOAD_DIR = "uploads_wiki"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ==========================================
-# 2. CABEÇALHO E ABAS
+# 2. TÍTULO E DESCRIÇÃO
 # ==========================================
+
 st.title("🤝 Central de Conhecimento do Suporte")
 st.markdown("Respostas rápidas, documentação organizada e conhecimento sempre atualizado!")
 
+
+# ==========================================
+# 3. ABAS (Com validação de perfis)
+# ==========================================
 # Define as abas dependendo do perfil (ADICIONADA A NOVA ABA 6: ARQUIVO PSY)
 if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolvedor']:
     aba_ranking, aba_nova, aba_minhas, aba_fila, aba_gemini, aba_arquivo = st.tabs([
@@ -40,6 +45,7 @@ else:
     aba_ranking, aba_nova, aba_minhas, aba_gemini, aba_arquivo = st.tabs([
         "🏅 Ranking e Troféus", "📝 Adicionar Contribuição", "📚 Minhas Contribuições", "🤖 Pesquisar com PSY IA", "📖 Histórico das pesquisas"
     ])
+
 
 # ==========================================
 # ABA 1: GAMIFICAÇÃO E RANKING
@@ -441,7 +447,7 @@ with aba_gemini:
                             st.warning("⚠️ Nenhum documento oficial encontrado para esta dúvida. Tente reformular a pergunta ou consulte um colega da equipe.")
 
 # ==========================================
-# ABA 6: ARQUIVO PSY (HISTÓRICO E RANKING DA EQUIPE)
+# Aba 6: HISTÓRICO DE BUSCAS E RANKING DE ASSUNTOS
 # ==========================================
 with aba_arquivo:
     st.subheader("📖 Histórico e Ranking da Equipe")
@@ -486,3 +492,65 @@ with aba_arquivo:
             st.write("Nenhuma busca registrada ainda. Seja o primeiro a fazer uma pergunta ao PSY e veja seu assunto aparecer aqui no ranking dos mais buscados!")
 
 
+# 🗂️ HUB DE CARTÕES INTERATIVOS (Substitui os Gráficos)
+with st.container():
+    st.markdown("### 🗂️ Explore nossa Base de Conhecimento")
+    
+    engine = get_connection()
+    with engine.connect() as conn:
+        # Trazemos tudo de uma vez para a memória (Pandas) para ser ultrarrápido
+        query_docs = text("""
+            SELECT titulo, conteudo, caminho_anexo, COALESCE(NULLIF(categoria, ''), origem) as categoria 
+            FROM base_conhecimento 
+            WHERE status = 'APROVADO' 
+            ORDER BY titulo ASC
+        """)
+        df_docs = pd.read_sql(query_docs, conn)
+
+    if not df_docs.empty:
+        # Conta quantos documentos existem por categoria
+        categorias_count = df_docs['categoria'].value_counts()
+        
+        # Define 3 colunas por linha para o Grid de Cartões
+        colunas_por_linha = 3
+        cols = st.columns(colunas_por_linha)
+        
+        for idx, (cat_nome, total) in enumerate(categorias_count.items()):
+            # O operador módulo (%) distribui os cartões perfeitamente entre as 3 colunas infinitamente
+            col_atual = cols[idx % colunas_por_linha]
+            
+            with col_atual:
+                # Cria a "Caixa" do Cartão com borda elegante
+                with st.container(border=True):
+                    st.markdown(f"#### 📂 {cat_nome}")
+                    st.caption(f"📚 {total} soluções disponíveis")
+                    
+                    # Filtra os documentos apenas desta categoria
+                    docs_da_categoria = df_docs[df_docs['categoria'] == cat_nome]
+                    
+                    # Dropdown limpo para o usuário escolher o manual sem sair do cartão
+                    doc_escolhido = st.selectbox(
+                        "Ler manual:", 
+                        options=["Selecione para ler..."] + docs_da_categoria['titulo'].tolist(),
+                        key=f"sel_{cat_nome}_{idx}",
+                        label_visibility="collapsed"
+                    )
+                    
+                    # Se ele escolheu um documento, abre o leitor imediatamente abaixo
+                    if doc_escolhido != "Selecione para ler...":
+                        doc_info = docs_da_categoria[docs_da_categoria['titulo'] == doc_escolhido].iloc[0]
+                        
+                        # Exibe a solução dentro de um expander para não "quebrar" a harmonia do cartão
+                        with st.expander(f"📖 Lendo: {doc_escolhido[:25]}...", expanded=True):
+                            if doc_info['caminho_anexo'] and os.path.exists(doc_info['caminho_anexo']):
+                                with open(doc_info['caminho_anexo'], "rb") as f:
+                                    st.download_button(
+                                        "📎 Anexo", f, 
+                                        file_name=os.path.basename(doc_info['caminho_anexo']), 
+                                        key=f"dl_{cat_nome}_{doc_escolhido}"
+                                    )
+                            st.write(doc_info['conteudo'])
+    else:
+        st.info("A Base de Conhecimento está a aquecer. Nenhuma documentação aprovada foi encontrada ainda.")
+
+st.divider()
