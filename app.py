@@ -116,7 +116,7 @@ def tela_login() -> None:
             except: pass
             
         st.markdown("<h2 style='text-align: center;'>WikiSuporte</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: gray;'>Gestão e Centralização de Atendimentos</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: gray;'>Plataforma de Suporte Técnico</p>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         # 2. CAIXA DO FORMULÁRIO (Card com borda)
@@ -280,7 +280,7 @@ def tela_home() -> None:
     with col_lateral:
         # Tenta carregar a mascote
         try:
-            st.image("mascote/psy_braco_cruzado_aposto.png", use_container_width=True)
+            st.image("mascote/mascote_padrão.png", use_container_width=True)
         except:
             pass
 
