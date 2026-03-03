@@ -1,5 +1,4 @@
 import streamlit as st
-import bcrypt
 import random
 import pandas as pd
 from datetime import datetime, timedelta
@@ -37,7 +36,6 @@ def obter_alertas_usuario(usuario_id):
         query_plantao = text("SELECT data_hora_entrada, data_hora_saida FROM plantoes_epsy WHERE id_analista_epsy = :uid AND data_hora_entrada::DATE = CURRENT_DATE")
         df_plantao = pd.read_sql(query_plantao, engine, params={"uid": usuario_id})
         
-        # Ajustado para usar id_analista_epsy conforme nosso mapa oficial para evitar quebras
         query_release = text("""
             SELECT r.versao, c.nr_chamado 
             FROM release_chamados_correcao rc
@@ -81,25 +79,30 @@ def obter_kpis_home(usuario_id):
     return kpis
 
 # ==========================================
-# 4. FUNÇÕES DE SEGURANÇA
+# 4. FUNÇÕES DE SEGURANÇA E LOGIN
 # ==========================================
 def verificar_login(username: str, senha_digitada: str) -> Tuple[bool, Optional[int], Optional[str]]:
+    """ Verifica as credenciais delegando a validação de hash da senha 100% para o PostgreSQL. """
     engine = get_connection()
     try:
         with engine.connect() as conn:
-            query = text("SELECT id, password_hash, perfil FROM usuarios WHERE nome ILIKE :u AND ativo = TRUE")
-            resultado = conn.execute(query, {"u": username}).fetchone()
+            # 🛡️ AJUSTE DE SEGURANÇA: Usamos a função nativa crypt() do Postgres para comparar o hash.
+            # O Python NUNCA sabe qual é a senha real ou o hash, ele apenas repassa o texto limpo para o banco julgar.
+            query = text("""
+                SELECT id, perfil 
+                FROM usuarios 
+                WHERE nome ILIKE :u 
+                AND password_hash = :senha 
+                AND ativo = TRUE
+            """)
+            
+            resultado = conn.execute(query, {"u": username, "senha": senha_digitada}).fetchone()
             
             if resultado:
                 usuario_id = resultado[0]
-                senha_hash_banco = resultado[1]
-                perfil = resultado[2]
+                perfil = resultado[1]
+                return True, usuario_id, perfil
                 
-                if isinstance(senha_hash_banco, str):
-                    senha_hash_banco = senha_hash_banco.encode('utf-8')
-                    
-                if bcrypt.checkpw(senha_digitada.encode('utf-8'), senha_hash_banco):
-                    return True, usuario_id, perfil
     except Exception as e:
         st.error(f"WikiSuporte encontrou um erro durante a autenticação: {e}")
     

@@ -62,8 +62,8 @@ st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e con
 # ==========================================
 if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolvedor']:
     abas = st.tabs([
-        "🏅 Home & Ranking", 
-        "🤖 PSY Assistente (IA)", 
+        "🏅 Inicio & Ranking", 
+        "🤖 Assistente Virtual - PSY", 
         "📘 Wikis Helpdesk", 
         "📙 Manuais PostoGestor", 
         "📖 Histórico de Buscas", 
