@@ -17,7 +17,7 @@ except ImportError:
 # ==========================================
 # 1. CONFIGURAÇÃO GLOBAL E ESTILO
 # ==========================================
-st.set_page_config(page_title="WikiSuporte", page_icon="💡", layout="wide")
+st.set_page_config(page_title="WikiSuporte </>", page_icon="💡", layout="wide")
 
 # ==========================================
 # 2. INICIALIZAÇÃO DE SESSÃO

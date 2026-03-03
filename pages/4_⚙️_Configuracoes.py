@@ -32,7 +32,7 @@ except:
 # 1. CONFIGURAÇÃO INICIAL DA PÁGINA E VERIFICAÇÃO DE ACESSO
 # ================================================================================================
 
-st.set_page_config(page_title="Configurações", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="WikiSuporte </>", page_icon="⚙️", layout="wide")
 
 if not st.session_state.get('autenticado'):
     st.switch_page("app.py")
