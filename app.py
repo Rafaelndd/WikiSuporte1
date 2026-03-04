@@ -274,6 +274,14 @@ def tela_login() -> None:
                 st.markdown("<p style='text-align: center; color: gray; font-size: 0.8rem;'>© 2026 WikiSuporte — Desenvolvido por Rafael D. Nascimento.</p>", unsafe_allow_html=True)
 
 
+def carregar_termos():
+    """Lê o arquivo de termos externo."""
+    try:
+        with open("termos_de_uso.md", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "⚠️ Erro: Arquivo 'termos.md' não encontrado."
+
 def tela_termos_uso() -> None:
     st.markdown("""
         <style>
@@ -283,34 +291,28 @@ def tela_termos_uso() -> None:
     """, unsafe_allow_html=True)
     
     col_vazia1, col_centro, col_vazia2 = st.columns([1, 3, 1])
+    
     with col_centro:
         st.title("📜 Termo de Uso e Confidencialidade")
-        st.warning("⚠️ **Atenção:** Ambiente restrito e protegido. O acesso e uso deste sistema estão condicionados às políticas de confidencialidade vigentes.")
+        st.warning("⚠️ **Atenção:** Ambiente restrito e protegido.")
         
-        with st.container(border=True):
-            st.markdown("""
-            ### Proteção de Dados (LGPD)
-            Este sistema processa dados pessoais e informações estratégicas protegidas pela **Lei nº 13.709/2018**.
-            
-            **1. Confidencialidade**
-            Os dados exibidos são confidenciais. É **terminantemente proibido**:
-            * Partilhar capturas de tela (prints) ou credenciais com terceiros.
-            * Armazenar exportações de dados em dispositivos pessoais.
-            
-            **2. Monitorização e Auditoria**
-            Para fins de segurança, todas as ações realizadas neste sistema são registadas em logs de auditoria.
-            """)
+        # Chama a função que lê o arquivo externo
+        texto_termos = carregar_termos()
+        
+        with st.container(height=400, border=True):
+            st.markdown(texto_termos)
         
         st.markdown("<br>", unsafe_allow_html=True)
-        aceito = st.checkbox("Eu li, compreendo e concordo com os termos de uso e confidencialidade descritos acima.")
+        aceito = st.checkbox("Eu li, compreendo e concordo com os termos de uso.")
         
-        if st.button("Aceitar Termos e Entrar", type="primary", width='stretch'):
+        if st.button("Aceitar Termos e Entrar", type="primary", use_container_width=True):
             if aceito:
+                # Lógica de aceite aqui...
                 st.session_state['termos_aceitos'] = True
-                registrar_log_auditoria(st.session_state.get('usuario_id'), "ACEITE_TERMOS", "Usuário leu e aceitou os termos da LGPD.")
-                st.rerun() 
+                st.rerun()
             else:
-                st.error("❌ É obrigatório marcar a caixa de seleção para aceitar os termos e prosseguir.")
+                st.error("❌ É obrigatório marcar a caixa de seleção.")
+
 
 def tela_home() -> None:
     """Nova Home principal que consolida a antiga Page 0 no App.py"""
