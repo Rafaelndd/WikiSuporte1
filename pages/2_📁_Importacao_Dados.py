@@ -91,7 +91,7 @@ def is_plantao_normal(dt):
 st.title("📁 Importação e Exportação de Relatórios")
 st.markdown("Importe relatórios mensais, faça a gestão do CRM de clientes e extraia análises de Plantão diário.")
 
-aba1, aba2, aba3 = st.tabs(["📥 Importar Mensal / Relatórios", "🔗 Cadastrar Clientes (CRM)", "🌙 Extrator de Plantões Diário"])
+aba1, aba2, aba3 = st.tabs(["📥 Importar Mensal / Relatórios", "🔗 Cadastrar Clientes (CRM)", "📥 Extrator de Plantões Diário"])
 
 # ------------------------------------------
 # ABA 1: IMPORTAÇÃO DE ARQUIVOS (MENSAL)

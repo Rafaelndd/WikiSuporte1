@@ -1,10 +1,42 @@
 import streamlit as st
 import random
 import pandas as pd
+import os
+import logging
 from datetime import datetime, timedelta
 from sqlalchemy import text
 from typing import Tuple, Optional
 from modules.database import get_connection
+
+# ==========================================
+# PASSO 1: Preparar a pasta de logs
+# ==========================================
+# Definimos o nome da pasta que queremos criar
+pasta_logs = "logs"
+
+# Verificamos se a pasta já existe no teu projeto. Se não existir, o Python cria-a!
+if not os.path.exists(pasta_logs):
+    os.makedirs(pasta_logs)
+
+# Criamos o caminho completo: "logs/sistema.log"
+# Usamos o os.path.join porque ele coloca a barra correta ( / ou \ ) dependendo se usas Windows ou Mac/Linux
+caminho_do_log = os.path.join(pasta_logs, "sistema.log")
+
+
+# ==========================================
+# PASSO 2: Configuração Central de Logs
+# ==========================================
+# Agora passamos o "caminho_do_log" em vez de apenas o nome do ficheiro
+logging.basicConfig(
+    filename=caminho_do_log, 
+    filemode='a',               
+    format='%(asctime)s - %(levelname)s - %(message)s', 
+    level=logging.INFO          
+)
+
+# Teste simples para garantir que está a funcionar
+logging.info("--- Aplicação iniciada e logs configurados  ---")
+
 
 # Tenta importar a função de auditoria (Ajuste o caminho se necessário)
 try:
@@ -131,7 +163,7 @@ if st.session_state['autenticado']:
     agora = datetime.now()
     ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
     
-    if agora - ultimo_acesso > timedelta(minutes=50):
+    if agora - ultimo_acesso > timedelta(minutes=20):
         st.session_state.clear() 
         st.warning("⏱️ Sessão expirada por inatividade. Por favor, faça login novamente para continuar.")
         st.stop()
@@ -146,6 +178,11 @@ def tela_login() -> None:
         <style>
             [data-testid="collapsedControl"] {display: none;}
             [data-testid="stSidebar"] {display: none;}
+            /* Força a centralização de textos dentro de elementos de alerta e captions */
+            .stAlert p, .stCaption {
+                text-align: center;
+                display: block;
+            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -163,13 +200,13 @@ def tela_login() -> None:
         st.markdown("<br>", unsafe_allow_html=True)
 
         with st.container(border=True):
-            st.markdown("<h4 style='text-align: center;'>🔐 Acesso Restrito</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='text-align: center;'>🔐 Login </h4>", unsafe_allow_html=True)
             
             with st.form("form_login"):
                 usuario = st.text_input("👤 Usuário", placeholder="Insira o seu nome de usuário")
                 senha = st.text_input("🔑 Senha", type="password", placeholder="••••••••")
                 st.markdown("<br>", unsafe_allow_html=True)
-                btn_login = st.form_submit_button("Acessar Sistema", type="primary", width='stretch')
+                btn_login = st.form_submit_button("Acessar Sistema", type="primary", use_container_width=True)
                 
             if btn_login:
                 if usuario and senha:
@@ -189,21 +226,53 @@ def tela_login() -> None:
                         st.error("❌ Usuário ou senha incorretos. Por favor, tente novamente.")
                 else:
                     st.warning("⚠️ Por favor, preencha ambos os campos de usuário e senha.")
+            
+                pass
 
         st.markdown("<br>", unsafe_allow_html=True)
         frases = [
-            "“Conhecereis a verdade, e a verdade vos libertará.” — Jesus Cristo",
-            "“A persistência realiza o impossível.” — Confúcio",
-            "“A qualidade nunca é um acidente; é sempre o resultado de um esforço inteligente.” — John Ruskin",
-            "“Você não precisa ser grande para começar, mas precisa começar para ser grande.” — Zig Ziglar",
-            "“O sucesso é a soma de pequenos esforços repetidos dia após dia.” — Robert Collier",
-            "“O trabalho em equipe é o combustível que permite a pessoas comuns alcançarem resultados incomuns.” — Andrew Carnegie",
-            "“A excelência não é um ato, mas um hábito.” — Aristóteles",
-            "“A única maneira de fazer um excelente trabalho é amar o que você faz.” — Steve Jobs",
-            "“O talento vence jogos, mas o trabalho em equipe ganha campeonatos.” — Michael Jordan"
-        ]
-        st.success(f"💡 **Pensamento do dia:**\n\n_{random.choice(frases)}_")
-        st.caption("© 2026 WikiSuporte — Desenvolvido por Rafael D. Nascimento.")
+                    "Aquele que quer ser o maior entre vós, seja o que serve. Jesus",
+                    "A imaginação é mais importante que o conhecimento. Albert Einstein",
+                    "Seja a mudança que você deseja ver no mundo. Mahatma Gandhi",
+                    "Paciência é um elemento fundamental do sucesso. Bill Gates",
+                    "A persistência é o caminho do êxito. Charles Chaplin",
+                    "Saber que não sabemos nada é o começo da sabedoria. Sócrates",
+                    "O que importa não é o que acontece com você, mas como você reage. Epicteto",
+                    "Comece onde você está, use o que você tem, faça o que você pode. Arthur Ashe",
+                    "O homem é o que ele pensa o dia todo. Ralph Waldo Emerson",
+                    "Não espere por circunstâncias ideais, elas nunca chegam. Napoleon Hill",
+                    "A alegria de fazer o bem é a única felicidade verdadeira. Leon Tolstói",
+                    "Quanto maior a dificuldade, maior a glória em superá-la. Epicuro",
+                    "Se você não pode fazer grandes coisas, faça pequenas coisas de forma grandiosa. Napoleon Hill",
+                    "A simplicidade é o último grau da sofisticação. Leonardo da Vinci",
+                    "Onde há amor pela humanidade, há amor pela arte de curar. Hipócrates",
+                    "Viver é a coisa mais rara do mundo. A maioria das pessoas apenas existe. Oscar Wilde",
+                    "A vida é 10% o que acontece comigo e 90% como eu reajo a isso. Charles Swindoll",
+                    "Sempre parece impossível até que seja feito. Nelson Mandela",
+                    "A única coisa que se coloca entre você e seu objetivo é a história que você conta a si mesmo. Jordan Belfort",
+                    "Procure ser um homem de valor, em vez de ser um homem de sucesso. Albert Einstein",
+                    "Nós somos o que fazemos repetidamente. Excelência, então, não é um ato, mas um hábito. Will Durant",
+                    "O melhor modo de prever o futuro é criá-lo. Alan Kay",
+                    "Nossa maior fraqueza está em desistir. Thomas Edison",
+                    "Para ganhar conhecimento, adicione coisas todos os dias. Para ganhar sabedoria, elimine coisas todos os dias. Lao Tzu",
+                    "Qualidade significa fazer certo quando ninguém está olhando. Henry Ford",
+                    "Um cliente satisfeito é a melhor estratégia de negócios de todas. Michael LeBoeuf",
+                    "A maior descoberta da minha geração é que um ser humano pode alterar sua vida ao alterar suas atitudes. William James",
+                    "Se você quer ir rápido, vá sozinho. Se você quer ir longe, vá acompanhado. Provérbio Africano",
+                    "A tecnologia é apenas uma ferramenta. O professor é o mais importante. Bill Gates",
+                    
+                ]
+
+        with col_centro:
+                # ... (seu formulário de login)
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # Frase centralizada
+                st.success(f"💡 **Pensamento do dia:**\n\n_{random.choice(frases)}_")
+                
+                # Rodapé centralizado com HTML
+                st.markdown("<p style='text-align: center; color: gray; font-size: 0.8rem;'>© 2026 WikiSuporte — Desenvolvido por Rafael D. Nascimento.</p>", unsafe_allow_html=True)
+
 
 def tela_termos_uso() -> None:
     st.markdown("""
