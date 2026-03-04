@@ -197,12 +197,12 @@ with aba1:
                         col_m2.metric("Data Inicial", df_processado['data_inicio'].min().strftime('%d/%m/%Y'))
                         col_m3.metric("Data Final", df_processado['data_inicio'].max().strftime('%d/%m/%Y'))
                 
-                if st.button("💾 Confirmar e Salvar Mensal no Banco", type="primary", width='stretch'):
+                if st.button("💾 Salvar", type="primary", width='stretch'):
                     with st.spinner("Gravando dados no WikiSuporte..."):
                         sucesso, msg = salvar_no_banco(df_processado, nome_tabela_bd, tipo_identificado)
                         if sucesso:
-                            st.success(f"🎉 Fantástico! {len(df_processado)} registros foram salvos no banco.")
-                            registrar_log_auditoria(usuario_id, "IMPORT_CSV", f"Importou arquivo MENSAL {arquivo_upload.name}")
+                            st.success(f"{len(df_processado)} registros foram salvos com sucesso.")
+                            registrar_log_auditoria(usuario_id, "IMPORT_CSV", f"Importado {arquivo_upload.name}")
                         else: st.error(f"❌ Erro ao salvar o arquivo: {msg}")
 
 # ------------------------------------------
@@ -444,7 +444,7 @@ with aba3:
                             except Exception as e: st.error(f"❌ Erro ao salvar: {e}")
 
                             # 🌟 LAYOUT DE EXPORTAÇÃO TXT SOLICITADO
-                            txt_content = "Relatório Oficial de Atendimentos - Plantão\n" + "="*60 + "\n\n"
+                            txt_content = "Relatório de Atendimentos - Plantão\n" + "="*60 + "\n\n"
                             
                             lista_dfs_export = []
                             analistas_unicos = df_limpo['Atendente'].unique()

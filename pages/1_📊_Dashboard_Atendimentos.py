@@ -59,7 +59,7 @@ def carregar_dados_multi360():
 # 3. INTERFACE E FILTROS GLOBAIS
 # ==========================================
 st.title("📊 Dashboard de Atendimentos")
-st.markdown("Visão clara do fluxo de atendimentos e do desempenho da equipe em todos os canais.")
+st.markdown("Análise detalhada dos atendimentos via GoTo e Multi360.")
 
 df_goto_raw = carregar_dados_goto()
 df_multi360_raw = carregar_dados_multi360()
@@ -93,7 +93,7 @@ with st.expander("⚙️ Filtros: ", expanded=True):
             data_final_padrao = datetime.now().date()
             data_inicial_padrao = (datetime.now() - timedelta(days=30)).date()
 
-        datas_selecionadas = st.date_input("📅 Período (Abertura):", value=(data_inicial_padrao, data_final_padrao), max_value=datetime.now().date() + timedelta(days=1))
+        datas_selecionadas = st.date_input("📅 Período (Abertura):", value=(data_inicial_padrao, data_final_padrao), max_value=datetime.now().date() + timedelta(days=1),format="DD/MM/YYYY")
         
     with col_f2:
         sla_finalizacao_horas = st.number_input("⏱️ Meta SLA WhatsApp (Horas):", value=24)
@@ -247,14 +247,14 @@ if not df_tel.empty:
 # ==========================================
 # 5. CONSTRUÇÃO DAS ABAS PRINCIPAIS (UX/UI)
 # ==========================================
-aba_geral, aba_wpp, aba_telefonia = st.tabs(["👁️ Visão Unificada", "💬 WhatsApp (Multi360)", "📞 Ligações (GoTo)"])
+aba_geral, aba_wpp, aba_telefonia = st.tabs(["Visão Unificada", "WhatsApp (Multi360)", "Ligações (GoTo)"])
 
 # ------------------------------------------
 # ABA 1: VISÃO UNIFICADA (GERAL)
 # ------------------------------------------
 with aba_geral:
     st.markdown("### 📈 Resumo de Atendimentos - GoTo e WhatsApp")
-    st.caption("Volume total de atendimentos, divisão por canal e análise de horários críticos.")
+    st.caption("Volume total de atendimentos, proporção entre GoTo e Multi360.")
     
     vol_wpp = len(df_wpp) if 'df_wpp' in locals() else 0
     vol_tel = len(df_tel) if 'df_tel' in locals() else 0
@@ -289,7 +289,7 @@ with aba_geral:
             fig_omni.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20))
             fig_omni.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig_omni, width='stretch')
-            st.caption("A visão unificada mostra a divisão de atendimentos entre os canais, facilitando a análise de onde está a maior demanda.")
+            st.caption("Visualize a distribuição dos atendimentos entre os canais para entender onde a maioria dos clientes está buscando suporte.")
             
         with g2:
             st.markdown("#### 📈 Tendência Diária de Atendimentos")
@@ -332,91 +332,392 @@ with aba_wpp:
 
             st.divider()
             col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                st.markdown("#### 📈 Resumo Diário de Atendimentos")
-                tma_diario = df_wpp.groupby("DIA")["TMA_HORAS"].mean().reset_index()
-                fig_tma = px.bar(tma_diario, x="DIA", y="TMA_HORAS", color_discrete_sequence=['#25D366'])
-                fig_tma.update_layout(margin=dict(t=20, b=0, l=0, r=0))
-                st.plotly_chart(fig_tma, width='stretch')
-                st.caption("Acompanhe o tempo médio de atendimento por dia para identificar tendências e picos de demanda.")
-                
-            with col_g2:
+        with col_g1:
+            st.markdown("#### 📈 Performance e Volume Diário")
+            
+            # 1. Preparação dos dados: Média e Contagem no mesmo agrupamento
+            resumo_diario = df_wpp.groupby("DIA").agg(
+                TMA_medio=("TMA_HORAS", "mean"),
+                Quantidade=("TMA_HORAS", "count")
+            ).reset_index()
+            
+            # 2. Criar gráfico com dois eixos
+            from plotly.subplots import make_subplots
+            import plotly.graph_objects as go
+
+            fig_misto = make_subplots(specs=[[{"secondary_y": True}]])
+
+            # Adiciona Volume (Barras) - Eixo Principal (Esquerda)
+            fig_misto.add_trace(
+                go.Bar(
+                    x=resumo_diario["DIA"], 
+                    y=resumo_diario["Quantidade"],
+                    name="Qtd. Atendimentos",
+                    marker_color='#D1FAE5', # Verde bem claro para não ofuscar a linha
+                    hovertemplate="Volume: %{y}<extra></extra>"
+                ),
+                secondary_y=False,
+            )
+
+            # Adiciona TMA (Linha) - Eixo Secundário (Direita)
+            fig_misto.add_trace(
+                go.Scatter(
+                    x=resumo_diario["DIA"], 
+                    y=resumo_diario["TMA_medio"],
+                    name="Tempo Médio (h)",
+                    mode="lines+markers+text",
+                    text=resumo_diario["TMA_medio"].round(1),
+                    textposition="top center",
+                    line=dict(color='#25D366', width=3), # Verde WhatsApp forte
+                    hovertemplate="Média: %{y:.2f}h<extra></extra>"
+                ),
+                secondary_y=True,
+            )
+
+            # 3. Ajustes de Layout e Nomes Claros
+            fig_misto.update_layout(
+                margin=dict(t=10, b=10, l=10, r=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                hovermode="x unified"
+            )
+
+            fig_misto.update_yaxes(title_text="Volume de Chats", secondary_y=False)
+            fig_misto.update_yaxes(title_text="Tempo Médio (h)", secondary_y=True)
+
+            st.plotly_chart(fig_misto, use_container_width=True)
+            st.caption("As barras mostram o **volume** total e a linha indica a **agilidade**. Analise picos de volume que causam aumento no tempo de resposta.")
+
+
+        with col_g2:
                 if 'DIA_SEMANA' in df_wpp.columns and 'HORA' in df_wpp.columns:
-                    st.markdown("#### 🔥 Demonstrativo por Dia da Semana e Hora do Dia")
+                    st.markdown("#### 📅 Mapa de Calor: Concentração de Atendimentos")
+                    
+                    # 1. Preparação dos dados
                     heatmap = df_wpp.pivot_table(index="DIA_SEMANA", columns="HORA", values="TMA_HORAS", aggfunc="count").fillna(0)
                     dias_ordem = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                     heatmap = heatmap.reindex([d for d in dias_ordem if d in heatmap.index])
-                    heatmap.index = heatmap.index.map({'Monday':'Seg', 'Tuesday':'Ter', 'Wednesday':'Qua', 'Thursday':'Qui', 'Friday':'Sex', 'Saturday':'Sáb', 'Sunday':'Dom'})
-                    fig_heat = px.imshow(heatmap, aspect="auto", color_continuous_scale='Reds')
-                    fig_heat.update_layout(margin=dict(t=20, b=0, l=0, r=0))
-                    st.plotly_chart(fig_heat, width='stretch')
-                    st.caption("Identifique os dias da semana e horários com maior volume de atendimentos.")
+                    
+                    # Tradução dos índices para o Gestor
+                    dias_pt = {'Monday':'Segunda', 'Tuesday':'Terça', 'Wednesday':'Quarta', 'Thursday':'Quinta', 'Friday':'Sexta', 'Saturday':'Sábado', 'Sunday':'Domingo'}
+                    heatmap.index = heatmap.index.map(dias_pt)
 
-        with sub_indiv:
-            if 'atendente' in df_wpp.columns:
-                atendentes_lista = df_wpp["atendente"].dropna().unique().tolist()
-                if atendentes_lista:
-                    st.markdown("### 👤 Análise Individual por Atendente")
-                    atendente = st.selectbox("Escolha um atendente:", atendentes_lista, label_visibility="collapsed")
-                    df_at = df_wpp[df_wpp["atendente"] == atendente]
+                    # 2. Criação do Gráfico com Plotly
+                    fig_heat = px.imshow(
+                        heatmap, 
+                        aspect="auto", 
+                        color_continuous_scale='YlOrRd', # Amarelo -> Laranja -> Vermelho (mais intuitivo)
+                        labels=dict(x="Hora do Dia", y="Dia da Semana", color="Qtd. Atendimentos"),
+                        text_auto=True # Mostra o número dentro do quadrado se houver espaço
+                    )
 
-                    with st.container(border=True):
-                        c_at1, c_at2, c_at3, c_at4 = st.columns(4)
-                        c_at1.metric("Atendimentos", len(df_at))
-                        c_at2.metric("Tempo Médio do Analista", f"{round(df_at['TMA_HORAS'].mean(), 1)}h")
-                        c_at3.metric("Tempo sem Resposta", f"{round(df_at['TEMPO_OCIOSO_HORAS'].mean(), 1)}h" if 'TEMPO_OCIOSO_HORAS' in df_at.columns else "N/A")
-                        c_at4.metric("Nota de Desempenho", round(score_df.loc[atendente]["Score"] * 100, 1) if 'score_df' in locals() and atendente in score_df.index else "N/A", "%")
+                    # 3. Refinamento de Layout (UX)
+                    fig_heat.update_layout(
+                        xaxis_nticks=24, # Garante que mostre as 24h se houver dados
+                        margin=dict(t=10, b=10, l=10, r=10),
+                        coloraxis_showscale=False # Remove a barra lateral para limpar o visual se preferir
+                    )
+                    
+                    st.plotly_chart(fig_heat, use_container_width='stretch')
+                    st.info("💡 **Dica de Gestão:** Áreas em vermelho indicam picos de atendimento.")
 
-                    c_graf1, c_graf2 = st.columns(2)
-                    with c_graf1:
-                        if 'MES' in df_at.columns:
-                            prod_mensal = df_at.groupby("MES").size().reset_index(name="Volume")
-                            fig_prod = px.bar(prod_mensal, x="MES", y="Volume", title="Volume de Atendimentos por Mês", color_discrete_sequence=['#25D366'])
-                            st.plotly_chart(fig_prod, width='stretch')
-                    with c_graf2:
-                        if 'avaliacao' in df_at.columns:
-                            fig_notas = px.histogram(df_at, x="avaliacao", nbins=5, title="Frequência de Notas Recebidas", color_discrete_sequence=['#FFC107'])
-                            st.plotly_chart(fig_notas, width='stretch')
-                            st.caption("Qual é a distribuição das avaliações recebidas? Isso pode indicar a satisfação geral dos clientes atendidos por esse analista.")
+with sub_indiv:
+    if 'atendente' in df_wpp.columns:
+        # 1. Preparação da lista e filtro
+        atendentes_lista = sorted(df_wpp["atendente"].dropna().unique().tolist())
+        
+        if atendentes_lista:
+            st.markdown("### 👤 Painel de Performance Individual")
+            atendente = st.selectbox("Selecione o Analista para análise detalhada:", atendentes_lista)
+            
+            # Filtra os dados do atendente selecionado
+            df_at = df_wpp[df_wpp["atendente"] == atendente]
 
-        with sub_qual:
-            if 'avaliacao' in df_wpp.columns and 'atendente' in df_wpp.columns:
-                col_q1, col_q2 = st.columns([1, 1.5])
-                with col_q1:
-                    st.markdown("#### 🏆 Ranking de Avaliações por Atendente")
-                    ranking_nota = df_wpp.groupby("atendente")["avaliacao"].mean().sort_values(ascending=False).reset_index()
-                    st.dataframe(ranking_nota.style.format({'avaliacao': "{:.1f}"}), width='stretch', hide_index=True)
-                with col_q2:
-                    fig_rank_notas = px.bar(ranking_nota, x="avaliacao", y="atendente", orientation='h', title="Média de Avaliações por Atendente", color='avaliacao', color_continuous_scale='Greens')
-                    fig_rank_notas.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
-                    st.plotly_chart(fig_rank_notas, width='stretch')
+            # 2. Bloco de Indicadores Principais (KPIs)
+            with st.container(border=True):
+                c_at1, c_at2, c_at3, c_at4 = st.columns(4)
+                
+                # Cálculos comparativos para Contexto (UX)
+                media_geral_tma = df_wpp['TMA_HORAS'].mean()
+                tma_individuo = df_at['TMA_HORAS'].mean()
+                # Diferença percentual entre o analista e a média da equipe
+                diff_percentual = ((tma_individuo / media_geral_tma) - 1) * 100
 
-        with sub_oper:
-            co1, co2 = st.columns(2)
-            with co1:
-                if 'HORA' in df_wpp.columns:
-                    vol_hora = df_wpp.groupby("HORA").size().reset_index(name="Volume")
-                    fig_hora = px.bar(vol_hora, x="HORA", y="Volume", color='Volume', color_continuous_scale='Blues', title="Volume Total por Hora do Dia")
-                    st.plotly_chart(fig_hora, width='stretch')
-            with co2:
-                fig_hist_tma = px.histogram(df_wpp, x="TMA_HORAS", nbins=20, title="Quanto tempo demoram os chamados?", color_discrete_sequence=['#EF553B'])
-                fig_hist_tma.update_layout(xaxis_title="Horas para Finalizar", yaxis_title="Quantidade de Chamados")
-                st.plotly_chart(fig_hist_tma, width='stretch')
-                st.caption("A distribuição do tempo de atendimento pode revelar se a maioria dos chamados é resolvida rapidamente ou se há muitos casos que se arrastam por dias, impactando a satisfação do cliente.")
+                # KPI 1: Volume Bruto
+                c_at1.metric(
+                    label="Chats Finalizados", 
+                    value=len(df_at),
+                    help="Total de atendimentos atribuídos a este analista no período."
+                )
 
-        with sub_estrat:
-            ce1, ce2 = st.columns(2)
-            with ce1:
-                if "departamento" in df_wpp.columns:
-                    dept = df_wpp.groupby("departamento")["TMA_HORAS"].mean().reset_index().sort_values('TMA_HORAS', ascending=True)
-                    fig_dept = px.bar(dept, x="TMA_HORAS", y="departamento", orientation='h', title="Departamento com maior tempo médio de atendimento", color='TMA_HORAS', color_continuous_scale='Reds')
-                    st.plotly_chart(fig_dept, width='stretch')
-            with ce2:
-                if 'atendente' in df_wpp.columns:
-                    pareto = df_wpp["atendente"].value_counts().reset_index().head(10)
-                    pareto.columns = ["Analista", "Volume"]
-                    fig_pareto = px.bar(pareto, x="Analista", y="Volume", title="Atendentes com maior número de atendimentos", color='Volume', color_continuous_scale='Purples')
-                    st.plotly_chart(fig_pareto, width='stretch')
+                # KPI 2: Agilidade (TMA) - Com comparativo de média
+                c_at2.metric(
+                    label="Tempo Médio (TMA)", 
+                    value=f"{tma_individuo:.1f}h", 
+                    delta=f"{diff_percentual:.1f}% vs Equipe", 
+                    delta_color="inverse", # Se o tempo for maior que a média, fica vermelho (ruim)
+                    help="Tempo médio que o analista leva para encerrar um chat. Menos tempo indica mais agilidade."
+                )
+                
+                # KPI 3: Gargalo de Espera
+                tempo_ocioso = df_at['TEMPO_OCIOSO_HORAS'].mean() if 'TEMPO_OCIOSO_HORAS' in df_at.columns else 0
+                c_at3.metric(
+                    label="Espera do Cliente", 
+                    value=f"{tempo_ocioso:.1f}h",
+                    help="Média de tempo que o cliente aguardou sem resposta após a última interação."
+                )
+                
+                # KPI 4: Score (Ranking)
+                if 'score_df' in locals() and atendente in score_df.index:
+                    pontuacao = score_df.loc[atendente]["Score"] * 100
+                    c_at4.metric(
+                        label="Índice de Qualidade", 
+                        value=f"{pontuacao:.0f} pts",
+                        help="Nota composta baseada em volume, agilidade e avaliações (0 a 100)."
+                    )
+
+            # 3. Bloco de Gráficos (Análise de Tendência e Satisfação)
+            col_esq, col_dir = st.columns(2)
+            
+            with col_esq:
+                st.markdown("#### 📈 Evolução de Produtividade")
+                if 'MES' in df_at.columns:
+                    # Agrupa por mês para ver se o analista está evoluindo
+                    prod_mensal = df_at.groupby("MES").size().reset_index(name="Volume")
+                    fig_prod = px.line(
+                        prod_mensal, x="MES", y="Volume", 
+                        markers=True, 
+                        color_discrete_sequence=['#25D366'],
+                        labels={"MES": "Mês", "Volume": "Qtd. Chats"}
+                    )
+                    fig_prod.update_layout(margin=dict(t=5, b=5, l=5, r=5))
+                    st.plotly_chart(fig_prod, use_container_width=True)
+                    st.caption("Histórico mensal de atendimentos realizados.")
+
+            with col_dir:
+                st.markdown("#### ⭐ Satisfação do Cliente (CSAT)")
+                if 'avaliacao' in df_at.columns:
+                    # Conta a frequência de cada nota (1 a 5)
+                    notas_counts = df_at['avaliacao'].value_counts().sort_index().reset_index()
+                    fig_notas = px.bar(
+                        notas_counts, x="avaliacao", y="count",
+                        color_discrete_sequence=['#FFC107'],
+                        labels={"avaliacao": "Nota Recebida", "count": "Frequência"}
+                    )
+                    fig_notas.update_layout(margin=dict(t=5, b=5, l=5, r=5))
+                    st.plotly_chart(fig_notas, use_container_width=True)
+                    st.caption("Distribuição das notas dadas pelos clientes ao fim do chat.")
+
+            # 4. Tabela de Casos Críticos (Ação Imediata)
+            
+                    st.markdown("#### 🚨 Top 5 Atendimentos com Maior Demora (Gargalos)")
+
+                    # Seleciona os 5 maiores e inclui a coluna 'atendente'
+                    casos_criticos = df_at.nlargest(5, 'TMA_HORAS')[['atendente', 'data_inicio', 'status', 'TMA_HORAS']]
+
+                    # Renomeia para termos amigáveis ao gestor
+                    casos_criticos.columns = ['Analista Responsável', 'Início do Chamado', 'Status Atual', 'Tempo Total (Horas)']
+
+                    # Exibe a tabela formatada ocupando a largura total
+                    st.dataframe(
+                        casos_criticos.style.format({'Tempo Total (Horas)': '{:.1f}h'}), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+
+                    st.caption("Esta lista destaca os atendimentos que mais impactaram negativamente a média de agilidade deste analista.")
+
+
+
+with sub_qual:
+    if 'avaliacao' in df_wpp.columns and 'atendente' in df_wpp.columns:
+        st.markdown("### ⭐ Qualidade e Satisfação (Score de Satisfação do Cliente - Escala 0-10)")
+        
+        # 1. Agrupamento com média e volume de amostragem
+        ranking_nota = df_wpp.groupby("atendente").agg(
+            Media_Nota=("avaliacao", "mean"),
+            Total_Votos=("avaliacao", "count")
+        ).sort_values("Media_Nota", ascending=False).reset_index()
+
+        col_q1, col_q2 = st.columns([1, 1.5])
+        
+        with col_q1:
+            st.markdown("#### 🏆 Ranking de Notas")
+            # UX: Background gradient calibrado para escala 10 (Vermelho a Verde)
+            st.dataframe(
+                ranking_nota.style.format({'Media_Nota': "{:.1f}"})
+                .background_gradient(subset=['Media_Nota'], cmap='RdYlGn', vmin=0, vmax=10),
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "atendente": "Analista",
+                    "Media_Nota": "Nota Média (0-10)",
+                    "Total_Votos": "Avaliações"
+                }
+            )
+            st.caption("💡 O gradiente de cor destaca quem está mais próximo da nota máxima (10.0).")
+
+        with col_q2:
+            # 2. Gráfico Horizontal com limite fixo em 10
+            fig_rank_notas = px.bar(
+                ranking_nota, 
+                x="Media_Nota", 
+                y="atendente", 
+                orientation='h',
+                text_auto='.1f',
+                color='Media_Nota',
+                # Escala de cores divergente para destacar notas baixas vs altas
+                color_continuous_scale='RdYlGn', 
+                range_x=[0, 11], # Margem extra para o texto da nota não cortar
+                labels={"Media_Nota": "Nota Média", "atendente": "Analista"}
+            )
+            
+            fig_rank_notas.update_layout(
+                title="Performance de Atendimento por Analista",
+                yaxis={'categoryorder':'total ascending'}, 
+                margin=dict(t=40, b=0, l=0, r=0),
+                coloraxis_showscale=False,
+                xaxis=dict(tickmode='linear', tick0=0, dtick=2) # Eixo X marcando de 2 em 2 até 10
+            )
+            
+            st.plotly_chart(fig_rank_notas, use_container_width=True)
+
+        # 3. Widget de Insight de Gestão
+        media_equipe = df_wpp['avaliacao'].mean()
+        # UX: Feedback visual baseado na média (Se média < 7, alerta amarelo)
+        tipo_alerta = "info" if media_equipe >= 7 else "warning"
+        
+        st.write("---")
+        if tipo_alerta == "info":
+            st.info(f"✅ **Média Geral da Equipe:** {media_equipe:.1f} / 10.0. Avaliação geral está boa, continue monitorando para manter a qualidade.")
+        else:
+            st.warning(f"⚠️ **Atenção:** Média da equipe está em {media_equipe:.1f} / 10.0. Considere investigar os fatores que estão impactando a satisfação do cliente e implementar ações de melhoria.")
+
+
+    with sub_oper:
+        st.markdown("### ⚙️ Eficiência e Gargalos Operacionais")
+        
+        co1, co2 = st.columns(2)
+        
+        with co1:
+            if 'HORA' in df_wpp.columns:
+                st.markdown("#### 🕒 Pico de Demanda (Por Hora)")
+                # Agrupamento e preparação
+                vol_hora = df_wpp.groupby("HORA").size().reset_index(name="Volume")
+                
+                # UX: Gráfico de área/linha costuma ser melhor para séries temporais contínuas (horas)
+                fig_hora = px.area(
+                    vol_hora, x="HORA", y="Volume", 
+                    color_discrete_sequence=['#007BFF'],
+                    markers=True,
+                    labels={"HORA": "Hora do Dia", "Volume": "Qtd. Atendimentos"}
+                )
+                
+                fig_hora.update_layout(
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    xaxis=dict(tickmode='linear', tick0=0, dtick=2), # Mostra 0h, 2h, 4h...
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(fig_hora, use_container_width=True)
+                st.caption("🔍 **Insight:** Identifique os horários com maior demanda.")
+
+        with co2:
+            st.markdown("#### ⏳ Análise de Tempo de Atendimento (Tempo Médio por Atendimento - TMA)")
+            # UX: Ajuste de bins para não poluir e foco no 'Grosso' da operação
+            fig_hist_tma = px.histogram(
+                df_wpp, x="TMA_HORAS", 
+                nbins=30, 
+                color_discrete_sequence=['#EF553B'],
+                labels={"TMA_HORAS": "Duração (Horas)", "count": "Frequência"}
+            )
+            
+            # Adiciona uma linha vertical com a mediana (UX: A mediana é mais "real" que a média em histogramas)
+            mediana_tma = df_wpp["TMA_HORAS"].median()
+            fig_hist_tma.add_vline(x=mediana_tma, line_dash="dash", line_color="black", 
+                                    annotation_text=f"Mediana: {mediana_tma:.1f}h")
+
+            fig_hist_tma.update_layout(
+                margin=dict(t=10, b=10, l=10, r=10),
+                xaxis_title="Horas para Finalizar", 
+                yaxis_title="Volume de Chamados",
+                bargap=0.1
+            )
+            
+            st.plotly_chart(fig_hist_tma, use_container_width=True)
+            st.caption("💡 **Análise:** Se a curva tiver uma 'cauda' longa à direita, você tem muitos casos complexos que travam a fila.")
+
+        # --- MÉTRICA DE CONCLUSÃO RÁPIDA (UX: O "Pulo do Gato" para o Gestor) ---
+        atendimentos_rapidos = (df_wpp["TMA_HORAS"] <= 1).mean() * 100
+        st.info(f"🚀 **Agilidade de Primeiro Nível:** {atendimentos_rapidos:.1f}% dos atendimentos do suporte são resolvidos em **menos de 1 hora**.")
+
+
+    with sub_estrat:
+        st.markdown("### 📊 Visão Estratégica: Departamentos e Produtividade")
+        
+        ce1, ce2 = st.columns(2)
+    
+    with ce1:
+        if "departamento" in df_wpp.columns:
+            st.markdown("#### 🏢 Agilidade por Departamento")
+            # Agrupamento e ordenação (Menor tempo = Melhor performance no topo)
+            dept = df_wpp.groupby("departamento")["TMA_HORAS"].mean().reset_index().sort_values('TMA_HORAS', ascending=True)
+            
+            fig_dept = px.bar(
+                dept, 
+                x="TMA_HORAS", 
+                y="departamento", 
+                orientation='h', 
+                text_auto='.1f',
+                color='TMA_HORAS', 
+                color_continuous_scale='Reds', # Vermelho indica "alerta" para tempos altos
+                labels={"TMA_HORAS": "Tempo Médio (h)", "departamento": "Departamento"}
+            )
+            
+            fig_dept.update_layout(
+                margin=dict(t=30, b=10, l=10, r=10),
+                coloraxis_showscale=False,
+                xaxis_title="Duração Média (Horas)",
+                yaxis_title=None
+            )
+            
+            st.plotly_chart(fig_dept, use_container_width=True)
+            st.caption("🚨 **Foco de Gestão:** Departamentos no final da lista possuem processos mais lentos ou maior complexidade.")
+
+    with ce2:
+        if 'atendente' in df_wpp.columns:
+            st.markdown("#### 🏆 Top 10 Analistas (Volume)")
+            # Curva de Pareto simplificada: quem carrega o maior volume?
+            pareto = df_wpp["atendente"].value_counts().reset_index().head(10)
+            pareto.columns = ["Analista", "Volume"]
+            
+            fig_pareto = px.bar(
+                pareto, 
+                x="Volume", # Inverti para horizontal (H) para facilitar leitura de nomes longos
+                y="Analista", 
+                orientation='h',
+                text_auto=True,
+                color='Volume', 
+                color_continuous_scale='Purples', # Roxo transmite autoridade/importância
+                labels={"Volume": "Qtd. Atendimentos", "Analista": "Analista"}
+            )
+            
+            fig_pareto.update_layout(
+                margin=dict(t=30, b=10, l=10, r=10),
+                coloraxis_showscale=False,
+                yaxis={'categoryorder':'total ascending'}, # O maior volume fica no topo
+                xaxis_title="Total de Chats Concluídos",
+                yaxis_title=None
+            )
+            
+            st.plotly_chart(fig_pareto, use_container_width=True)
+            st.caption("⭐ **Reconhecimento:** Estes são os analistas que processam a maior demanda da operação.")
+
+    # --- INSIGHT ESTRATÉGICO FINAL ---
+    if not df_wpp.empty:
+        top_analista = pareto.iloc[0]["Analista"]
+        vol_max = pareto.iloc[0]["Volume"]
+        st.success(f"💡 **Destaque Operacional:** O analista **{top_analista}** é o mais produtivo do período, com **{vol_max}** atendimentos finalizados.")
+
 
 # ------------------------------------------
 # ABA 3: TELEFONIA (GOTO)
