@@ -101,7 +101,7 @@ with st.expander("⚙️ Filtros: ", expanded=True):
     with col_f3:
         st.write("") 
         st.write("")
-        if st.button("🔄 Atualizar", use_container_width=True):
+        if st.button("🔄 Atualizar", width='stretch'):
             st.cache_data.clear()
             st.rerun()
 
@@ -288,7 +288,7 @@ with aba_geral:
             fig_omni = px.pie(df_omni, values='Volume', names='Canal', hole=0.5, color_discrete_sequence=['#25D366', '#007BFF'])
             fig_omni.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20))
             fig_omni.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_omni, use_container_width=True)
+            st.plotly_chart(fig_omni, width='stretch')
             st.caption("A visão unificada mostra a divisão de atendimentos entre os canais, facilitando a análise de onde está a maior demanda.")
             
         with g2:
@@ -311,7 +311,7 @@ with aba_geral:
                 df_trend = pd.concat(trends)
                 fig_trend = px.area(df_trend, x='Data', y='Volume', color='Canal', color_discrete_map={"WhatsApp": "#25D366", "Telefone": "#007BFF"})
                 fig_trend.update_layout(margin=dict(t=20, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                st.plotly_chart(fig_trend, use_container_width=True)
+                st.plotly_chart(fig_trend, width='stretch')
                 st.caption("Acompanhe a evolução diária dos atendimentos em cada canal para identificar picos e sazonalidades.")
 
 # ------------------------------------------
@@ -337,7 +337,7 @@ with aba_wpp:
                 tma_diario = df_wpp.groupby("DIA")["TMA_HORAS"].mean().reset_index()
                 fig_tma = px.bar(tma_diario, x="DIA", y="TMA_HORAS", color_discrete_sequence=['#25D366'])
                 fig_tma.update_layout(margin=dict(t=20, b=0, l=0, r=0))
-                st.plotly_chart(fig_tma, use_container_width=True)
+                st.plotly_chart(fig_tma, width='stretch')
                 st.caption("Acompanhe o tempo médio de atendimento por dia para identificar tendências e picos de demanda.")
                 
             with col_g2:
@@ -349,7 +349,7 @@ with aba_wpp:
                     heatmap.index = heatmap.index.map({'Monday':'Seg', 'Tuesday':'Ter', 'Wednesday':'Qua', 'Thursday':'Qui', 'Friday':'Sex', 'Saturday':'Sáb', 'Sunday':'Dom'})
                     fig_heat = px.imshow(heatmap, aspect="auto", color_continuous_scale='Reds')
                     fig_heat.update_layout(margin=dict(t=20, b=0, l=0, r=0))
-                    st.plotly_chart(fig_heat, use_container_width=True)
+                    st.plotly_chart(fig_heat, width='stretch')
                     st.caption("Identifique os dias da semana e horários com maior volume de atendimentos.")
 
         with sub_indiv:
@@ -372,11 +372,11 @@ with aba_wpp:
                         if 'MES' in df_at.columns:
                             prod_mensal = df_at.groupby("MES").size().reset_index(name="Volume")
                             fig_prod = px.bar(prod_mensal, x="MES", y="Volume", title="Volume de Atendimentos por Mês", color_discrete_sequence=['#25D366'])
-                            st.plotly_chart(fig_prod, use_container_width=True)
+                            st.plotly_chart(fig_prod, width='stretch')
                     with c_graf2:
                         if 'avaliacao' in df_at.columns:
                             fig_notas = px.histogram(df_at, x="avaliacao", nbins=5, title="Frequência de Notas Recebidas", color_discrete_sequence=['#FFC107'])
-                            st.plotly_chart(fig_notas, use_container_width=True)
+                            st.plotly_chart(fig_notas, width='stretch')
                             st.caption("Qual é a distribuição das avaliações recebidas? Isso pode indicar a satisfação geral dos clientes atendidos por esse analista.")
 
         with sub_qual:
@@ -385,11 +385,11 @@ with aba_wpp:
                 with col_q1:
                     st.markdown("#### 🏆 Ranking de Avaliações por Atendente")
                     ranking_nota = df_wpp.groupby("atendente")["avaliacao"].mean().sort_values(ascending=False).reset_index()
-                    st.dataframe(ranking_nota.style.format({'avaliacao': "{:.1f}"}), use_container_width=True, hide_index=True)
+                    st.dataframe(ranking_nota.style.format({'avaliacao': "{:.1f}"}), width='stretch', hide_index=True)
                 with col_q2:
                     fig_rank_notas = px.bar(ranking_nota, x="avaliacao", y="atendente", orientation='h', title="Média de Avaliações por Atendente", color='avaliacao', color_continuous_scale='Greens')
                     fig_rank_notas.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
-                    st.plotly_chart(fig_rank_notas, use_container_width=True)
+                    st.plotly_chart(fig_rank_notas, width='stretch')
 
         with sub_oper:
             co1, co2 = st.columns(2)
@@ -397,11 +397,11 @@ with aba_wpp:
                 if 'HORA' in df_wpp.columns:
                     vol_hora = df_wpp.groupby("HORA").size().reset_index(name="Volume")
                     fig_hora = px.bar(vol_hora, x="HORA", y="Volume", color='Volume', color_continuous_scale='Blues', title="Volume Total por Hora do Dia")
-                    st.plotly_chart(fig_hora, use_container_width=True)
+                    st.plotly_chart(fig_hora, width='stretch')
             with co2:
                 fig_hist_tma = px.histogram(df_wpp, x="TMA_HORAS", nbins=20, title="Quanto tempo demoram os chamados?", color_discrete_sequence=['#EF553B'])
                 fig_hist_tma.update_layout(xaxis_title="Horas para Finalizar", yaxis_title="Quantidade de Chamados")
-                st.plotly_chart(fig_hist_tma, use_container_width=True)
+                st.plotly_chart(fig_hist_tma, width='stretch')
                 st.caption("A distribuição do tempo de atendimento pode revelar se a maioria dos chamados é resolvida rapidamente ou se há muitos casos que se arrastam por dias, impactando a satisfação do cliente.")
 
         with sub_estrat:
@@ -410,13 +410,13 @@ with aba_wpp:
                 if "departamento" in df_wpp.columns:
                     dept = df_wpp.groupby("departamento")["TMA_HORAS"].mean().reset_index().sort_values('TMA_HORAS', ascending=True)
                     fig_dept = px.bar(dept, x="TMA_HORAS", y="departamento", orientation='h', title="Departamento com maior tempo médio de atendimento", color='TMA_HORAS', color_continuous_scale='Reds')
-                    st.plotly_chart(fig_dept, use_container_width=True)
+                    st.plotly_chart(fig_dept, width='stretch')
             with ce2:
                 if 'atendente' in df_wpp.columns:
                     pareto = df_wpp["atendente"].value_counts().reset_index().head(10)
                     pareto.columns = ["Analista", "Volume"]
                     fig_pareto = px.bar(pareto, x="Analista", y="Volume", title="Atendentes com maior número de atendimentos", color='Volume', color_continuous_scale='Purples')
-                    st.plotly_chart(fig_pareto, use_container_width=True)
+                    st.plotly_chart(fig_pareto, width='stretch')
 
 # ------------------------------------------
 # ABA 3: TELEFONIA (GOTO)
@@ -454,7 +454,7 @@ with aba_telefonia:
                     df_vol_dia_tel.columns = ['Data', 'Volume']
                     fig_linha_tel = px.area(df_vol_dia_tel, x='Data', y='Volume', title="Fluxo Diário de Entradas", color_discrete_sequence=['#007BFF'])
                     fig_linha_tel.update_layout(margin=dict(t=30, b=0, l=0, r=0))
-                    st.plotly_chart(fig_linha_tel, use_container_width=True)
+                    st.plotly_chart(fig_linha_tel, width='stretch')
             
             with cg_tel2:
                 if 'Categoria_UX' in df_tel.columns:
@@ -467,7 +467,7 @@ with aba_telefonia:
                     fig_status = px.pie(df_status, values='Quantidade', names='Status', hole=0.45, title="Desfecho das Chamadas", color='Status', color_discrete_map=cores_status)
                     fig_status.update_layout(margin=dict(t=30, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
                     fig_status.update_traces(textposition='inside', textinfo='percent')
-                    st.plotly_chart(fig_status, use_container_width=True)
+                    st.plotly_chart(fig_status, width='stretch')
 
         with tab_tel_agentes:
             if coluna_agente_tel:
@@ -499,12 +499,12 @@ with aba_telefonia:
                 with c_tel1:
                     fig_tel_vol = px.bar(df_equipe_real.head(10), x='Atendidas', y=coluna_agente_tel, orientation='h', title="Top 10: Atendimentos Efetivos", color='Atendidas', color_continuous_scale='Blues')
                     fig_tel_vol.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
-                    st.plotly_chart(fig_tel_vol, use_container_width=True)
+                    st.plotly_chart(fig_tel_vol, width='stretch')
                 with c_tel2:
                     df_perdidas = df_equipe_real.sort_values('Perdidas_Ramal', ascending=False).head(10)
                     fig_tel_perd = px.bar(df_perdidas, x='Perdidas_Ramal', y=coluna_agente_tel, orientation='h', title="🚨 Alerta: Chamadas Não Atendidas", color='Perdidas_Ramal', color_continuous_scale='Reds')
                     fig_tel_perd.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=30, b=0, l=0, r=0))
-                    st.plotly_chart(fig_tel_perd, use_container_width=True)
+                    st.plotly_chart(fig_tel_perd, width='stretch')
                 
                 st.markdown("#### 📋 Produtividade por Analista")
                 # Prepara os nomes das colunas com extrema clareza
@@ -521,7 +521,7 @@ with aba_telefonia:
                 st.dataframe(df_exibicao_equipe.style.format({
                     'Duração Média (Min)': "{:.1f}", 
                     'Horas Totais na Linha': "{:.1f}h"
-                }).background_gradient(subset=['Não Atendeu (Perdidas)'], cmap='Reds'), use_container_width=True, hide_index=True)
+                }).background_gradient(subset=['Não Atendeu (Perdidas)'], cmap='Reds'), width='stretch', hide_index=True)
 
                 # ----------------------------------------------------
                 # BLOCO 2: APENAS SISTEMA E TRANSFERÊNCIAS
@@ -539,7 +539,7 @@ with aba_telefonia:
                     # Removemos as colunas de TMA e Atendidas porque não fazem sentido para transferências
                     df_exibicao_rotas = df_exibicao_rotas[["Origem / Status do Sistema", "Total de Registros"]]
                     
-                    st.dataframe(df_exibicao_rotas, use_container_width=True, hide_index=True)
+                    st.dataframe(df_exibicao_rotas, width='stretch', hide_index=True)
 
             else:
                 st.info("O sistema não conseguiu identificar o nome dos agentes no arquivo do GoTo.")

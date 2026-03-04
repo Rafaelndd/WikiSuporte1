@@ -148,7 +148,7 @@ with aba_ramais:
             nome_analista = st.text_input("Digite o nome:") if analista_selecionado == "-- Novo Analista --" else analista_selecionado
             numero_ramal = st.text_input("Número do Ramal:")
             
-            if st.form_submit_button("Vincular Ramal", type="primary", use_container_width=True):
+            if st.form_submit_button("Vincular Ramal", type="primary", width='stretch'):
                 if nome_analista.strip() and numero_ramal.strip():
                     ramais_salvos[nome_analista.strip()] = numero_ramal.strip()
                     salvar_ramais(ramais_salvos)
@@ -162,7 +162,7 @@ with aba_ramais:
             st.info("Nenhum ramal configurado.")
         else:
             df_ramais = pd.DataFrame(list(ramais_salvos.items()), columns=["Analista EPSY", "Ramal Interno"]).sort_values(by="Analista EPSY")
-            st.dataframe(df_ramais, hide_index=True, use_container_width=True)
+            st.dataframe(df_ramais, hide_index=True, width='stretch')
             
             st.divider()
             analista_remover = st.selectbox("Remover o ramal de:", [""] + list(ramais_salvos.keys()))
@@ -262,7 +262,7 @@ with aba_diagnostico:
         
         with d1:
             st.markdown("#### 🗄️ Conexão com o Banco de Dados")
-            if st.button("🔌 Testar Conexão com o Banco de Dados", use_container_width=True):
+            if st.button("🔌 Testar Conexão com o Banco de Dados", width='stretch'):
                 inicio_db = time.time()
                 try:
                     eng = get_connection()
@@ -275,7 +275,7 @@ with aba_diagnostico:
                     
         with d2:
             st.markdown("#### 🌐 Qualidade e Ping do Servidor")
-            if st.button("📡 Teste de Ping à Internet", use_container_width=True):
+            if st.button("📡 Teste de Ping à Internet", width='stretch'):
                 inicio_net = time.time()
                 try:
                     # Testa a resolução e conexão com servidor DNS primário
@@ -292,7 +292,7 @@ with aba_diagnostico:
                     
         with d3:
             st.markdown("#### 💻 Monitoramento de Recursos")
-            if st.button("📈 Análise de Recursos", use_container_width=True):
+            if st.button("📈 Análise de Recursos", width='stretch'):
                 if HAS_PSUTIL:
                     cpu_usage = psutil.cpu_percent(interval=0.5)
                     ram_usage = psutil.virtual_memory().percent

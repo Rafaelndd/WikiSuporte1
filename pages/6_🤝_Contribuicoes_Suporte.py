@@ -114,7 +114,7 @@ with aba_ranking:
                 else: trofeus.append("🏅 Honra")
             
             df_ranking.insert(0, "Troféu", trofeus)
-            st.dataframe(df_ranking, use_container_width=True, hide_index=True)
+            st.dataframe(df_ranking, width='stretch', hide_index=True)
         else:
             st.write("Nenhuma contribuição aprovada ainda. Seja o primeiro a contribuir!")
 
@@ -251,7 +251,7 @@ with aba_wikis:
         df_rank_wiki = pd.read_sql(query_rank_wiki, conn)
     
     if not df_rank_wiki.empty:
-        st.dataframe(df_rank_wiki, use_container_width=True, hide_index=True)
+        st.dataframe(df_rank_wiki, width='stretch', hide_index=True)
     else:
         st.caption("Ainda não há dados suficientes para o ranking de Wikis.")
 
@@ -263,7 +263,7 @@ with aba_wikis:
         termo_busca_wiki = st.text_input("🔍 O que você está procurando nas Wikis?", placeholder="Ex: Erro nota fiscal...", key="busca_wiki_input")
     with col_btn_w:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_buscar_wiki = st.button("Pesquisar Wiki", use_container_width=True, type="primary")
+        btn_buscar_wiki = st.button("Pesquisar Wiki", width='stretch', type="primary")
 
     if erro_bd: 
         st.error(f"❌ Ocorreu um erro técnico: `{erro_bd}`")
@@ -359,7 +359,7 @@ with aba_manuais:
         df_rank_man = pd.read_sql(query_rank_man, conn)
     
     if not df_rank_man.empty:
-        st.dataframe(df_rank_man, use_container_width=True, hide_index=True)
+        st.dataframe(df_rank_man, width='stretch', hide_index=True)
     else:
         st.caption("Ainda não há dados suficientes para o ranking de Manuais.")
 
@@ -371,7 +371,7 @@ with aba_manuais:
         termo_busca_manual = st.text_input("🔍 O que você está procurando nos Manuais?", placeholder="Ex: Configurar impressora...", key="busca_manual_input")
     with col_btn_m:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_buscar_manual = st.button("Pesquisar Manual", use_container_width=True, type="primary")
+        btn_buscar_manual = st.button("Pesquisar Manual", width='stretch', type="primary")
 
     if erro_bd:
         st.error(f"❌ Ocorreu um erro técnico: `{erro_bd}`")
@@ -471,7 +471,7 @@ with aba_arquivo:
         with engine.connect() as conn:
             query_ranking_buscas = text("SELECT INITCAP(lower(pergunta)) as \"Assunto\", COUNT(id) as \"Volume\" FROM historico_buscas_psy GROUP BY lower(pergunta) ORDER BY \"Volume\" DESC LIMIT 10")
             df_ranking_buscas = pd.read_sql(query_ranking_buscas, conn)
-        if not df_ranking_buscas.empty: st.dataframe(df_ranking_buscas, use_container_width=True, hide_index=True)
+        if not df_ranking_buscas.empty: st.dataframe(df_ranking_buscas, width='stretch', hide_index=True)
 
 # ==========================================
 # ABA 6: NOVA CONTRIBUIÇÃO
@@ -647,7 +647,7 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
                     c1, c2 = st.columns([1, 2])
                     
                     with c1:
-                        if st.button("✅ Aprovar e Publicar", key=f"apr_{row['id']}", type="primary", use_container_width=True):
+                        if st.button("✅ Aprovar e Publicar", key=f"apr_{row['id']}", type="primary", width='stretch'):
                             try:
                                 with engine.begin() as conn_apr: 
                                     conn_apr.execute(text("UPDATE base_conhecimento SET status = 'APROVADO' WHERE id = :id"), {"id": row['id']})
@@ -657,7 +657,7 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
                                 st.error(f"Erro ao aprovar: {e}")
                     with c2:
                         motivo = st.text_input("Feedback / Motivo da Rejeição (Obrigatório caso rejeite):", key=f"mot_{row['id']}", placeholder="Ex: Faltou print do erro; formatação ruim...")
-                        if st.button("❌ Rejeitar e Devolver ao Autor", key=f"rej_{row['id']}", use_container_width=True):
+                        if st.button("❌ Rejeitar e Devolver ao Autor", key=f"rej_{row['id']}", width='stretch'):
                             if not motivo.strip():
                                 st.warning("⚠️ Você deve escrever um motivo claro para o analista entender o que precisa corrigir.")
                             else:

@@ -146,7 +146,7 @@ with st.expander("⚙️ Filtros: ", expanded=True):
     with col_f4:
         st.write("")
         st.write("")
-        if st.button("🔄 Atualizar", use_container_width=True):
+        if st.button("🔄 Atualizar", width='stretch'):
             st.cache_data.clear()
             st.rerun()
 
@@ -239,7 +239,7 @@ with aba1:
         st.subheader("Fila Atual por Status")
         fila = df['status_atual'].value_counts().reset_index()
         fila.columns = ['Status', 'Volume']
-        st.plotly_chart(px.bar(fila, x='Volume', y='Status', orientation='h', color='Status'), use_container_width=True)
+        st.plotly_chart(px.bar(fila, x='Volume', y='Status', orientation='h', color='Status'), width='stretch')
         
     with g2:
         st.subheader("Classificação de Reincidência Pós-Liberação")
@@ -247,7 +247,7 @@ with aba1:
         reinc_data.columns = ['Classificação', 'Volume']
         fig_reinc = px.pie(reinc_data, values='Volume', names='Classificação', hole=0.4, color='Classificação',
                            color_discrete_map={"Resolvido Pós-Liberação": "#25D366", "Reincidência": "#FF4B4B", "Aguardando Validação EPSY": "#FFA500", "Sem Liberação": "#808080"})
-        st.plotly_chart(fig_reinc, use_container_width=True)
+        st.plotly_chart(fig_reinc, width='stretch')
 
     # NOVO: Tabela detalhada de reincidências
     if reincidentes > 0:
@@ -259,7 +259,7 @@ with aba1:
         df_reincidentes['Resumo do Erro'] = df_reincidentes['erro_relatado'].str[:100] + "..."
         
         cols_reinc = ['nr_chamado', 'cliente_nome', 'usuario_epsy', 'versao_sistema', 'status_atual', 'Resumo do Erro']
-        st.dataframe(df_reincidentes[cols_reinc], hide_index=True, use_container_width=True)
+        st.dataframe(df_reincidentes[cols_reinc], hide_index=True, width='stretch')
 
 # ------------------------------------------
 # ABA 2: AGING E GARGALOS (FILA COMPLETA)
@@ -307,7 +307,7 @@ with aba2:
         st.dataframe(
             df_abertos_view.style.format({"Dias em Aberto": "{:.0f}"}).background_gradient(cmap='Reds', subset=['Dias em Aberto']), 
             hide_index=True, 
-            use_container_width=True,
+            width='stretch',
             height=600
         )
 
@@ -328,7 +328,7 @@ with aba3:
             st.markdown("#### Chamados por Versão")
             versoes = df_ver["versao_sistema"].value_counts().reset_index().head(10)
             versoes.columns = ['Versão', 'Volume']
-            st.plotly_chart(px.bar(versoes, x='Volume', y='Versão', orientation='h', color='Volume', color_continuous_scale='Reds'), use_container_width=True)
+            st.plotly_chart(px.bar(versoes, x='Volume', y='Versão', orientation='h', color='Volume', color_continuous_scale='Reds'), width='stretch')
             
         with v2:
             st.markdown("#### Tempo Médio até a 1ª Liberação da Desenvolvedora")
@@ -343,7 +343,7 @@ with aba3:
         df_ver['Erro Resumido'] = df_ver['erro_relatado'].str[:150] + "..."
         agrupamento_bugs = df_ver[['versao_sistema', 'nr_chamado', 'cliente_nome', 'Erro Resumido']].sort_values(by=['versao_sistema', 'nr_chamado'], ascending=[False, False])
         
-        st.dataframe(agrupamento_bugs, hide_index=True, use_container_width=True)
+        st.dataframe(agrupamento_bugs, hide_index=True, width='stretch')
 
 # ------------------------------------------
 # ABA 4: PERFORMANCE EPSY & OFENSORES
@@ -362,7 +362,7 @@ with aba4:
         else:
             analistas = df_epsy["usuario_epsy"].value_counts().reset_index()
             analistas.columns = ['Analista EPSY', 'Volume de Chamados Abertos']
-            st.plotly_chart(px.bar(analistas, x='Volume de Chamados Abertos', y='Analista EPSY', orientation='h', color='Volume de Chamados Abertos', color_continuous_scale='Blues'), use_container_width=True)
+            st.plotly_chart(px.bar(analistas, x='Volume de Chamados Abertos', y='Analista EPSY', orientation='h', color='Volume de Chamados Abertos', color_continuous_scale='Blues'), width='stretch')
             
     with e2:
         st.markdown("#### 🏢 Chamados Abertos por Cliente")
@@ -378,6 +378,6 @@ with aba4:
             
             clientes_agg.rename(columns={'cliente_nome': 'Cliente', 'Total_Chamados': 'Total Abertos (Período)', 'Fila_Ativa': 'Ainda Pendentes'}, inplace=True)
             
-            st.dataframe(clientes_agg, hide_index=True, use_container_width=True)
+            st.dataframe(clientes_agg, hide_index=True, width='stretch')
 
 registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD_CHAMADOS", "Acessou Dashboard Analítico - Chamados Tecnuv (EPSY)")

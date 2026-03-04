@@ -143,7 +143,7 @@ with g1:
             coloraxis_showscale=False # Esconde a barra lateral de cor para ficar mais limpo
         )
         fig_bar.update_traces(textposition='outside')
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width='stretch')
 
 with g2:
     with st.container(border=True):
@@ -164,7 +164,7 @@ with g2:
             plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(l=0, r=0, t=30, b=0)
         )
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig_donut, width='stretch')
 
 # ==========================================
 # 7. TABELA DE DADOS DETALHADA
@@ -186,6 +186,6 @@ with st.container(border=True):
     st.dataframe(
         df_exibicao, 
         hide_index=True, 
-        use_container_width=True,
+        width='stretch',
         height=400 # Altura fixa para permitir scroll sem quebrar a tela
     )

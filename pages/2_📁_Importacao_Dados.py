@@ -184,7 +184,7 @@ with aba1:
 
                 with st.container(border=True):
                     st.markdown("### 🔍 Pré-visualização dos Dados (Prontos para o Banco)")
-                    st.dataframe(df_processado.head(5), use_container_width=True)
+                    st.dataframe(df_processado.head(5), width='stretch')
                 
                 with st.container(border=True):
                     st.markdown("#### 📊 Resumo do Arquivo Mensal")
@@ -197,7 +197,7 @@ with aba1:
                         col_m2.metric("Data Inicial", df_processado['data_inicio'].min().strftime('%d/%m/%Y'))
                         col_m3.metric("Data Final", df_processado['data_inicio'].max().strftime('%d/%m/%Y'))
                 
-                if st.button("💾 Confirmar e Salvar Mensal no Banco", type="primary", use_container_width=True):
+                if st.button("💾 Confirmar e Salvar Mensal no Banco", type="primary", width='stretch'):
                     with st.spinner("Gravando dados no WikiSuporte..."):
                         sucesso, msg = salvar_no_banco(df_processado, nome_tabela_bd, tipo_identificado)
                         if sucesso:
@@ -220,7 +220,7 @@ with aba2:
                 cnpj_limpo = apenas_numeros(st.text_input("CNPJ do Cliente (Opcional):", placeholder="Ex: 00.000.000/0000-00"))
                 telefone_limpo = apenas_numeros(st.text_input("Telefone ou WhatsApp (Obrigatório):", placeholder="Ex: 4899999999"))
                 
-                btn_vincular = st.form_submit_button("🔗 Salvar e Vincular Cliente", type="primary", use_container_width=True)
+                btn_vincular = st.form_submit_button("🔗 Salvar e Vincular Cliente", type="primary", width='stretch')
                 
                 if btn_vincular:
                     if nome_cliente and telefone_limpo:
@@ -465,7 +465,7 @@ with aba3:
 
                             df_final_export = pd.concat(lista_dfs_export, ignore_index=True).iloc[:-1]
                             
-                            with st.container(border=True): st.dataframe(df_final_export, use_container_width=True, hide_index=True)
+                            with st.container(border=True): st.dataframe(df_final_export, width='stretch', hide_index=True)
                             
                             csv_content = df_final_export.to_csv(index=False, sep=';', decimal=',')
                             output = io.BytesIO()
@@ -475,13 +475,13 @@ with aba3:
                             st.markdown("#### 📥 Baixar Relatórios")
                             c_txt, c_xls, c_csv = st.columns(3)
                             nome_arq = f"Plantao_Oficial_{datetime.datetime.now().strftime('%d%m%Y')}"
-                            c_txt.download_button("📄 Exportar TXT Formatado", txt_content, f"{nome_arq}.txt", "text/plain", use_container_width=True)
-                            c_xls.download_button("📊 Exportar Excel (.xlsx)", excel_content, f"{nome_arq}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                            c_csv.download_button("📑 Exportar CSV", csv_content, f"{nome_arq}.csv", "text/csv", use_container_width=True)
+                            c_txt.download_button("📄 Exportar TXT Formatado", txt_content, f"{nome_arq}.txt", "text/plain", width='stretch')
+                            c_xls.download_button("📊 Exportar Excel (.xlsx)", excel_content, f"{nome_arq}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width='stretch')
+                            c_csv.download_button("📑 Exportar CSV", csv_content, f"{nome_arq}.csv", "text/csv", width='stretch')
 
                             st.divider()
                             
-                            if st.button("🧹 Limpar Tela e Enviar Novo Arquivo", use_container_width=True):
+                            if st.button("🧹 Limpar Tela e Enviar Novo Arquivo", width='stretch'):
                                 st.session_state['plantao_uploader_key'] += 1
                                 if 'df_plantao_filtrado' in st.session_state: del st.session_state['df_plantao_filtrado']
                                 st.rerun()

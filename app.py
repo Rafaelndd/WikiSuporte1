@@ -155,7 +155,7 @@ def tela_login() -> None:
     with col_centro:
         c_img1, c_img2, c_img3 = st.columns([1, 2, 1])
         with c_img2:
-            try: st.image("mascote/psy_no_dashbsoard.png", use_container_width=True)
+            try: st.image("mascote/psy_no_dashbsoard.png", width='stretch')
             except: pass
             
         st.markdown("<h2 style='text-align: center;'>WikiSuporte</h2>", unsafe_allow_html=True)
@@ -169,7 +169,7 @@ def tela_login() -> None:
                 usuario = st.text_input("👤 Usuário", placeholder="Insira o seu nome de usuário")
                 senha = st.text_input("🔑 Senha", type="password", placeholder="••••••••")
                 st.markdown("<br>", unsafe_allow_html=True)
-                btn_login = st.form_submit_button("Acessar Sistema", type="primary", use_container_width=True)
+                btn_login = st.form_submit_button("Acessar Sistema", type="primary", width='stretch')
                 
             if btn_login:
                 if usuario and senha:
@@ -235,7 +235,7 @@ def tela_termos_uso() -> None:
         st.markdown("<br>", unsafe_allow_html=True)
         aceito = st.checkbox("Eu li, compreendo e concordo com os termos de uso e confidencialidade descritos acima.")
         
-        if st.button("Aceitar Termos e Entrar", type="primary", use_container_width=True):
+        if st.button("Aceitar Termos e Entrar", type="primary", width='stretch'):
             if aceito:
                 st.session_state['termos_aceitos'] = True
                 registrar_log_auditoria(st.session_state.get('usuario_id'), "ACEITE_TERMOS", "Usuário leu e aceitou os termos da LGPD.")
@@ -255,7 +255,7 @@ def tela_home() -> None:
     st.sidebar.markdown(f"### {obter_saudacao()}!")
     st.sidebar.caption(f"🛡️ Perfil: **{perfil_usuario.title()}**")
     st.sidebar.divider()
-    if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
+    if st.sidebar.button("🚪 Sair do Sistema", width='stretch'):
         registrar_log_auditoria(st.session_state.get('usuario_id'), "LOGOUT", "Usuário saiu do sistema.")
         st.session_state.clear()
         st.rerun()
