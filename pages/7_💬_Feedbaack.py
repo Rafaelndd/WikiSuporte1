@@ -66,7 +66,7 @@ with col_texto:
 with col_img:
     # Renderizando o GIF animado do Psy
     if os.path.exists(caminho_psy):
-        st.image(caminho_psy, use_container_width=True)
+        st.image(caminho_psy, use_container_width='stretch')
     else:
         # Fallback caso o GIF ainda não exista na pasta
         st.markdown("<h1 style='text-align: center;'>🐾</h1>", unsafe_allow_html=True)
@@ -83,7 +83,7 @@ with st.container(border=True):
             placeholder="Escreva sua mensagem aqui para o Psy..."
         )
         
-        enviado = st.form_submit_button("🚀 Enviar Feedback", use_container_width=True)
+        enviado = st.form_submit_button("🚀 Enviar Feedback", use_container_width='stretch')
         
         # --- 5. PROCESSAMENTO DO FORMULÁRIO ---
         if enviado:
