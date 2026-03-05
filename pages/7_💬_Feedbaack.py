@@ -37,7 +37,7 @@ st.markdown("""
 
 st.title("💬 Feedback do WikiSuporte")
 
-# --- 3. INTERFACE INTERATIVA COM O MASCOTE PSY (GIFs) ---
+# --- 3. INTERFACE INTERATIVA COM O MASCOTE Psy (GIFs) ---
 tipo_feedback = st.selectbox(
     "Sobre o que você quer falar?",
     options=["💡 Sugestão", "✅ Elogio", "❌ Crítica / Problema", "🐞 Relato de Bug"],
@@ -53,7 +53,7 @@ with col_texto:
         caminho_psy = "assets/psy_pensativo.gif" # Exemplo: Psy com uma lâmpada ou pensando
     elif "Elogio" in tipo_feedback:
         fala_psy = "Eba! Fico muito feliz em saber que estamos ajudando! Conta mais? 🤩"
-        caminho_psy = "assets/psy_feliz.gif" # Exemplo: Psy pulando ou sorrindo
+        caminho_psy = "assets/psy_recebendo_feedbaack.gif" # Exemplo: Psy pulando ou sorrindo
     elif "Bug" in tipo_feedback:
         fala_psy = "Opa, Vamos investigar 🕵️‍♂️ Por favor, me dê o máximo de detalhes para o nosso Desenvolvedor corrigir."
         caminho_psy = "assets/psy_digitado.gif" # Exemplo: Psy com uma lupa

@@ -73,16 +73,16 @@ def is_plantao_normal(dt):
     if wd in [5, 6]: 
         return True
         
-    # 0=Segunda-feira: Plantão do FDS encerra às 07:00. O novo começa às 18:30.
+    # 0=Segunda-feira: Plantão do FDS encerra às 07:00. O novo começa às 18:20.
     if wd == 0: 
         if time_val <= datetime.time(7, 0): return True
-        if time_val >= datetime.time(18, 30): return True
+        if time_val >= datetime.time(18, 20): return True
         return False
         
-    # 1=Terça a 4=Sexta: O da madrugada encerra 07:30. O novo começa 18:30.
+    # 1=Terça a 4=Sexta: O da madrugada encerra 07:30. O novo começa 18:20.
     if wd in [1, 2, 3, 4]: 
         if time_val <= datetime.time(7, 30): return True
-        if time_val >= datetime.time(18, 30): return True
+        if time_val >= datetime.time(18, 20): return True
         return False
 
 # ==========================================
@@ -146,7 +146,7 @@ with aba1:
                 if pd.isna(dias_arquivo): dias_arquivo = 0
                 
                 if dias_arquivo <= 5:
-                    st.warning(f"🤖 **PSY alerta:** Este arquivo cobre apenas **{int(dias_arquivo)} dia(s)**. Parece um Relatório de Plantão.")
+                    st.warning(f"🤖 **Psy alerta:** Este arquivo cobre apenas **{int(dias_arquivo)} dia(s)**. Parece um Relatório de Plantão.")
                     liberar = st.checkbox("Eu confirmo que este é um arquivo MENSAL válido. Desbloquear importação.")
                     if not liberar: bloqueio_plantao = True
 
@@ -278,7 +278,7 @@ with aba2:
 # ------------------------------------------
 with aba3:
     st.subheader("Extrator Inteligente de Plantões")
-    st.info("🤖 **PSY:** Olá! Faça o upload do arquivo do GoTo. Eu buscarei automaticamente no arquivo inteiro quais ligações pertencem ao plantão, separando cada plantonista caso haja imprevistos e substituições!")
+    st.info("🤖 **Psy:** Olá! Faça o upload do arquivo do GoTo. Eu buscarei automaticamente no arquivo inteiro quais ligações pertencem ao plantão, separando cada plantonista caso haja imprevistos e substituições!")
     
     if 'plantao_uploader_key' not in st.session_state:
         st.session_state['plantao_uploader_key'] = 0
@@ -323,12 +323,12 @@ with aba3:
             if pd.isna(dias_arquivo_plantao): dias_arquivo_plantao = 0
             
             if dias_arquivo_plantao > 5:
-                st.error(f"🤖 **PSY bloqueou a extração:** \n\nEste arquivo abrange **{int(dias_arquivo_plantao)} dias**. Relatórios de plantão costumam ter no máximo 3 ou 4 dias.\n\n👉 Para o mês todo, use a aba '📥 Importar Mensal'.")
+                st.error(f"🤖 **Psy bloqueou a extração:** \n\nEste arquivo abrange **{int(dias_arquivo_plantao)} dias**. Relatórios de plantão costumam ter no máximo 3 ou 4 dias.\n\n👉 Para o mês todo, use a aba '📥 Importar Mensal'.")
             else:
                 df_goto = df_goto_bruto[df_goto_bruto['duracao_ms'].fillna(0) > 0].copy()
                 
                 if df_goto.empty:
-                    st.warning("⚠️ **PSY informa:** Todas as chamadas deste arquivo eram perdidas ou abandonadas (Duração 0).")
+                    st.warning("⚠️ **Psy informa:** Todas as chamadas deste arquivo eram perdidas ou abandonadas (Duração 0).")
                 else:
                     st.divider()
                     st.markdown("#### ⚙️ Configuração do Regime do Plantão")
@@ -340,7 +340,7 @@ with aba3:
                     df_plantao_filtrado = pd.DataFrame()
                     
                     if regime == "Normal (Seg-Sex e Fim de Semana Padrão)":
-                        st.caption("Ciclo Automático: Seg a Qui (18:30 às 07:30). FDS Contínuo: Sexta 18:30 até Segunda às 07:00.")
+                        st.caption("Ciclo Automático: Seg a Qui (18:20 às 07:30). FDS Contínuo: Sexta 18:20 até Segunda às 07:00.")
                         mascara = df_goto['data_chamada'].apply(is_plantao_normal)
                         df_plantao_filtrado = df_goto[mascara].sort_values('data_chamada')
                         
@@ -411,9 +411,9 @@ with aba3:
                         df_limpo = df_temp[mascara_validas].copy()
                         
                         if df_limpo.empty:
-                            st.warning("⚠️ **PSY informa:** Analisei o período, mas todos os registros eram chamadas não atendidas por humanos (URA/Sistema).")
+                            st.warning("⚠️ **Psy informa:** Analisei o período, mas todos os registros eram chamadas não atendidas por humanos (URA/Sistema).")
                         else:
-                            st.success(f"🎯 **PSY diz:** Temos **{len(df_limpo)} atendimentos reais**! Salvando no banco...")
+                            st.success(f"🎯 **Psy diz:** Temos **{len(df_limpo)} atendimentos reais**! Salvando no banco...")
                             df_limpo = df_limpo.sort_values(by=['Atendente', 'Data_Real'])
                             
                             # SALVAMENTO AUTOMÁTICO
@@ -453,16 +453,24 @@ with aba3:
                             for analista in analistas_unicos:
                                 df_grupo = df_limpo[df_limpo['Atendente'] == analista].drop(columns=['Data_Real', 'Data_Fim_Real'])
                                 
+                                # Mantém a construção do arquivo TXT intacta (que não sofre com o erro do PyArrow)
                                 txt_content += f"👤 ATENDENTE: {analista}\n" + "-"*60 + "\n"
                                 for _, row in df_grupo.iterrows():
                                     txt_content += f"Data: {row['Data']}   Início: {row['Horário inicio atendimento']}   Fim: {row['Horário fim do atendimento']}   Total (Min): {row['Total (Minutos)']}\n"
                                 
                                 txt_content += f"\n-> TOTAL DE ATENDIMENTOS ({analista}): {len(df_grupo)}\n" + "="*60 + "\n\n"
                                 
+                                # Prepara os dados para o Excel e Streamlit (sem o totalizador problemático)
                                 lista_dfs_export.append(df_grupo)
-                                lista_dfs_export.append(pd.DataFrame([{'Data': '', 'Horário inicio atendimento': '', 'Horário fim do atendimento': '', 'Atendente': f'TOTAL {analista}', 'Total (Minutos)': f'{len(df_grupo)} atendimentos'}]))
-                                lista_dfs_export.append(pd.DataFrame([{'Data': '', 'Horário inicio atendimento': '', 'Horário fim do atendimento': '', 'Atendente': '', 'Total (Minutos)': ''}]))
-
+                                
+                                # ⚠️ CORREÇÃO DA LINHA EM BRANCO: Usamos None em 'Total (Minutos)' para não quebrar a tipagem numérica
+                                lista_dfs_export.append(pd.DataFrame([{
+                                    'Data': '', 
+                                    'Horário inicio atendimento': '', 
+                                    'Horário fim do atendimento': '', 
+                                    'Atendente': '', 
+                                    'Total (Minutos)': None 
+                                }]))
                             df_final_export = pd.concat(lista_dfs_export, ignore_index=True).iloc[:-1]
                             
                             with st.container(border=True): st.dataframe(df_final_export, width='stretch', hide_index=True)
@@ -474,7 +482,7 @@ with aba3:
                             
                             st.markdown("#### 📥 Baixar Relatórios")
                             c_txt, c_xls, c_csv = st.columns(3)
-                            nome_arq = f"Plantao_Oficial_{datetime.datetime.now().strftime('%d%m%Y')}"
+                            nome_arq = f"Plantao{datetime.datetime.now().strftime('%d%m%Y')}"
                             c_txt.download_button("📄 Exportar TXT Formatado", txt_content, f"{nome_arq}.txt", "text/plain", width='stretch')
                             c_xls.download_button("📊 Exportar Excel (.xlsx)", excel_content, f"{nome_arq}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width='stretch')
                             c_csv.download_button("📑 Exportar CSV", csv_content, f"{nome_arq}.csv", "text/csv", width='stretch')
@@ -487,4 +495,4 @@ with aba3:
                                 st.rerun()
                     
                     elif st.session_state.get('df_plantao_filtrado') is not None and st.session_state['df_plantao_filtrado'].empty:
-                        st.info("🤖 **PSY:** O arquivo é válido, mas não ocorreram atendimentos nesse horário de plantão específico.")
+                        st.info("🤖 **Psy:** O arquivo é válido, mas não ocorreram atendimentos nesse horário de plantão específico.")

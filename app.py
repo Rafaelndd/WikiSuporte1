@@ -2,6 +2,8 @@ import streamlit as st
 import random
 import pandas as pd
 import os
+import requests
+
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy import text
@@ -149,6 +151,55 @@ def verificar_aceite_termos(usuario_id: int) -> bool:
             return bool(resultado)
     except Exception:
         return False
+
+
+# --- 1. FUNÇÃO DE CONSUMO DE API (COM CACHE) ---
+# O TTL=3600 significa que o sistema só vai na internet buscar o clima a cada 1 hora (3600 segundos).
+# Nos outros acessos, ele pega da memória RAM do servidor, ficando instantâneo!
+@st.cache_data(ttl=3600)
+def obter_previsao_tempo(lat="-29.1173", lon="-49.6176"):
+    """
+    Consome a API gratuita do Open-Meteo para buscar o clima atual.
+    Coordenadas padrão configuradas para Sombrio, SC.
+    """
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+    
+    try:
+        # timeout=10 garante que o sistema não trave se a internet do servidor cair
+        resposta = requests.get(url, timeout=10)
+        resposta.raise_for_status() # Verifica se houve erro HTTP (ex: 404, 500)
+        
+        dados = resposta.json()
+        return dados.get("current_weather")
+        
+    except Exception as e:
+        # DIRETRIZ FUNDAMENTAL #3: Exibir o erro real na tela do Streamlit
+        st.error(f"Erro ao buscar a previsão do tempo: {e}")
+        return None
+
+# INTERFACE DO WIDGET PARA A HOME ---
+def exibir_widget_clima():
+    # Container com borda para manter o padrão Enterprise
+    with st.container(border=True):
+        st.subheader("🌤️ Clima Atual - Sombrio/SC")
+        
+        # Chama a função (que vai usar o cache se já tiver sido chamada recentemente)
+        clima = obter_previsao_tempo()
+        
+        if clima:
+            # Divide o card em duas colunas para ficar elegante
+            col1, col2 = st.columns(2)
+            with col1:
+                # st.metric é perfeito para mostrar números de destaque
+                st.metric(label="Temperatura", value=f"{clima['temperature']} °C")
+            with col2:
+                st.metric(label="Velocidade do Vento", value=f"{clima['windspeed']} km/h")
+        else:
+            st.warning("Não foi possível carregar os dados do clima no momento.")
+
+
+
+
 
 def obter_saudacao() -> str:
     hora_atual = datetime.now().hour
@@ -330,11 +381,31 @@ def tela_home() -> None:
         registrar_log_auditoria(st.session_state.get('usuario_id'), "LOGOUT", "Usuário saiu do sistema.")
         st.session_state.clear()
         st.rerun()
+    
+
+    # --- PREPARAÇÃO DA DATA E DIA DA SEMANA ---
+    # Lista infalível para garantir o idioma português, independente do servidor
+    dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    hoje = datetime.now()
+    dia_semana_str = dias_semana[hoje.weekday()] # Pega o dia da semana de 0 a 6
+    data_atual = f"{dia_semana_str}, {hoje.strftime('%d/%m/%Y')}"
 
     # --- CORPO DA PÁGINA (HOME) ---
-    st.markdown(f"<h1>{obter_saudacao()}, {nome_usuario}! 👋</h1>", unsafe_allow_html=True)
-    st.markdown("Este é o seu painel de controle central do **WikiSuporte**. Acompanhe os seus indicadores e os alertas do dia.")
-    st.caption(f"📅 Hoje é **{data_atual}** | 🏢 Ambiente Seguro WikiSuporte")
+    # Dividimos a tela: 70% para a saudação (col_texto) e 30% para o clima (col_clima)
+    col_texto, col_clima = st.columns([2.5, 1])
+
+    with col_texto:
+        # Sua saudação original
+        st.markdown(f"<h1>{obter_saudacao()}, {nome_usuario}! 👋</h1>", unsafe_allow_html=True)
+        st.markdown("Este é o seu painel de controle central do **WikiSuporte**. Acompanhe os seus indicadores e os alertas do dia.")
+        
+        # Caption limpa, apenas com as informações de texto
+        st.caption(f"📅 Hoje é **{data_atual}** | 🏢 Ambiente Seguro WikiSuporte")
+
+    with col_clima:
+        # O widget do clima é chamado AQUI, dentro da coluna dele, para ser desenhado no canto direito
+        exibir_widget_clima()
+
     st.divider()
 
     # --- SISTEMA DE ALERTAS INTELIGENTES ---
@@ -369,7 +440,7 @@ def tela_home() -> None:
     st.divider()
 
     # --- MENSAGEM DO SISTEMA ---
-    st.info("💡 **Recado do PSY:** A sua participação faz toda a diferença para manter o WikiSuporte sempre atualizado. Navegue pelo menu lateral, pesquise na Central de Conhecimento e, se encontrar uma solução nova no seu dia a dia, não a guarde só para si. Clique em 'Contribuir' e partilhe com a equipa!")
+    st.info("💡 **Recado do Psy:** A sua participação faz toda a diferença para manter o WikiSuporte sempre atualizado. Navegue pelo menu lateral, pesquise na Central de Conhecimento e, se encontrar uma solução nova no seu dia a dia, não a guarde só para si. Clique em 'Contribuir' e partilhe com a equipa!")
 
 # ==========================================
 # 7. CONTROLADOR DE FLUXO PRINCIPAL

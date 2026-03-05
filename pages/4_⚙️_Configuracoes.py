@@ -46,7 +46,7 @@ if perfil_usuario not in ["desenvolvedor", "coordenação"]:
     st.stop()
 
 st.title("⚙️ WikiSuporte - Configurações")
-st.markdown("WikiSuporte — Configure o sistema, ajuste o comportamento do assistente PSY, vincule ramais aos analistas e gerencie os usuários. Utilize as abas para acessar cada seção de configuração.")
+st.markdown("WikiSuporte — Configure o sistema, ajuste o comportamento do assistente Psy, vincule ramais aos analistas e gerencie os usuários. Utilize as abas para acessar cada seção de configuração.")
 
 # ==========================================
 # 2. GESTÃO DE RAMAIS E ANALISTAS
@@ -96,7 +96,7 @@ aba_robo, aba_ramais, aba_usuarios, aba_diagnostico = st.tabs([
 # ABA 1: CONTROLE DO ROBÔ DE VARREDURA (INTACTO)
 # ------------------------------------------
 with aba_robo:
-    st.subheader("Controle do assintente PSY")
+    st.subheader("Controle do assistente Psy")
     st.markdown("Configure o comportamento do assistente, controle de varredura automática, monitorize seu status e defina os intervalos de execução.")
     
     estado_atual = ler_estado_robo()
@@ -123,14 +123,14 @@ with aba_robo:
     
     with st.form("form_motor_robo"):
         st.markdown("#### Configurações do Motor de Varredura")
-        novo_status = st.toggle("Ativar assistente PSY - Iniciar varredura automaticamente", value=auto_ativo)
+        novo_status = st.toggle("Ativar assistente Psy - Iniciar varredura automaticamente", value=auto_ativo)
         novo_intervalo = st.slider("Intervalo entre as consultas (em minutos):", min_value=15, max_value=240, value=intervalo_atual, step=15)
         
         if st.form_submit_button("Salvar configurações", type="primary"):
             estado_atual["auto_ativo"] = novo_status
             estado_atual["intervalo"] = novo_intervalo
             salvar_estado_robo(estado_atual)
-            st.success("✅ Configurações do assistente PSY atualizadas com sucesso!")
+            st.success("✅ Configurações do assistente Psy atualizadas com sucesso!")
             st.rerun()
 
 # ------------------------------------------
@@ -161,7 +161,7 @@ with aba_ramais:
         if not ramais_salvos:
             st.info("Nenhum ramal configurado.")
         else:
-            df_ramais = pd.DataFrame(list(ramais_salvos.items()), columns=["Analista EPSY", "Ramal Interno"]).sort_values(by="Analista EPSY")
+            df_ramais = pd.DataFrame(list(ramais_salvos.items()), columns=["Analista EPSY", "Ramal Interno"]).sort_values(by="Analista EPsy")
             st.dataframe(df_ramais, hide_index=True, width='stretch')
             
             st.divider()

@@ -63,7 +63,7 @@ st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e con
 if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolvedor']:
     abas = st.tabs([
         "🏅 Inicio & Ranking", 
-        "🤖 Assistente Virtual - PSY", 
+        "🤖 Assistente Virtual - Psy", 
         "📘 Wikis Helpdesk", 
         "📙 Manuais PostoGestor", 
         "📖 Histórico de Buscas", 
@@ -75,7 +75,7 @@ if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolve
 else:
     abas = st.tabs([
         "🏅 Home & Ranking", 
-        "🤖 PSY Assistente (IA)", 
+        "🤖 Psy Assistente (IA)", 
         "📘 Wikis Helpdesk", 
         "📙 Manuais PostoGestor", 
         "📖 Histórico de Buscas", 
@@ -122,10 +122,10 @@ with aba_ranking:
 # ABA 2: MOTOR DE BUSCA HÍBRIDO (Com IA Inteligente)
 # ==========================================
 with aba_gemini:
-    st.subheader("🤖 Pesquisar com o PSY")
+    st.subheader("🤖 Pesquisar com o Psy")
     pergunta = st.text_input("Informe sua dúvida: ", placeholder="Ex: Como configurar o e-mail no PostoGestor?", key="input_psy")
     
-    if st.button("🔍 Buscar no Motor PSY", type="primary"):
+    if st.button("🔍 Buscar no Motor Psy", type="primary"):
         if not pergunta.strip():
             st.warning("⚠️ Insira uma dúvida válida.")
         else:
@@ -464,7 +464,7 @@ with aba_arquivo:
             for idx, row in df_recentes.iterrows():
                 nome_autor = row['nome'] if row['nome'] else 'Membro da Equipe'
                 with st.expander(f"👤 {nome_autor} buscou: {row['pergunta']} ({row['data_busca']})"): st.markdown(row['resposta_ia'])
-        else: st.info("Ainda não há registros de buscas ao PSY.")
+        else: st.info("Ainda não há registros de buscas ao Psy.")
             
     with col_rank:
         st.markdown("#### 🏆 Top 10 Assuntos")
