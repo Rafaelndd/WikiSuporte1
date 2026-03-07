@@ -50,7 +50,7 @@ with col_texto:
     # Lógica Interativa: A fala e o GIF do Psy mudam conforme a escolha!
     if "Sugestão" in tipo_feedback:
         fala_psy = "Olá! Eu sou o Psy. Adoro novas ideias! O que você sugere para deixarmos o sistema ainda melhor? 💡"
-        caminho_psy = "assets/psy_pensativo.gif" # Exemplo: Psy com uma lâmpada ou pensando
+        caminho_psy = "mascote/psy_sorriso.png" # Exemplo: Psy com uma lâmpada ou pensando
     elif "Elogio" in tipo_feedback:
         fala_psy = "Eba! Fico muito feliz em saber que estamos ajudando! Conta mais? 🤩"
         caminho_psy = "assets/psy_recebendo_feedbaack.gif" # Exemplo: Psy pulando ou sorrindo

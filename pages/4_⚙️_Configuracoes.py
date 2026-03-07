@@ -161,9 +161,16 @@ with aba_ramais:
         if not ramais_salvos:
             st.info("Nenhum ramal configurado.")
         else:
-            df_ramais = pd.DataFrame(list(ramais_salvos.items()), columns=["Analista EPSY", "Ramal Interno"]).sort_values(by="Analista EPsy")
+            # 1. Criamos o DataFrame com as colunas exatas
+            df_ramais = pd.DataFrame(list(ramais_salvos.items()), columns=["Analista EPsy", "Ramal"])
+            
+            # 2. Ordenamos usando EXATAMENTE o mesmo nome
+            df_ramais = df_ramais.sort_values(by="Analista EPsy")
+            
+            # 3. Exibimos na tela
             st.dataframe(df_ramais, hide_index=True, width='stretch')
             
+            # 4. Adicionamos a opção de remover vínculos
             st.divider()
             analista_remover = st.selectbox("Remover o ramal de:", [""] + list(ramais_salvos.keys()))
             if st.button("🗑️ Remover Ramal") and analista_remover:
@@ -192,7 +199,7 @@ with aba_usuarios:
             
             # Puxa o perfil atual para evitar mudanças acidentais
             perfil_atual = df_users.loc[df_users['nome'] == user_alvo, 'perfil'].values[0] if not df_users.empty else "Analista"
-            lista_perfis = ["Analista", "Coordenação", "Desenvolvedor", "Superadmin"]
+            lista_perfis = ["Analista", "Coordenação", ]
             index_perfil = lista_perfis.index(perfil_atual) if perfil_atual in lista_perfis else 0
             
             novo_perfil = st.selectbox("Novo Perfil:", lista_perfis, index=index_perfil)

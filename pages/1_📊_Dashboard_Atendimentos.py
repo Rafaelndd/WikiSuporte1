@@ -384,7 +384,7 @@ with aba_wpp:
             fig_misto.update_yaxes(title_text="Volume de Chats", secondary_y=False)
             fig_misto.update_yaxes(title_text="Tempo Médio (h)", secondary_y=True)
 
-            st.plotly_chart(fig_misto, use_container_width=True)
+            st.plotly_chart(fig_misto, use_container_width='stretch')
             st.caption("As barras mostram o **volume** total e a linha indica a **agilidade**. Analise picos de volume que causam aumento no tempo de resposta.")
 
 
@@ -490,7 +490,7 @@ with sub_indiv:
                         labels={"MES": "Mês", "Volume": "Qtd. Chats"}
                     )
                     fig_prod.update_layout(margin=dict(t=5, b=5, l=5, r=5))
-                    st.plotly_chart(fig_prod, use_container_width=True)
+                    st.plotly_chart(fig_prod, use_container_width='stretch')
                     st.caption("Histórico mensal de atendimentos realizados.")
 
             with col_dir:
@@ -504,7 +504,7 @@ with sub_indiv:
                         labels={"avaliacao": "Nota Recebida", "count": "Frequência"}
                     )
                     fig_notas.update_layout(margin=dict(t=5, b=5, l=5, r=5))
-                    st.plotly_chart(fig_notas, use_container_width=True)
+                    st.plotly_chart(fig_notas, use_container_width='stretch')
                     st.caption("Distribuição das notas dadas pelos clientes ao fim do chat.")
 
             # 4. Tabela de Casos Críticos (Ação Imediata)
@@ -520,7 +520,7 @@ with sub_indiv:
                     # Exibe a tabela formatada ocupando a largura total
                     st.dataframe(
                         casos_criticos.style.format({'Tempo Total (Horas)': '{:.1f}h'}), 
-                        use_container_width=True, 
+                        use_container_width='stretch', 
                         hide_index=True
                     )
 
@@ -546,7 +546,7 @@ with sub_qual:
             st.dataframe(
                 ranking_nota.style.format({'Media_Nota': "{:.1f}"})
                 .background_gradient(subset=['Media_Nota'], cmap='RdYlGn', vmin=0, vmax=10),
-                use_container_width=True, 
+                use_container_width='stretch', 
                 hide_index=True,
                 column_config={
                     "atendente": "Analista",
@@ -579,7 +579,7 @@ with sub_qual:
                 xaxis=dict(tickmode='linear', tick0=0, dtick=2) # Eixo X marcando de 2 em 2 até 10
             )
             
-            st.plotly_chart(fig_rank_notas, use_container_width=True)
+            st.plotly_chart(fig_rank_notas, use_container_width='stretch')
 
         # 3. Widget de Insight de Gestão
         media_equipe = df_wpp['avaliacao'].mean()
@@ -618,7 +618,7 @@ with sub_qual:
                     hovermode="x unified"
                 )
                 
-                st.plotly_chart(fig_hora, use_container_width=True)
+                st.plotly_chart(fig_hora, use_container_width='stretch')
                 st.caption("🔍 **Insight:** Identifique os horários com maior demanda.")
 
         with co2:
@@ -643,7 +643,7 @@ with sub_qual:
                 bargap=0.1
             )
             
-            st.plotly_chart(fig_hist_tma, use_container_width=True)
+            st.plotly_chart(fig_hist_tma, use_container_width= 'stretch')
             st.caption("💡 **Análise:** Se a curva tiver uma 'cauda' longa à direita, você tem muitos casos complexos que travam a fila.")
 
         # --- MÉTRICA DE CONCLUSÃO RÁPIDA (UX: O "Pulo do Gato" para o Gestor) ---
@@ -680,7 +680,7 @@ with sub_qual:
                 yaxis_title=None
             )
             
-            st.plotly_chart(fig_dept, use_container_width=True)
+            st.plotly_chart(fig_dept, use_container_width='stretch')
             st.caption("🚨 **Foco de Gestão:** Departamentos no final da lista possuem processos mais lentos ou maior complexidade.")
 
     with ce2:
@@ -709,7 +709,7 @@ with sub_qual:
                 yaxis_title=None
             )
             
-            st.plotly_chart(fig_pareto, use_container_width=True)
+            st.plotly_chart(fig_pareto, use_container_width='stretch')
             st.caption("⭐ **Reconhecimento:** Estes são os analistas que processam a maior demanda da operação.")
 
     # --- INSIGHT ESTRATÉGICO FINAL ---
@@ -837,7 +837,7 @@ with aba_telefonia:
                         "Total_Direcionado": "Total de Registros"
                     })
                     
-                    # Removemos as colunas de TMA e Atendidas porque não fazem sentido para transferências
+                    # Removi as colunas de TMA e Atendidas porque não fazem sentido para transferências
                     df_exibicao_rotas = df_exibicao_rotas[["Origem / Status do Sistema", "Total de Registros"]]
                     
                     st.dataframe(df_exibicao_rotas, width='stretch', hide_index=True)

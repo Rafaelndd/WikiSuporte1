@@ -54,7 +54,7 @@ def carregar_manuais():
 # ==========================================
 # 3. TÍTULO E DESCRIÇÃO
 # ==========================================
-st.title("🤝 Central Única de Conhecimento")
+st.title("🤝 Central de Conhecimento")
 st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e conhecimento colaborativo centralizados em um só lugar!")
 
 # ==========================================
