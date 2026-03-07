@@ -23,7 +23,7 @@ except:
 # ==========================================
 # 1. CADEADO DE SEGURANÇA E SESSÃO
 # ==========================================
-st.set_page_config(page_title="WikiSuporte </>", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Wiki Suporte", page_icon="📊", layout="wide")
 if not st.session_state.get('autenticado'):
     st.switch_page("app.py")
 
