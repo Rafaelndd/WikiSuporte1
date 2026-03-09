@@ -65,3 +65,11 @@ docs
 *.bkp
 
 database/init_database.sql
+
+# WikiSuporte 2.0
+wikisuporte2/backend/.env
+wikisuporte2/backend/.venv/
+wikisuporte2/backend/__pycache__/
+wikisuporte2/backend/app/**/__pycache__/
+wikisuporte2/backend/alembic/versions/*.py
+!wikisuporte2/backend/alembic/versions/.gitkeep
