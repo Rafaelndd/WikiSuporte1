@@ -63,3 +63,5 @@ backups/
 hist
 docs
 *.bkp
+
+database/init_database.sql

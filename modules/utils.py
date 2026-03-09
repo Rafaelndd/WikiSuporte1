@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 import streamlit as st
 
+
 # ==========================================
 # GESTÃO DE ESTADO DO ROBÔ (COOLDOWN E LOGS)
 # ==========================================
@@ -59,4 +60,4 @@ def calcular_patente(xp):
 # 3. Função para garantir que o XP exista em todas as páginas
 def inicializar_usuario():
     if "xp" not in st.session_state:
-        st.session_state.xp = 125000  # Valor inicial
+        st.session_state.xp = 0  # Valor inicial

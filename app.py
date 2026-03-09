@@ -3,6 +3,7 @@
 
 import sys
 import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import streamlit as st
 import random
 import pandas as pd
@@ -13,6 +14,9 @@ import tempfile
 import openmeteo_requests
 import requests_cache
 import numpy as np
+from config import Config
+from datetime import datetime, timedelta
+
 
 from retry_requests import retry
 from datetime import datetime, timedelta
@@ -23,7 +27,9 @@ from dotenv import load_dotenv
 from streamlit_mic_recorder import speech_to_text 
 from typing import Union
 from typing import Optional, Dict, Union  
-from utils import inicializar_usuario, calcular_patente
+from modules.utils import inicializar_usuario, calcular_patente
+
+
 
 #======================================================================================================================#
 
@@ -280,7 +286,7 @@ CODIGOS_CLIMA = {
 
 # --- FUNÇÃO DE CONSUMO À API (COM CACHE DO STREAMLIT) ---
 @st.cache_data(ttl=3600)   # <-- decorador agora aplicado corretamente
-def obter_previsao_tempo(lat="-29.1173", lon="-49.6176"):
+def obter_previsao_tempo(lat="-28.935", lon="-49.486"):
     """
     Obtém dados meteorológicos atuais da API Open-Meteo usando o cliente global.
     """
@@ -346,7 +352,7 @@ def obter_previsao_tempo(lat="-29.1173", lon="-49.6176"):
 @st.cache_data(ttl=300)  # Cache de 5 minutos
 def exibir_widget_clima():
     with st.container(border=True):
-        st.subheader("Temperatura atual - Sombrio/SC")
+        st.subheader("Temperatura atual - Araranguá - SC")
         clima = obter_previsao_tempo()  # usa coordenadas padrão
 
         if clima:

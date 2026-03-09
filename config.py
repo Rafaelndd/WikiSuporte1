@@ -24,6 +24,12 @@ class Config:
     except KeyError as e:
         raise ValueError(f"ERRO CRÍTICO: A variável obrigatória {e} não foi encontrada no arquivo .env.")
 
+    # --- CREDENCIAIS DA API GOTO CONNECT (Plano Principal de Integração) ---
+    # Estas credenciais são opcionais: o sistema funciona sem elas usando o
+    # upload manual de arquivos como Plano B.
+    GOTO_CLIENT_ID = os.getenv("GOTO_CLIENT_ID", "")
+    GOTO_CLIENT_SECRET = os.getenv("GOTO_CLIENT_SECRET", "")
+
     # --- CONFIGURAÇÕES DO SISTEMA ---
     # Resolve o bug do booleano: Converte a string "True" ou "False" para o tipo Boolean real do Python
     _headless_str = os.getenv("MODO_HEADLESS", "False").lower()

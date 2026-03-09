@@ -1,6 +1,3 @@
-import os
-print('GOTO_CLIENT_ID:', os.getenv('GOTO_CLIENT_ID'))
-print('GOTO_CLIENT_SECRET:', os.getenv('GOTO_CLIENT_SECRET'))
 import streamlit as st
 import pandas as pd
 import re
@@ -9,22 +6,9 @@ import datetime
 import os
 from sqlalchemy import text
 from modules.database import get_connection
-from dotenv import load_dotenv
-load_dotenv()   
-
-
-
 
 # Importa as suas funções de LGPD e limpeza
 from modules.processador_csv import processar_csv_goto, processar_csv_multi360, ler_arquivo_dinamico
-
-# Importa o módulo de integração com a API do GoTo Connect
-try:
-    import goto_api
-    GOTO_API_DISPONIVEL = True
-except ImportError:
-    goto_api = None
-    GOTO_API_DISPONIVEL = False
 
 try:
     from modules.auditoria import registrar_log_auditoria
@@ -47,7 +31,7 @@ usuario_id = st.session_state.get('usuario_id')
 perfil_usuario = str(st.session_state.get('perfil', '')).lower()
 nome_usuario = str(st.session_state.get('usuario_nome', 'Sistema'))
 
-if perfil_usuario not in ["dev", "coordenador"]:
+if perfil_usuario not in ["desenvolvedor", "coordenação"]:
     st.error("⛔ Acesso Negado: Você não tem permissão para acessar esta página.")
     st.stop()
 
@@ -107,204 +91,12 @@ def is_plantao_normal(dt):
 st.title("📁 Importação e Exportação de Relatórios")
 st.markdown("Importe relatórios mensais, faça a gestão do CRM de clientes e extraia análises de Plantão diário.")
 
-aba1, aba2, aba3, aba4 = st.tabs([
-    "🔌 Buscar via API GoTo",
-    "📥 Importar Mensal / Relatórios",
-    "🔗 Cadastrar Clientes (CRM)",
-    "📥 Extrator de Plantões Diário",
-])
+aba1, aba2, aba3 = st.tabs(["📥 Importar Mensal / Relatórios", "🔗 Cadastrar Clientes (CRM)", "📥 Extrator de Plantões Diário"])
 
 # ------------------------------------------
-# ABA 1: INTEGRAÇÃO COM A API DO GOTO (PLANO PRINCIPAL)
+# ABA 1: IMPORTAÇÃO DE ARQUIVOS (MENSAL)
 # ------------------------------------------
 with aba1:
-    st.markdown("### 🔌 Buscar Atendimentos Diretamente da API GoTo Connect")
-    st.success(
-        "🚀 **Plano Principal:** Use esta aba para buscar os relatórios de chamadas "
-        "automaticamente, sem precisar exportar arquivos. "
-        "Caso a API esteja indisponível, utilize a aba **📥 Importar Mensal** como Plano B."
-    )
-
-    if not GOTO_API_DISPONIVEL:
-        st.error("❌ Módulo `goto_api` não encontrado. Certifique-se de que o arquivo `goto_api.py` está na raiz do projeto.")
-        st.stop()
-
-    # Verifica se as credenciais estão configuradas
-    cid_env = os.getenv("GOTO_CLIENT_ID", "")
-    csecret_env = os.getenv("GOTO_CLIENT_SECRET", "")
-    credenciais_configuradas = bool(cid_env and csecret_env)
-
-    with st.container(border=True):
-        st.markdown("#### 🔑 Credenciais da API GoTo")
-        if credenciais_configuradas:
-            st.success("✅ Credenciais encontradas nas variáveis de ambiente (`.env`).")
-            usar_env = st.checkbox("Usar as credenciais do `.env` automaticamente", value=True, key="goto_usar_env")
-        else:
-            st.warning(
-                "⚠️ Variáveis `GOTO_CLIENT_ID` e `GOTO_CLIENT_SECRET` não encontradas no `.env`. "
-                "Preencha abaixo para continuar."
-            )
-            usar_env = False
-
-        if not (credenciais_configuradas and usar_env):
-            col_cid, col_csecret = st.columns(2)
-            with col_cid:
-                client_id_input = st.text_input("Client ID (GoTo):", type="default", key="goto_client_id_input")
-            with col_csecret:
-                client_secret_input = st.text_input("Client Secret / Senha:", type="password", key="goto_client_secret_input")
-            client_id_final = client_id_input.strip() or cid_env
-            client_secret_final = client_secret_input.strip() or csecret_env
-        else:
-            client_id_final = cid_env
-            client_secret_final = csecret_env
-
-    # Botão de teste de conectividade
-    col_test, _ = st.columns([1, 3])
-    with col_test:
-        if st.button("🔍 Testar Conexão com a API", key="goto_testar_conexao"):
-            with st.spinner("Testando conectividade com a API do GoTo..."):
-                ok, msg = goto_api.verificar_conectividade(client_id_final, client_secret_final)
-            if ok:
-                st.success(msg)
-            else:
-                st.error(msg)
-
-    st.divider()
-
-    with st.container(border=True):
-        st.markdown("#### 📅 Período de Busca")
-        col_di, col_df = st.columns(2)
-        with col_di:
-            data_ini_api = st.date_input(
-                "Data de Início:",
-                value=datetime.date.today().replace(day=1),
-                key="goto_data_inicio",
-            )
-            hora_ini_api = st.time_input("Hora de Início:", value=datetime.time(0, 0), key="goto_hora_inicio")
-        with col_df:
-            data_fim_api = st.date_input(
-                "Data de Fim:",
-                value=datetime.date.today(),
-                key="goto_data_fim",
-            )
-            hora_fim_api = st.time_input("Hora de Fim:", value=datetime.time(23, 59), key="goto_hora_fim")
-
-        dt_inicio_api = datetime.datetime.combine(data_ini_api, hora_ini_api)
-        dt_fim_api = datetime.datetime.combine(data_fim_api, hora_fim_api)
-
-        if dt_inicio_api >= dt_fim_api:
-            st.error("⚠️ A data de início deve ser anterior à data de fim.")
-
-    # Botão principal de busca
-    if st.button("📡 Buscar Chamadas via API GoTo", type="primary", key="goto_buscar", disabled=(dt_inicio_api >= dt_fim_api)):
-        if not client_id_final or not client_secret_final:
-            st.error("❌ Informe as credenciais GoTo antes de buscar.")
-        else:
-            barra_progresso = st.progress(0, text="Iniciando busca na API GoTo...")
-            status_container = st.empty()
-
-            def atualizar_progresso(pagina, total):
-                msg = f"🔄 Carregando página {pagina}... ({total} registros no total)"
-                barra_progresso.progress(min(pagina * 10, 95), text=msg)
-                status_container.caption(msg)
-
-            try:
-                with st.spinner("Autenticando e buscando chamadas..."):
-                    df_api = goto_api.buscar_atendimentos_goto(
-                        data_inicio=dt_inicio_api,
-                        data_fim=dt_fim_api,
-                        client_id=client_id_final,
-                        client_secret=client_secret_final,
-                        callback_progresso=atualizar_progresso,
-                    )
-
-                barra_progresso.progress(100, text="✅ Busca concluída!")
-                status_container.empty()
-
-                if df_api.empty:
-                    st.warning("⚠️ Nenhuma chamada encontrada para o período informado.")
-                else:
-                    st.success(f"🎯 **{len(df_api)} chamadas** encontradas para o período selecionado!")
-                    st.session_state['df_goto_api'] = df_api
-
-            except (ValueError, ConnectionError) as e:
-                barra_progresso.empty()
-                status_container.empty()
-                st.error(f"❌ Erro ao buscar dados da API GoTo: {e}")
-            except Exception as e:
-                barra_progresso.empty()
-                status_container.empty()
-                st.error(f"❌ Erro inesperado: {e}")
-
-    # Exibe e permite salvar os dados buscados via API
-    df_goto_api = st.session_state.get('df_goto_api', pd.DataFrame())
-    if not df_goto_api.empty:
-        st.divider()
-        st.markdown("#### 🔍 Pré-visualização dos Dados Obtidos via API")
-
-        # Cruzamento com CRM (mesmo pipeline do upload manual)
-        with st.spinner("🔄 Cruzando telefones com o banco de dados do CRM..."):
-            try:
-                engine = get_connection()
-                with engine.connect() as conn:
-                    df_crm = pd.read_sql(text("""
-                        SELECT c.razao_social, t.numero as telefone_bd 
-                        FROM clientes_telefones t
-                        JOIN clientes_crm c ON t.id_cliente = c.id_cliente
-                        WHERE t.numero IS NOT NULL AND t.numero != ''
-                    """), conn)
-                mapa_clientes = dict(zip(df_crm['telefone_bd'], df_crm['razao_social']))
-
-                def extrair_numero_cliente_api(row):
-                    if str(row.get('direcao', '')).upper() == 'RECEBIDA':
-                        return re.sub(r'\D', '', str(row.get('telefone_origem', '')))
-                    else:
-                        nums = re.findall(r'\+55\d+', str(row.get('participantes', '')))
-                        if nums:
-                            return re.sub(r'\D', '', nums[0])
-                        return re.sub(r'\D', '', str(row.get('telefone_origem', '')))
-
-                numeros_api = df_goto_api.apply(extrair_numero_cliente_api, axis=1)
-                df_goto_api['cliente_nome'] = numeros_api.map(mapa_clientes).fillna("Não Identificado")
-                sucesso_crm_api = len(df_goto_api[df_goto_api['cliente_nome'] != "Não Identificado"])
-                st.success(f"🎯 **{sucesso_crm_api} chamadas** vinculadas a clientes do CRM!")
-                st.session_state['df_goto_api'] = df_goto_api
-            except Exception as e:
-                st.warning(f"⚠️ Cruzamento com CRM falhou: {e}")
-                df_goto_api['cliente_nome'] = "Não Identificado"
-
-        with st.container(border=True):
-            st.dataframe(df_goto_api.head(10), use_container_width=True)
-
-        with st.container(border=True):
-            st.markdown("#### 📊 Resumo")
-            col_r1, col_r2, col_r3 = st.columns(3)
-            col_r1.metric("Total de Chamadas", len(df_goto_api))
-            data_min_api = df_goto_api['data_chamada'].min()
-            data_max_api = df_goto_api['data_chamada'].max()
-            if pd.notna(data_min_api):
-                col_r2.metric("Data Inicial", pd.to_datetime(data_min_api).strftime('%d/%m/%Y'))
-            if pd.notna(data_max_api):
-                col_r3.metric("Data Final", pd.to_datetime(data_max_api).strftime('%d/%m/%Y'))
-
-        if st.button("💾 Salvar no Banco de Dados", type="primary", key="goto_salvar_api", use_container_width=True):
-            with st.spinner("Gravando dados no WikiSuporte..."):
-                sucesso, msg = salvar_no_banco(df_goto_api, "atendimentos_goto", "GOTO")
-                if sucesso:
-                    st.success(f"✅ {len(df_goto_api)} registros salvos com sucesso!")
-                    registrar_log_auditoria(usuario_id, "IMPORT_API_GOTO", f"Importado via API GoTo: {len(df_goto_api)} registros")
-                    del st.session_state['df_goto_api']
-                else:
-                    st.error(f"❌ Erro ao salvar: {msg}")
-
-# ------------------------------------------
-# ABA 2: IMPORTAÇÃO DE ARQUIVOS (MENSAL) — PLANO B
-# ------------------------------------------
-with aba2:
-    st.warning(
-        "📋 **Plano B — Upload Manual:** Use esta aba quando a API do GoTo estiver indisponível. "
-        "Exporte o arquivo CSV/XLSX diretamente pelo portal GoTo e importe aqui."
-    )
     st.info("💡 **Dica:** O sistema cruza os telefones com o CRM automaticamente para identificar o nome do cliente no Dashboard!")
     with st.container(border=True):
         arquivo_upload = st.file_uploader("📂 Selecione o seu arquivo de atendimento:", type=['csv', 'xlsx'], key="up_import_mensal")
@@ -414,9 +206,9 @@ with aba2:
                         else: st.error(f"❌ Erro ao salvar o arquivo: {msg}")
 
 # ------------------------------------------
-# ABA 3: VÍNCULO DE CLIENTES (CRM)
+# ABA 2: VÍNCULO DE CLIENTES (CRM)
 # ------------------------------------------
-with aba3:
+with aba2:
     st.markdown("### 🔗 Cadastro de Clientes (CRM)")
     st.caption("Cadastre o nome do cliente e associe seus números de telefone (CNPJ). Isso fará com que o Dashboard identifique as ligações por nome.")
     col_crm1, col_crm2 = st.columns([1.5, 1])
@@ -482,9 +274,9 @@ with aba3:
             if telefone_limpo: st.success(f"📞 **Telefone:** {telefone_limpo}")
 
 # ------------------------------------------
-# ABA 4: ANÁLISE DE PLANTÕES (GOTO)
+# ABA 3: ANÁLISE DE PLANTÕES (GOTO)
 # ------------------------------------------
-with aba4:
+with aba3:
     st.subheader("Extrator Inteligente de Plantões")
     st.info("🤖 **Psy:** Olá! Faça o upload do arquivo do GoTo. Eu buscarei automaticamente no arquivo inteiro quais ligações pertencem ao plantão, separando cada plantonista caso haja imprevistos e substituições!")
     
