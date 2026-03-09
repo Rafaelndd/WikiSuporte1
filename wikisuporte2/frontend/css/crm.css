@@ -1,0 +1,175 @@
+/* ============================================================
+   WikiSuporte 2.0 — CRM / Técnico Consultor
+   ============================================================ */
+
+/* Pipeline de prospecção */
+.pipeline {
+    display: flex;
+    gap: var(--space-4);
+    overflow-x: auto;
+    padding-bottom: var(--space-4);
+    align-items: flex-start;
+}
+
+.pipeline-column {
+    flex-shrink: 0;
+    width: 260px;
+}
+
+.pipeline-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: none;
+}
+
+.pipeline-status-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+.pipeline-count {
+    background: var(--primary-bg);
+    color: var(--primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-full);
+}
+
+.pipeline-cards {
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-height: 200px;
+}
+
+/* Card de prospecção */
+.prospect-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    cursor: pointer;
+    transition: box-shadow var(--transition), transform var(--transition);
+}
+
+.prospect-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+
+.prospect-card-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: var(--space-1);
+}
+
+.prospect-card-cnpj {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: var(--space-2);
+}
+
+.prospect-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Alerta de duplicidade */
+.duplicate-warning {
+    background: var(--warning-light);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-4);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    font-size: 0.875rem;
+    color: var(--gray-800);
+}
+
+.duplicate-warning .warning-icon { font-size: 1.125rem; flex-shrink: 0; }
+
+/* Lista de clientes */
+.client-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-4);
+    gap: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.search-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    flex: 1;
+    max-width: 360px;
+}
+
+.search-input-wrapper input {
+    border: none;
+    outline: none;
+    font-size: 0.875rem;
+    font-family: inherit;
+    color: var(--text);
+    background: transparent;
+    width: 100%;
+}
+
+.search-icon { color: var(--text-muted); font-size: 0.875rem; }
+
+/* Pedido de venda */
+.order-summary {
+    background: var(--primary-bg);
+    border: 1px solid var(--primary-light);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    margin-top: var(--space-4);
+}
+
+.order-total-label { font-size: 0.8125rem; color: var(--primary-dark); font-weight: 500; }
+.order-total-value { font-size: 1.5rem; font-weight: 700; color: var(--primary); margin-top: var(--space-1); }
+
+/* Tabs */
+.tabs {
+    display: flex;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: var(--space-5);
+    gap: 0;
+}
+
+.tab-btn {
+    padding: var(--space-2) var(--space-5);
+    border: none;
+    background: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
