@@ -518,6 +518,58 @@ AFTER INSERT OR UPDATE OR DELETE ON base_conhecimento_votos
 FOR EACH ROW EXECUTE FUNCTION atualizar_xp_usuario();
 
 
+DO $$ 
+DECLARE 
+    r RECORD;
+    xp_total_calc bigint;
+    patente_calc text;
+BEGIN
+    -- Loop por todos os usuários que possuem ao menos uma contribuição aprovada
+    FOR r IN (SELECT DISTINCT id_analista_autor FROM base_conhecimento WHERE status = 'APROVADO') 
+    LOOP
+        -- 1. Calcula o XP Total (Agilidade + Upvotes)
+        SELECT 
+            COALESCE(SUM(
+                CASE 
+                    WHEN (criado_em::date - data_ocorrido::date <= 7) THEN 100
+                    WHEN (criado_em::date - data_ocorrido::date <= 14) THEN 50
+                    WHEN (criado_em::date - data_ocorrido::date <= 21) THEN 25
+                    ELSE 0 
+                END
+            ), 0) + (COALESCE(SUM(qtd_upvotes), 0) * 20)
+        INTO xp_total_calc
+        FROM base_conhecimento 
+        WHERE id_analista_autor = r.id_analista_autor AND status = 'APROVADO';
+
+        -- 2. Define o Nome da Patente (Texto puro para facilitar busca no Python)
+        patente_calc := CASE 
+            WHEN xp_total_calc >= 1000000 THEN 'Expert'
+            WHEN xp_total_calc >= 950000  THEN 'Lenda do Suporte'
+            WHEN xp_total_calc >= 850000  THEN 'Referência Técnica'
+            WHEN xp_total_calc >= 700000  THEN 'Analista Mestre'
+            WHEN xp_total_calc >= 550000  THEN 'Analista Pleno'
+            WHEN xp_total_calc >= 400000  THEN 'Analista Jr'
+            WHEN xp_total_calc >= 250000  THEN 'Especialista Sênior'
+            WHEN xp_total_calc >= 150000  THEN 'Especialista N2'
+            WHEN xp_total_calc >= 100000  THEN 'Especialista N1'
+            WHEN xp_total_calc >= 75000   THEN 'Contribuidor Pleno'
+            WHEN xp_total_calc >= 50000   THEN 'Contribuidor Ativo'
+            WHEN xp_total_calc >= 20000   THEN 'Contribuidor Jr'
+            WHEN xp_total_calc >= 10000   THEN 'Novato Consistente'
+            WHEN xp_total_calc >= 5000    THEN 'Novato Proativo'
+            WHEN xp_total_calc >= 1000    THEN 'Novato Aspirante'
+            ELSE 'Estagiário'
+        END;
+
+        -- 3. Atualiza o cadastro do Analista
+        UPDATE usuarios 
+        SET xp_total = xp_total_calc, 
+            medalha_atual = patente_calc 
+        WHERE id = r.id_analista_autor;
+    END LOOP;
+END $$;
+
+
 -- =================================================================================
 -- FIM DO SCRIPT
 -- =================================================================================

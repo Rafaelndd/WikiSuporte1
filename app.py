@@ -58,7 +58,7 @@ except ImportError:
 
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
 st.set_page_config(
-    page_title="Wiki Suporte", 
+    page_title="Wiki-Suporte", 
     page_icon="💡", 
     layout="wide", 
     initial_sidebar_state="collapsed"
@@ -595,7 +595,7 @@ def tela_home() -> None:
                 'id': f"plantao_{datetime.now().strftime('%Y%m%d')}",
                 'icone': '🚨',
                 'titulo': 'Alerta de Escala: Plantão Hoje',
-                'detalhe': f"Você está escalado para o plantão de hoje, das {entrada} às {saida}. Mantenha-se atento aos acionamentos."
+                'detalhe': f"Você está de plantão hoje, das {entrada} às {saida}. Mantenha-se atento e saia no Horário."
             })
 
         if not df_correcoes.empty:

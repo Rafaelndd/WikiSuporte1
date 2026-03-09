@@ -2,26 +2,65 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-
+import logging
+from dotenv import load_dotenv
+import os
+from datetime import datetime, timedelta
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sqlalchemy import text
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import text
 from datetime import datetime, timedelta, time
 from modules.database import get_connection
 
-# Logs de auditoria (com tratamento de exceção para evitar falhas caso o módulo não esteja presente)
+#======================================================================================================================#
+
+#*** Carrega variáveis de ambiente (DB_HOST, DB_NAME, DB_USER, DB_PASS) ***#
+load_dotenv()
+
+#======================================================================================================================#
+
+# Configura o registro de logs: define destino (arquivo), modo de escrita (anexo) e formato da mensagem
+
+pasta_logs = "logs"
+if not os.path.exists(pasta_logs):
+    os.makedirs(pasta_logs)
+caminho_do_log = os.path.join(pasta_logs, "sistema.log")
+
+logging.basicConfig(
+    filename= caminho_do_log,
+    filemode='a',               
+    format='%(asctime)s - %(levelname)s - %(message)s', 
+    level=logging.INFO          
+)
+
+logging.info("--- Aplicação iniciada e logs configurados  ---")
+
+#======================================================================================================================#
+# Tenta importar a função de auditoria (Ajuste o caminho se necessário)
 try:
     from modules.auditoria import registrar_log_auditoria
-except:
-    def registrar_log_auditoria(*args): pass
+except ImportError:
+    # Fallback caso o ficheiro não exista ainda
+    def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
-# ==========================================
-# 1. CADEADO DE SEGURANÇA E SESSÃO
-# ==========================================
-st.set_page_config(page_title="Wiki Suporte", page_icon="📊", layout="wide")
+# Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
+st.set_page_config(
+    page_title="Wiki-Suporte", 
+    page_icon="💡", 
+    layout="wide", 
+    initial_sidebar_state="collapsed"
+)
 
-if not st.session_state.get('autenticado'):
-    st.switch_page("app.py")
+# Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
+if 'autenticado' not in st.session_state:
+    st.session_state['autenticado'] = False
+if 'notificacoes_lidas' not in st.session_state:
+    st.session_state['notificacoes_lidas'] = []
 
-usuario_id = st.session_state.get('usuario_id')
 
 # ==========================================
 # 2. MOTORES DE BUSCA DE DADOS (COM CACHE)
@@ -209,26 +248,40 @@ if not df_tel.empty:
         # 1. Ajuste do Tempo: Milissegundos para Minutos
         if 'duracao_ms' in colunas_lower:
             col_real_tempo = colunas_lower['duracao_ms']
-            df_tel['duracao_minutos'] = pd.to_numeric(df_tel[col_real_tempo], errors='coerce').fillna(0) / 60000.0
+            df_tel['duracao_ms_val'] = pd.to_numeric(df_tel[col_real_tempo], errors='coerce').fillna(0)
+            df_tel['duracao_minutos'] = df_tel['duracao_ms_val'] / 60000.0
         elif 'duracao' in colunas_lower:
             col_real_tempo = colunas_lower['duracao']
-            df_tel['duracao_minutos'] = pd.to_numeric(df_tel[col_real_tempo], errors='coerce').fillna(0) / 60000.0
+            df_tel['duracao_ms_val'] = pd.to_numeric(df_tel[col_real_tempo], errors='coerce').fillna(0)
+            df_tel['duracao_minutos'] = df_tel['duracao_ms_val'] / 60000.0
         else:
+            df_tel['duracao_ms_val'] = 0.0
             df_tel['duracao_minutos'] = 0.0
             
         # 2. TRADUTOR DE STATUS (UX) - Entendendo o comportamento da chamada
         if 'resultado' in colunas_lower:
             col_res = colunas_lower['resultado']
             df_tel['resultado_upper'] = df_tel[col_res].fillna("").astype(str).str.upper()
-            
-            def categorizar_chamada(status):
-                if "SUCESSO" in status: return "Atendida"
-                elif "PERDIDA" in status: return "Perdida (Tocou no Ramal)"
-                elif "PLANO DE DISCAGEM" in status: return "Abandonada na URA"
-                elif "INDETERMINADO" in status: return "Falha Técnica / Cancelada"
-                else: return "Outros"
-                
-            df_tel['Categoria_UX'] = df_tel['resultado_upper'].apply(categorizar_chamada)
+
+            LIMITE_MS = 5 * 60 * 1000  # 5 minutos em ms
+
+            def categorizar_chamada(row):
+                status = row['resultado_upper']
+                dur_ms = row.get('duracao_ms_val', 0)
+
+                if "PLANO DE DISCAGEM" in status:
+                    return "Abandonada na URA"
+                if "CHAMADA PERDIDA" in status:
+                    return "Perdida (Tocou no Ramal)"
+                if "INDETERMINADO" in status:
+                    return "Falha Técnica / Cancelada"
+
+                # Regra de negócio: não atendida em até 5 minutos => perdida; caso contrário => atendida
+                if dur_ms <= LIMITE_MS:
+                    return "Perdida (Tocou no Ramal)"
+                return "Atendida"
+
+            df_tel['Categoria_UX'] = df_tel.apply(categorizar_chamada, axis=1)
         else:
             df_tel['Categoria_UX'] = "Não Informado"
             
@@ -282,14 +335,41 @@ with aba_geral:
     if total_interacoes > 0:
         g1, g2 = st.columns([1.5, 2.5])
         
-        with g1:
-            st.markdown("#### 📊 Proporção de Atendimentos por Canal")
-            df_omni = pd.DataFrame({"Canal": ["WhatsApp", "Telefone"], "Volume": [vol_wpp, vol_tel]})
-            fig_omni = px.pie(df_omni, values='Volume', names='Canal', hole=0.5, color_discrete_sequence=['#25D366', '#007BFF'])
-            fig_omni.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20))
-            fig_omni.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_omni, width='stretch')
-            st.caption("Visualize a distribuição dos atendimentos entre os canais para entender onde a maioria dos clientes está buscando suporte.")
+    with g1:
+        st.markdown("#### 📊 Proporção de Atendimentos por Canal")
+        df_omni = pd.DataFrame(
+            {"Canal": ["WhatsApp", "Telefone"], "Volume": [vol_wpp, vol_tel]}
+        )
+
+        # Gráfico em barras horizontais para melhor leitura em telas largas/estreitas
+        fig_omni = px.bar(
+            df_omni,
+            x="Volume",
+            y="Canal",
+            orientation="h",
+            text="Volume",
+            color="Canal",
+            color_discrete_map={"WhatsApp": "#25D366", "Telefone": "#007BFF"},
+        )
+
+        fig_omni.update_traces(
+            texttemplate="%{text:,}",
+            textposition="outside",
+            cliponaxis=False,
+            marker=dict(line=dict(color="rgba(0,0,0,0.08)", width=1), opacity=0.92),
+        )
+        fig_omni.update_layout(
+            xaxis_title="Volume de atendimentos",
+            yaxis_title="",
+            bargap=0.25,
+            margin=dict(t=20, b=20, l=10, r=20),
+            showlegend=False,
+            height=280,
+        )
+        st.plotly_chart(fig_omni, use_container_width=True)
+        st.caption(
+            "Distribuição dos atendimentos por canal. As barras facilitam comparar volumes e funcionam melhor em telas menores."
+        )
             
         with g2:
             st.markdown("#### 📈 Tendência Diária de Atendimentos")
@@ -439,26 +519,22 @@ with sub_indiv:
                 # Cálculos comparativos para Contexto (UX)
                 media_geral_tma = df_wpp['TMA_HORAS'].mean()
                 tma_individuo = df_at['TMA_HORAS'].mean()
-                # Diferença percentual entre o analista e a média da equipe
-                diff_percentual = ((tma_individuo / media_geral_tma) - 1) * 100
+                diff_percentual = ((tma_individuo / media_geral_tma) - 1) * 100  # Diferença vs equipe
 
-                # KPI 1: Volume Bruto
                 c_at1.metric(
                     label="Chats Finalizados", 
                     value=len(df_at),
                     help="Total de atendimentos atribuídos a este analista no período."
                 )
 
-                # KPI 2: Agilidade (TMA) - Com comparativo de média
                 c_at2.metric(
                     label="Tempo Médio (TMA)", 
                     value=f"{tma_individuo:.1f}h", 
                     delta=f"{diff_percentual:.1f}% vs Equipe", 
-                    delta_color="inverse", # Se o tempo for maior que a média, fica vermelho (ruim)
+                    delta_color="inverse",
                     help="Tempo médio que o analista leva para encerrar um chat. Menos tempo indica mais agilidade."
                 )
                 
-                # KPI 3: Gargalo de Espera
                 tempo_ocioso = df_at['TEMPO_OCIOSO_HORAS'].mean() if 'TEMPO_OCIOSO_HORAS' in df_at.columns else 0
                 c_at3.metric(
                     label="Espera do Cliente", 
@@ -466,7 +542,6 @@ with sub_indiv:
                     help="Média de tempo que o cliente aguardou sem resposta após a última interação."
                 )
                 
-                # KPI 4: Score (Ranking)
                 if 'score_df' in locals() and atendente in score_df.index:
                     pontuacao = score_df.loc[atendente]["Score"] * 100
                     c_at4.metric(
@@ -481,51 +556,79 @@ with sub_indiv:
             with col_esq:
                 st.markdown("#### 📈 Evolução de Produtividade")
                 if 'MES' in df_at.columns:
-                    # Agrupa por mês para ver se o analista está evoluindo
-                    prod_mensal = df_at.groupby("MES").size().reset_index(name="Volume")
+                    prod_mensal = (
+                        df_at.groupby("MES")
+                        .size()
+                        .reset_index(name="Volume")
+                        .sort_values("MES")
+                    )
                     fig_prod = px.line(
-                        prod_mensal, x="MES", y="Volume", 
-                        markers=True, 
+                        prod_mensal,
+                        x="MES",
+                        y="Volume",
+                        markers=True,
                         color_discrete_sequence=['#25D366'],
                         labels={"MES": "Mês", "Volume": "Qtd. Chats"}
                     )
-                    fig_prod.update_layout(margin=dict(t=5, b=5, l=5, r=5))
-                    st.plotly_chart(fig_prod, use_container_width='stretch')
+                    fig_prod.update_traces(marker=dict(size=8, line=dict(width=1, color="#0F5132")))
+                    fig_prod.update_layout(
+                        margin=dict(t=10, b=10, l=10, r=10),
+                        height=320,
+                        xaxis_title=None,
+                        yaxis_title=None,
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(fig_prod, use_container_width=True)
                     st.caption("Histórico mensal de atendimentos realizados.")
 
             with col_dir:
                 st.markdown("#### ⭐ Satisfação do Cliente (CSAT)")
                 if 'avaliacao' in df_at.columns:
-                    # Conta a frequência de cada nota (1 a 5)
-                    notas_counts = df_at['avaliacao'].value_counts().sort_index().reset_index()
-                    fig_notas = px.bar(
-                        notas_counts, x="avaliacao", y="count",
-                        color_discrete_sequence=['#FFC107'],
-                        labels={"avaliacao": "Nota Recebida", "count": "Frequência"}
+                    # Conta a frequência de cada nota (1 a 5) com nomes de colunas únicos
+                    notas_counts = (
+                        df_at['avaliacao']
+                        .value_counts()
+                        .sort_index()
+                        .reset_index(name="Frequência")
+                        .rename(columns={"index": "avaliacao"})
                     )
-                    fig_notas.update_layout(margin=dict(t=5, b=5, l=5, r=5))
-                    st.plotly_chart(fig_notas, use_container_width='stretch')
+
+                    fig_notas = px.bar(
+                        notas_counts,
+                        y="avaliacao",
+                        x="Frequência",
+                        orientation="h",  # barras horizontais para melhor leitura
+                        color_discrete_sequence=['#FFC107'],
+                        labels={"avaliacao": "Nota Recebida", "Frequência": "Frequência"}
+                    )
+                    fig_notas.update_traces(
+                        texttemplate="%{x}",
+                        textposition="outside",
+                        marker=dict(line=dict(color="rgba(0,0,0,0.08)", width=1), opacity=0.9)
+                    )
+                    fig_notas.update_layout(
+                        margin=dict(t=10, b=10, l=10, r=20),
+                        height=320,
+                        xaxis_title="Frequência",
+                        yaxis_title=None
+                    )
+                    st.plotly_chart(fig_notas, use_container_width=True)
                     st.caption("Distribuição das notas dadas pelos clientes ao fim do chat.")
 
             # 4. Tabela de Casos Críticos (Ação Imediata)
             
                     st.markdown("#### 🚨 Top 5 Atendimentos com Maior Demora (Gargalos)")
 
-                    # Seleciona os 5 maiores e inclui a coluna 'atendente'
                     casos_criticos = df_at.nlargest(5, 'TMA_HORAS')[['atendente', 'data_inicio', 'status', 'TMA_HORAS']]
-
-                    # Renomeia para termos amigáveis ao gestor
                     casos_criticos.columns = ['Analista Responsável', 'Início do Chamado', 'Status Atual', 'Tempo Total (Horas)']
 
-                    # Exibe a tabela formatada ocupando a largura total
                     st.dataframe(
-                        casos_criticos.style.format({'Tempo Total (Horas)': '{:.1f}h'}), 
-                        use_container_width='stretch', 
+                        casos_criticos.style.format({'Tempo Total (Horas)': '{:.1f}h'}),
+                        use_container_width=True,
                         hide_index=True
                     )
 
                     st.caption("Esta lista destaca os atendimentos que mais impactaram negativamente a média de agilidade deste analista.")
-
 
 
 with sub_qual:
@@ -761,14 +864,42 @@ with aba_telefonia:
                 if 'Categoria_UX' in df_tel.columns:
                     df_status = df_tel['Categoria_UX'].value_counts().reset_index()
                     df_status.columns = ['Status', 'Quantidade']
-                    
+                    df_status['Percentual'] = (
+                        df_status['Quantidade'] / df_status['Quantidade'].sum() * 100
+                    ).round(1)
+
                     # Paleta de cores semântica (Verde=Sucesso, Vermelho=Perdida, Laranja=URA, Cinza=Erro)
-                    cores_status = {"Atendida": "#25D366", "Perdida (Tocou no Ramal)": "#EF553B", "Abandonada na URA": "#FFA15A", "Falha Técnica / Cancelada": "#B6E880", "Outros": "#AB63FA"}
-                    
-                    fig_status = px.pie(df_status, values='Quantidade', names='Status', hole=0.45, title="Desfecho das Chamadas", color='Status', color_discrete_map=cores_status)
-                    fig_status.update_layout(margin=dict(t=30, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-                    fig_status.update_traces(textposition='inside', textinfo='percent')
-                    st.plotly_chart(fig_status, width='stretch')
+                    cores_status = {
+                        "Atendida": "#25D366",
+                        "Perdida (Tocou no Ramal)": "#EF553B",
+                        "Abandonada na URA": "#FFA15A",
+                        "Falha Técnica / Cancelada": "#B6E880",
+                        "Outros": "#AB63FA",
+                    }
+
+                    fig_status = px.bar(
+                        df_status,
+                        y="Status",
+                        x="Quantidade",
+                        orientation="h",
+                        color="Status",
+                        color_discrete_map=cores_status,
+                        text="Percentual",
+                        title="Desfecho das Chamadas",
+                        labels={"Quantidade": "Qtd. Chamadas", "Status": "Status"},
+                    )
+                    fig_status.update_traces(
+                        texttemplate="%{text:.1f}%",
+                        textposition="outside",
+                        marker=dict(line=dict(color="rgba(0,0,0,0.08)", width=1), opacity=0.92),
+                        cliponaxis=False,
+                    )
+                    fig_status.update_layout(
+                        margin=dict(t=30, b=10, l=0, r=10),
+                        height=320,
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_status, use_container_width=True)
 
         with tab_tel_agentes:
             if coluna_agente_tel:
