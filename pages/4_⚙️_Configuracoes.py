@@ -77,10 +77,14 @@ def obter_lista_usuarios_sistema():
     """Busca usuários da tabela do sistema (ajuste 'usuarios' para o nome real da sua tabela se necessário)."""
     engine = get_connection()
     try:
-        df = pd.read_sql("SELECT id, nome, perfil FROM usuarios", engine)
+        df = pd.read_sql("SELECT id, nome, email, perfil, ramal, ativo, data_criacao FROM usuarios  ORDER BY nome ASC", engine)
+        # O Pandas já recebe o DataFrame perfeitamente ordenado pelo PostgreSQL
+        #df = pd.read_sql(query, engine)
         return df
-    except:
+    except Exception as e:
+        print(f"Erro ao ler dados do banco: {e}")
         return pd.DataFrame()
+        
 
 # ==========================================
 # 3. ESTRUTURA DE ABAS PARA CONFIGURAÇÕES
@@ -195,7 +199,8 @@ with aba_usuarios:
             st.markdown("#### 🔑 Alteração de Usuários do Sistema")
             st.info("WikiSuporte - Selecione um usuário para alterar seu perfil ou senha.")
             
-            user_alvo = st.selectbox("Selecione o Usuário:", df_users['nome'].tolist())
+            lista_usuarios = df_users['nome'].tolist()
+            user_alvo = st.selectbox("Selecione o Usuário:", lista_usuarios)
             
             # Puxa o perfil atual para evitar mudanças acidentais
             perfil_atual = df_users.loc[df_users['nome'] == user_alvo, 'perfil'].values[0] if not df_users.empty else "Analista"
@@ -207,7 +212,6 @@ with aba_usuarios:
             
             if st.button("💾 Salvar Alterações", type="primary"):
                 from sqlalchemy import text
-                import bcrypt
                 import time
                 from modules.database import get_connection
                 
@@ -220,12 +224,9 @@ with aba_usuarios:
                 try:
                     with engine.begin() as conn: 
                         if nova_senha.strip():
-                            # Gera o hash bcrypt exatamente como o app.py espera na hora do login
-                            senha_bytes = nova_senha.encode('utf-8')
-                            senha_hash = bcrypt.hashpw(senha_bytes, bcrypt.gensalt()).decode('utf-8')
-                            
+                            # O Python envia a senha em texto plano; o PostgreSQL assume a criptografia
                             query = text("UPDATE usuarios SET perfil = :p, password_hash = :s WHERE nome = :n")
-                            conn.execute(query, {"p": novo_perfil, "s": senha_hash, "n": user_alvo})
+                            conn.execute(query, {"p": novo_perfil, "s": nova_senha.strip(), "n": user_alvo})
                             msg_sucesso = f"✅ Perfil e Senha de '{user_alvo}' alterados com sucesso!"
                         else:
                             query = text("UPDATE usuarios SET perfil = :p WHERE nome = :n")
@@ -250,11 +251,40 @@ with aba_usuarios:
             else:
                 st.warning("Cuidado: Alterar a senha do Administrador do Sistema pode afetar o acesso ao sistema. Certifique-se de lembrar a nova senha ou de ter um backup seguro.")
                 nova_senha_admin = st.text_input("Nova Senha do Administrador:", type="password", key="pass_admin")
+                
                 if st.button("🚨 Atualizar Senha do Administrador do Sistema", type="primary"):
-                    # TODO: Lógica de update do superadmin
-                    st.success("✅ Senha do Administrador alterada com sucesso! Lembre-se de anotar a nova senha em um local seguro.")
-                    registrar_log_auditoria(usuario_id, "UPDATE_ADMIN_PASS", "Alterou a senha do Administrador do Sistema.")
+                    if not nova_senha_admin.strip():
+                        st.warning("⚠️ A nova senha não pode estar em branco.")
+                    else:
+                        from sqlalchemy import text
+                        from modules.database import get_connection
+                        
+                        try:
+                            # Tenta carregar a função de auditoria localmente se não estiver no escopo global
+                            from modules.auditoria import registrar_log_auditoria
+                        except ImportError:
+                            def registrar_log_auditoria(user_id, acao, detalhe): pass
 
+                        engine = get_connection()
+                        try:
+                            with engine.begin() as conn:
+                                # Recupera o ID do usuário atual pela sessão do Streamlit
+                                usuario_logado_id = st.session_state.get('usuario_id', 0)
+                                
+                                # Envia a senha em texto plano. O PostgreSQL deve assumir o hash via Trigger/pgcrypto
+                                # A cláusula WHERE garante que apenas o próprio desenvolvedor logado seja alterado
+                                query = text("UPDATE usuarios SET password_hash = :s WHERE id = :id_user AND perfil = 'desenvolvedor'")
+                                result = conn.execute(query, {"s": nova_senha_admin.strip(), "id_user": usuario_logado_id})
+                                
+                                # Verifica se alguma linha foi de fato atualizada no banco
+                                if result.rowcount > 0:
+                                    st.success("✅ Senha do Administrador alterada com sucesso! Lembre-se de anotar a nova senha em um local seguro.")
+                                    registrar_log_auditoria(usuario_logado_id, "UPDATE_ADMIN_PASS", "Alterou a senha do Administrador do Sistema.")
+                                else:
+                                    st.error("❌ Falha na alteração. Verifique se o seu perfil é realmente 'desenvolvedor' no banco de dados.")
+                        
+                        except Exception as e:
+                            st.error(f"❌ Erro ao atualizar o banco de dados: {e}")
 # ------------------------------------------
 # ABA 4: DIAGNÓSTICO DO SISTEMA (EXCLUSIVO DEV)
 # ------------------------------------------

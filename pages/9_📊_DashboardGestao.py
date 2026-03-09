@@ -7,9 +7,21 @@ from datetime import datetime, timedelta
 from modules.database import get_connection 
 
 # --- 1. SEGURANÇA E CONFIGURAÇÃO ---
-if not st.session_state.get("autenticado") or not st.session_state.get("termos_aceitos"):
+# Verificação de autenticação com default explícito para False
+if not st.session_state.get('autenticado', False):
     st.warning("⚠️ Acesso negado. Faça o login para continuar.")
     st.stop()
+
+# Recuperação do perfil do usuário com default vazio para evitar erros
+perfil_logado = str(st.session_state.get('perfil', '')).lower()
+
+# Definição de perfis permitidos para esta página
+PERFIS_PERMITIDOS = ['dev', 'coordenador']
+
+# Verificação de perfil: apenas 'dev' e 'coordenador' podem acessar
+# Sem mensagem de erro visível; apenas para a execução silenciosamente
+if perfil_logado not in PERFIS_PERMITIDOS:
+    st.stop()  # Impede que o conteúdo da página apareça para perfis não permitidos
 
 st.markdown("""
 <style>
@@ -84,7 +96,7 @@ with aba_plantoes:
             color_discrete_map={"Normal": "#007BFF", "Personalizado": "#FF9900"} # Azul e Laranja
         )
         fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width='stretch')
         
         with st.expander("Ver Tabela Bruta de Plantões"):
             st.dataframe(df_plantoes)
@@ -136,7 +148,7 @@ with aba_plantoes:
             color_discrete_sequence=["#007BFF"]
         )
         fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width='stretch')
         
         with st.expander("Ver Tabela Bruta de Plantões"):
             st.dataframe(df_plantoes)

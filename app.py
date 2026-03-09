@@ -1,45 +1,54 @@
+
+#*** IMPORTAÇÕES ***#
+
+import sys
+import os
 import streamlit as st
 import random
 import pandas as pd
-import os
 import requests
-
 import logging
+import json
+import tempfile 
+import openmeteo_requests
+import requests_cache
+import numpy as np
+
+from retry_requests import retry
 from datetime import datetime, timedelta
 from sqlalchemy import text
 from typing import Tuple, Optional
 from modules.database import get_connection
+from dotenv import load_dotenv
+from streamlit_mic_recorder import speech_to_text 
+from typing import Union
+from typing import Optional, Dict, Union  
+from utils import inicializar_usuario, calcular_patente
 
-# ==========================================
-# PASSO 1: Preparar a pasta de logs
-# ==========================================
-# Definimos o nome da pasta que queremos criar
+#======================================================================================================================#
+
+#*** Carrega variáveis de ambiente (DB_HOST, DB_NAME, DB_USER, DB_PASS) ***#
+load_dotenv()
+
+#======================================================================================================================#
+
+# Configura o registro de logs: define destino (arquivo), modo de escrita (anexo) e formato da mensagem
+
 pasta_logs = "logs"
-
-# Verificamos se a pasta já existe no teu projeto. Se não existir, o Python cria-a!
 if not os.path.exists(pasta_logs):
     os.makedirs(pasta_logs)
-
-# Criamos o caminho completo: "logs/sistema.log"
-# Usamos o os.path.join porque ele coloca a barra correta ( / ou \ ) dependendo se usas Windows ou Mac/Linux
 caminho_do_log = os.path.join(pasta_logs, "sistema.log")
 
-
-# ==========================================
-# PASSO 2: Configuração Central de Logs
-# ==========================================
-# Agora passamos o "caminho_do_log" em vez de apenas o nome do ficheiro
 logging.basicConfig(
-    filename=caminho_do_log, 
+    filename= caminho_do_log,
     filemode='a',               
     format='%(asctime)s - %(levelname)s - %(message)s', 
     level=logging.INFO          
 )
 
-# Teste simples para garantir que está a funcionar
 logging.info("--- Aplicação iniciada e logs configurados  ---")
 
-
+#======================================================================================================================#
 # Tenta importar a função de auditoria (Ajuste o caminho se necessário)
 try:
     from modules.auditoria import registrar_log_auditoria
@@ -47,70 +56,164 @@ except ImportError:
     # Fallback caso o ficheiro não exista ainda
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
-# ==========================================
-# 1. CONFIGURAÇÃO GLOBAL E ESTILO
-# ==========================================
-st.set_page_config(page_title="Wiki Suporte", page_icon="💡", layout="wide")
+# Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
+st.set_page_config(
+    page_title="Wiki Suporte", 
+    page_icon="💡", 
+    layout="wide", 
+    initial_sidebar_state="collapsed"
+)
 
-# ==========================================
-# 2. INICIALIZAÇÃO DE SESSÃO
-# ==========================================
+# Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
-if 'termos_aceitos' not in st.session_state:
-    st.session_state['termos_aceitos'] = False
+if 'notificacoes_lidas' not in st.session_state:
+    st.session_state['notificacoes_lidas'] = []
+
+
 
 # ==========================================
 # 3. FUNÇÕES DE DADOS PARA A HOME (CACHED)
 # ==========================================
 @st.cache_data(ttl=300) 
-def obter_alertas_usuario(usuario_id):
-    engine = get_connection()
-    try:
-        query_plantao = text("SELECT data_hora_entrada, data_hora_saida FROM plantoes_epsy WHERE id_analista_epsy = :uid AND data_hora_entrada::DATE = CURRENT_DATE")
-        df_plantao = pd.read_sql(query_plantao, engine, params={"uid": usuario_id})
-        
-        query_release = text("""
-            SELECT r.versao, c.nr_chamado 
-            FROM release_chamados_correcao rc
-            JOIN releases_tecnuv r ON rc.id_release = r.id_release
-            JOIN chamados_tecnuv c ON rc.nr_chamado = c.nr_chamado
-            WHERE c.id_analista_epsy = :uid AND rc.validado_epsy = FALSE
-        """)
-        df_release = pd.read_sql(query_release, engine, params={"uid": usuario_id})
-        
-        return df_plantao, df_release
-    except Exception as e:
-        st.error(f"Erro ao buscar alertas no banco de dados: {e}")
+def obter_alertas_usuario(usuario_id: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Busca alertas de plantão e validações pendentes para o usuário logado.
+    Refatorado para utilizar context manager na conexão, garantindo estabilidade no Pandas.
+    """
+    if not usuario_id:
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=300)
+    engine = get_connection()
+    try:
+        # Uso do context manager para garantir que a conexão seja fechada corretamente
+        with engine.connect() as conn:
+            query_plantao = text("""
+                SELECT data_hora_entrada, data_hora_saida 
+                FROM plantoes_epsy 
+                WHERE id_analista_epsy = :uid 
+                AND data_hora_entrada::DATE = CURRENT_DATE
+            """)
+            df_plantao = pd.read_sql(query_plantao, conn, params={"uid": usuario_id})
+            
+            query_release = text("""
+                SELECT r.versao, c.nr_chamado 
+                FROM release_chamados_correcao rc
+                JOIN releases_tecnuv r ON rc.id_release = r.id_release
+                JOIN chamados_tecnuv c ON rc.nr_chamado = c.nr_chamado
+                WHERE c.id_analista_epsy = :uid AND rc.validado_epsy = FALSE
+            """)
+            df_release = pd.read_sql(query_release, conn, params={"uid": usuario_id})
+            
+            return df_plantao, df_release
+            
+    except Exception as e:
+        logging.error(f"Erro ao buscar alertas no banco de dados para o usuário {usuario_id}: {e}")
+        st.error(f"Erro ao buscar alertas no banco de dados. Contate o administrador.")
+        return pd.DataFrame(), pd.DataFrame()
+
+# @st.cache_data(ttl=300)
+# def obter_kpis_home(usuario_id):
+#     """Busca os dados de gamificação do analista."""
+#     engine = get_connection()
+#     kpis = {
+#         "minhas_dicas": 0, "meu_xp": 0, "posicao_ranking": "-"
+#     }
+#     try:
+#         with engine.connect() as conn:
+#             query_dicas = text("SELECT COUNT(id) FROM base_conhecimento WHERE id_analista_autor = :uid AND status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE'")
+#             kpis["minhas_dicas"] = conn.execute(query_dicas, {"uid": usuario_id}).scalar() or 0
+#             kpis["meu_xp"] = kpis["minhas_dicas"] * 50
+            
+#             query_rank = text("""
+#                 WITH Ranking AS (
+#                     SELECT id_analista_autor, COUNT(id) as total,
+#                            RANK() OVER(ORDER BY COUNT(id) DESC) as posicao
+#                     FROM base_conhecimento WHERE status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE' GROUP BY id_analista_autor
+#                 )
+#                 SELECT posicao FROM Ranking WHERE id_analista_autor = :uid
+#             """)
+#             rank_result = conn.execute(query_rank, {"uid": usuario_id}).scalar()
+#             if rank_result: kpis["posicao_ranking"] = f"{rank_result}º Lugar"
+            
+#     except Exception as e:
+#         st.error(f"Erro ao carregar KPIs: {e}")
+#     return kpis
+
+#@st.cache_data(ttl=300)
 def obter_kpis_home(usuario_id):
-    """Busca os dados de gamificação do analista."""
     engine = get_connection()
     kpis = {
-        "minhas_dicas": 0, "meu_xp": 0, "posicao_ranking": "-"
+        "minhas_dicas": 0, "meu_xp": 0, "posicao_ranking": "-",
+        "impacto_visualizacoes": 0, "upvotes_recebidos": 0,
+        "nivel_atual": "Iniciante 🌱", "progresso_nivel": 0.0,
+        "missoes_ativas": []
     }
     try:
         with engine.connect() as conn:
-            query_dicas = text("SELECT COUNT(id) FROM base_conhecimento WHERE id_analista_autor = :uid AND status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE'")
-            kpis["minhas_dicas"] = conn.execute(query_dicas, {"uid": usuario_id}).scalar() or 0
-            kpis["meu_xp"] = kpis["minhas_dicas"] * 50
-            
-            query_rank = text("""
-                WITH Ranking AS (
-                    SELECT id_analista_autor, COUNT(id) as total,
-                           RANK() OVER(ORDER BY COUNT(id) DESC) as posicao
-                    FROM base_conhecimento WHERE status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE' GROUP BY id_analista_autor
-                )
-                SELECT posicao FROM Ranking WHERE id_analista_autor = :uid
+            # 1. BUSCA DADOS DO USUÁRIO (Garante que o usuário sempre retorne algo)
+            query_user = text("""
+                SELECT 
+                    COALESCE(xp_total, 0) as xp, 
+                    COALESCE(medalha_atual, 'Iniciante 🌱') as medalha 
+                FROM usuarios WHERE id = :uid
             """)
-            rank_result = conn.execute(query_rank, {"uid": usuario_id}).scalar()
-            if rank_result: kpis["posicao_ranking"] = f"{rank_result}º Lugar"
+            res_user = conn.execute(query_user, {"uid": usuario_id}).fetchone()
             
+            if res_user:
+                kpis["meu_xp"] = res_user.xp
+                kpis["nivel_atual"] = res_user.medalha
+                # Calcula progresso (evita divisão por zero)
+                kpis["progresso_nivel"] = float((res_user.xp % 1000) / 1000.0)
+
+            # 2. BUSCA ESTATÍSTICAS DE POSTS (Separado para evitar erros de GROUP BY)
+            query_stats = text("""
+                SELECT 
+                    COUNT(id) as total_posts,
+                    COALESCE(SUM(qtd_upvotes), 0) as total_upvotes,
+                    COALESCE(SUM(qtd_visualizacoes), 0) as total_views
+                FROM base_conhecimento 
+                WHERE id_analista_autor = :uid 
+                  AND status = 'APROVADO' 
+                  AND origem = 'CONHECIMENTO_SUPORTE'
+            """)
+            res_stats = conn.execute(query_stats, {"uid": usuario_id}).fetchone()
+            
+            if res_stats:
+                kpis["minhas_dicas"] = res_stats.total_posts
+                kpis["upvotes_recebidos"] = res_stats.total_upvotes
+                kpis["impacto_visualizacoes"] = res_stats.total_views
+
+            # 3. RANKING (Simplificado)
+            query_rank = text("""
+                SELECT posicao FROM (
+                    SELECT id, RANK() OVER(ORDER BY xp_total DESC) as posicao
+                    FROM usuarios WHERE ativo = true
+                ) r WHERE id = :uid
+            """)
+            rank_val = conn.execute(query_rank, {"uid": usuario_id}).scalar()
+            kpis["posicao_ranking"] = f"{rank_val}º Lugar" if rank_val else "N/A"
+
+            # 4. MISSÕES (Engajamento)
+            if kpis["upvotes_recebidos"] < 10:
+                kpis["missoes_ativas"].append("⭐ **Missão:** Alcance 10 curtidas para subir de nível!")
+            
+            # Verifica voto nas últimas 24h
+            voto_hoje = conn.execute(text("""
+                SELECT EXISTS(
+                    SELECT 1 FROM base_conhecimento_votos 
+                    WHERE id_analista_votante = :uid AND data_voto >= now() - interval '24 hours'
+                )
+            """), {"uid": usuario_id}).scalar()
+            
+            if not voto_hoje:
+                kpis["missoes_ativas"].append("🔍 **Missão:** Avalie a dica de um colega hoje!")
+
     except Exception as e:
-        st.error(f"Erro ao carregar KPIs: {e}")
+        st.error(f"Erro Crítico nos KPIs: {e}")
+    
     return kpis
+
 
 # ==========================================
 # 4. FUNÇÕES DE SEGURANÇA E LOGIN
@@ -120,85 +223,147 @@ def verificar_login(username: str, senha_digitada: str) -> Tuple[bool, Optional[
     engine = get_connection()
     try:
         with engine.connect() as conn:
-            # 🛡️ AJUSTE DE SEGURANÇA: Usamos a função nativa crypt() do Postgres para comparar o hash.
+            # AJUSTE DE SEGURANÇA: Usando a função nativa crypt() do Postgres para comparar o hash.
             # O Python NUNCA sabe qual é a senha real ou o hash, ele apenas repassa o texto limpo para o banco julgar.
             query = text("""
                 SELECT id, perfil 
                 FROM usuarios 
                 WHERE nome ILIKE :u 
-                AND password_hash = :senha 
+                AND password_hash = crypt(:p, password_hash) 
                 AND ativo = TRUE
             """)
-            
-            resultado = conn.execute(query, {"u": username, "senha": senha_digitada}).fetchone()
+           # Passamos 'u' para o nome e 'p' para a senha em texto puro
+            resultado = conn.execute(query, {"u": username, "p": senha_digitada}).fetchone()
             
             if resultado:
-                usuario_id = resultado[0]
-                perfil = resultado[1]
-                return True, usuario_id, perfil
+                # Retorna ID e Perfil para a sessão do Streamlit
+                return True, resultado[0], resultado[1]
                 
     except Exception as e:
         st.error(f"WikiSuporte encontrou um erro durante a autenticação: {e}")
     
     return False, None, None
 
-def verificar_aceite_termos(usuario_id: int) -> bool:
-    engine = get_connection()
-    try:
-        with engine.connect() as conn:
-            query = text("SELECT 1 FROM logs_auditoria_sistema WHERE usuario_id = :u AND acao = 'ACEITE_TERMOS' LIMIT 1")
-            resultado = conn.execute(query, {"u": usuario_id}).fetchone()
-            return bool(resultado)
-    except Exception:
-        return False
-
 
 # --- 1. FUNÇÃO DE CONSUMO DE API (COM CACHE) ---
 # O TTL=3600 significa que o sistema só vai na internet buscar o clima a cada 1 hora (3600 segundos).
 # Nos outros acessos, ele pega da memória RAM do servidor, ficando instantâneo!
-@st.cache_data(ttl=3600)
+# --- 1. CONFIGURAÇÃO DO CLIENTE OPEN-METEO (GLOBAL) ---
+cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
+retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+openmeteo = openmeteo_requests.Client(session=retry_session)
+
+# --- MAPEAMENTO DOS CÓDIGOS DE CLIMA ---
+CODIGOS_CLIMA = {
+    0: {"texto": "Céu limpo", "icone": "☀️", "alerta": False},
+    1: {"texto": "Principalmente limpo", "icone": "🌤️", "alerta": False},
+    2: {"texto": "Parcialmente nublado", "icone": "⛅", "alerta": False},
+    3: {"texto": "Nublado", "icone": "☁️", "alerta": False},
+    45: {"texto": "Neblina", "icone": "🌫️", "alerta": False},
+    48: {"texto": "Neblina com geada", "icone": "🌫️❄️", "alerta": False},
+    51: {"texto": "Chuvisco leve", "icone": "🌦️", "alerta": False},
+    53: {"texto": "Chuvisco moderado", "icone": "🌦️", "alerta": False},
+    55: {"texto": "Chuvisco intenso", "icone": "🌧️", "alerta": True},
+    61: {"texto": "Chuva leve", "icone": "🌧️", "alerta": False},
+    63: {"texto": "Chuva moderada", "icone": "🌧️", "alerta": False},
+    65: {"texto": "Chuva pesada", "icone": "🌧️", "alerta": True},
+    71: {"texto": "Neve leve", "icone": "🌨️", "alerta": False},
+    73: {"texto": "Neve moderada", "icone": "🌨️", "alerta": False},
+    75: {"texto": "Neve pesada", "icone": "🌨️", "alerta": True},
+    80: {"texto": "Pancadas de chuva leves", "icone": "🌦️", "alerta": False},
+    81: {"texto": "Pancadas de chuva moderadas", "icone": "🌧️", "alerta": False},
+    82: {"texto": "Pancadas de chuva violentas", "icone": "🌧️", "alerta": True},
+    95: {"texto": "Tempestade", "icone": "⛈️", "alerta": True},
+    96: {"texto": "Tempestade com granizo leve", "icone": "⛈️🌨️", "alerta": True},
+    99: {"texto": "Tempestade com granizo pesado", "icone": "⛈️🌨️", "alerta": True},
+}
+
+# --- FUNÇÃO DE CONSUMO À API (COM CACHE DO STREAMLIT) ---
+@st.cache_data(ttl=3600)   # <-- decorador agora aplicado corretamente
 def obter_previsao_tempo(lat="-29.1173", lon="-49.6176"):
     """
-    Consome a API gratuita do Open-Meteo para buscar o clima atual.
-    Coordenadas padrão configuradas para Sombrio, SC.
+    Obtém dados meteorológicos atuais da API Open-Meteo usando o cliente global.
     """
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
-    
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": float(lat),
+        "longitude": float(lon),
+        "current": [
+            "weather_code", "cloud_cover", "precipitation", "rain",
+            "showers", "is_day", "apparent_temperature",
+            "relative_humidity_2m", "temperature_2m", "wind_speed_10m",
+            "wind_gusts_10m", "wind_direction_10m"
+        ],
+        "forecast_days": 1
+    }
+
     try:
-        # timeout=10 garante que o sistema não trave se a internet do servidor cair
-        resposta = requests.get(url, timeout=10)
-        resposta.raise_for_status() # Verifica se houve erro HTTP (ex: 404, 500)
-        
-        dados = resposta.json()
-        return dados.get("current_weather")
-        
+        responses = openmeteo.weather_api(url, params=params)
+        response = responses[0]
+        current = response.Current()
+
+        # Extrai os valores na mesma ordem dos parâmetros
+        current_weather_code = current.Variables(0).Value()
+        current_cloud_cover = current.Variables(1).Value()
+        current_precipitation = current.Variables(2).Value()
+        current_rain = current.Variables(3).Value()
+        current_showers = current.Variables(4).Value()
+        current_is_day = current.Variables(5).Value()
+        current_apparent_temperature = current.Variables(6).Value()
+        current_relative_humidity_2m = current.Variables(7).Value()
+        current_temperature_2m = current.Variables(8).Value()
+        current_wind_speed_10m = current.Variables(9).Value()
+        current_wind_gusts_10m = current.Variables(10).Value()
+        current_wind_direction_10m = current.Variables(11).Value()
+
+        info_condicao = CODIGOS_CLIMA.get(int(current_weather_code), {"texto": "Desconhecido", "icone": "❓", "alerta": False})
+
+        alertas = [{"event": "Condição severa detectada", "description": info_condicao["texto"]}] if info_condicao["alerta"] else []
+
+        return {
+            "temperature": current_temperature_2m,
+            "windspeed": current_wind_speed_10m,
+            "condicao_texto": info_condicao["texto"],
+            "icone_url": info_condicao["icone"],
+            "alertas": alertas,
+            # campos extras (opcionais)
+            "weather_code": current_weather_code,
+            "cloud_cover": current_cloud_cover,
+            "precipitation": current_precipitation,
+            "rain": current_rain,
+            "showers": current_showers,
+            "is_day": current_is_day,
+            "apparent_temperature": current_apparent_temperature,
+            "relative_humidity": current_relative_humidity_2m,
+            "wind_gusts": current_wind_gusts_10m,
+            "wind_direction": current_wind_direction_10m,
+        }
     except Exception as e:
-        # DIRETRIZ FUNDAMENTAL #3: Exibir o erro real na tela do Streamlit
-        st.error(f"Erro ao buscar a previsão do tempo: {e}")
+        st.error(f"Erro ao buscar dados do Open-Meteo: {e}")
         return None
 
-# INTERFACE DO WIDGET PARA A HOME ---
+# INTERFACE DO WIDGET PARA A HOME (adaptada com cache)
+@st.cache_data(ttl=300)  # Cache de 5 minutos
 def exibir_widget_clima():
-    # Container com borda para manter o padrão Enterprise
     with st.container(border=True):
-        st.subheader("🌤️ Clima Atual - Sombrio/SC")
-        
-        # Chama a função (que vai usar o cache se já tiver sido chamada recentemente)
-        clima = obter_previsao_tempo()
-        
+        st.subheader("Temperatura atual - Sombrio/SC")
+        clima = obter_previsao_tempo()  # usa coordenadas padrão
+
         if clima:
-            # Divide o card em duas colunas para ficar elegante
             col1, col2 = st.columns(2)
             with col1:
-                # st.metric é perfeito para mostrar números de destaque
-                st.metric(label="Temperatura", value=f"{clima['temperature']} °C")
+                st.write(clima["icone_url"])  # Emoji; se usar URL, trocar por st.image
+                st.metric(label="Temperatura", value=f"{clima['temperature']:.1f} °C")
             with col2:
-                st.metric(label="Velocidade do Vento", value=f"{clima['windspeed']} km/h")
+                st.metric(label="Velocidade do Vento", value=f"{clima['windspeed']:.1f} km/h")
+                st.write(f"Condição: {clima['condicao_texto']}")
+
+            if clima["alertas"]:
+                with st.expander("Alertas Meteorológicos", expanded=True):
+                    for alerta in clima["alertas"]:
+                        st.warning(f"{alerta['event']}: {alerta['description']}")
         else:
             st.warning("Não foi possível carregar os dados do clima no momento.")
-
-
-
 
 
 def obter_saudacao() -> str:
@@ -207,19 +372,19 @@ def obter_saudacao() -> str:
     elif 12 <= hora_atual < 18: return "Boa tarde"
     else: return "Boa noite"
 
-# ==========================================
-# 5. PROTEÇÃO CONTRA INATIVIDADE (TIMEOUT)
-# ==========================================
-if st.session_state['autenticado']:
-    agora = datetime.now()
-    ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
+# # ==========================================#
+# # PROTEÇÃO CONTRA INATIVIDADE (TIMEOUT)
+# # ==========================================#
+# if st.session_state.get('autenticado'):   # <-- correção aqui
+#     agora = datetime.now()
+#     ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
     
-    if agora - ultimo_acesso > timedelta(minutes=20):
-        st.session_state.clear() 
-        st.warning("⏱️ Sessão expirada por inatividade. Por favor, faça login novamente para continuar.")
-        st.stop()
-    else:
-        st.session_state['ultimo_acesso'] = agora
+#     if agora - ultimo_acesso > timedelta(minutes=30):
+#         st.session_state.clear() 
+#         st.warning("⏱️ Sessão expirada por inatividade. Por favor, faça login novamente para continuar.")
+#         st.stop()
+#     else:
+#         st.session_state['ultimo_acesso'] = agora
 
 # ==========================================
 # 6. TELAS (VIEWS) DO SISTEMA
@@ -257,7 +422,7 @@ def tela_login() -> None:
                 usuario = st.text_input("👤 Usuário", placeholder="Insira o seu nome de usuário")
                 senha = st.text_input("🔑 Senha", type="password", placeholder="••••••••")
                 st.markdown("<br>", unsafe_allow_html=True)
-                btn_login = st.form_submit_button("Acessar Sistema", type="primary", use_container_width=True)
+                btn_login = st.form_submit_button("Entrar", type="primary", use_container_width='stretch')
                 
             if btn_login:
                 if usuario and senha:
@@ -267,7 +432,6 @@ def tela_login() -> None:
                         st.session_state['usuario_id'] = user_id
                         st.session_state['usuario_nome'] = usuario
                         st.session_state['perfil'] = user_perfil 
-                        st.session_state['termos_aceitos'] = verificar_aceite_termos(user_id)
                         st.session_state['ultimo_acesso'] = datetime.now() 
                         
                         registrar_log_auditoria(user_id, "LOGIN", "Usuário autenticou-se com sucesso.")
@@ -278,7 +442,6 @@ def tela_login() -> None:
                 else:
                     st.warning("⚠️ Por favor, preencha ambos os campos de usuário e senha.")
             
-                pass
 
         st.markdown("<br>", unsafe_allow_html=True)
         frases = [
@@ -325,129 +488,244 @@ def tela_login() -> None:
                 st.markdown("<p style='text-align: center; color: gray; font-size: 0.8rem;'>© 2026 WikiSuporte — Desenvolvido por Rafael D. Nascimento.</p>", unsafe_allow_html=True)
 
 
-def carregar_termos():
-    """Lê o arquivo de termos externo."""
-    try:
-        with open("termos_de_uso.md", "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "⚠️ Erro: Arquivo 'termos.md' não encontrado."
-
-def tela_termos_uso() -> None:
-    st.markdown("""
-        <style>
-            [data-testid="collapsedControl"] {display: none;}
-            [data-testid="stSidebar"] {display: none;}
-        </style>
-    """, unsafe_allow_html=True)
-    
-    col_vazia1, col_centro, col_vazia2 = st.columns([1, 3, 1])
-    
-    with col_centro:
-        st.title("📜 Termo de Uso e Confidencialidade")
-        st.warning("⚠️ **Atenção:** Ambiente restrito e protegido.")
-        
-        # Chama a função que lê o arquivo externo
-        texto_termos = carregar_termos()
-        
-        with st.container(height=400, border=True):
-            st.markdown(texto_termos)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        aceito = st.checkbox("Eu li, compreendo e concordo com os termos de uso.")
-        
-        if st.button("Aceitar Termos e Entrar", type="primary", use_container_width=True):
-            if aceito:
-                # Lógica de aceite aqui...
-                st.session_state['termos_aceitos'] = True
-                st.rerun()
-            else:
-                st.error("❌ É obrigatório marcar a caixa de seleção.")
-
-
 def tela_home() -> None:
     """Nova Home principal que consolida a antiga Page 0 no App.py"""
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
     perfil_usuario = str(st.session_state.get('perfil', 'analista')).lower()
     usuario_id = st.session_state.get('usuario_id', 0)
-    data_atual = datetime.now().strftime("%d/%m/%Y")
+    
+    # --- PREPARAÇÃO DA DATA E DIA DA SEMANA ---
+    dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    hoje = datetime.now()
+    dia_semana_str = dias_semana[hoje.weekday()]
+    data_atual = f"{dia_semana_str}, {hoje.strftime('%d/%m/%Y')}"
     
     # --- CONSTRUÇÃO DA BARRA LATERAL (PÓS-LOGIN) ---
     st.sidebar.markdown(f"## 👤 {nome_usuario}")
     st.sidebar.markdown(f"### {obter_saudacao()}!")
     st.sidebar.caption(f"🛡️ Perfil: **{perfil_usuario.title()}**")
     st.sidebar.divider()
-    if st.sidebar.button("🚪 Sair do Sistema", width='stretch'):
-        registrar_log_auditoria(st.session_state.get('usuario_id'), "LOGOUT", "Usuário saiu do sistema.")
+    
+    if st.sidebar.button("🚪 Sair do Sistema", use_container_width='stretch'):
+        registrar_log_auditoria(usuario_id, "LOGOUT", "Usuário saiu do sistema.")
         st.session_state.clear()
         st.rerun()
-    
 
-    # --- PREPARAÇÃO DA DATA E DIA DA SEMANA ---
-    # Lista infalível para garantir o idioma português, independente do servidor
-    dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
-    hoje = datetime.now()
-    dia_semana_str = dias_semana[hoje.weekday()] # Pega o dia da semana de 0 a 6
-    data_atual = f"{dia_semana_str}, {hoje.strftime('%d/%m/%Y')}"
+# --- AJUSTE VISUAL PROFISSIONAL ---
+    # Mata o espaço em branco inútil do topo do Streamlit
+    st.markdown("<style>.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }</style>", unsafe_allow_html=True)
 
-    # --- CORPO DA PÁGINA (HOME) ---
-    # Dividimos a tela: 70% para a saudação (col_texto) e 30% para o clima (col_clima)
+    # --- LOGO DA EPSY SISTEMAS ---
+    # As colunas [3, 1, 3] centralizam a logo e deixam ela com um tamanho elegante
+    _, col_logo, _ = st.columns([3, 1, 3])
+    with col_logo:
+        st.image("assets/imgepsy.png", use_container_width='stretch')
+
+    st.divider() # Linha para separar a logo do seu painel
+
+    # SAUDAÇÃO E CLIMA USANDO COMPONENTES NATIVOS
     col_texto, col_clima = st.columns([2.5, 1])
 
     with col_texto:
-        # Sua saudação original
-        st.markdown(f"<h1>{obter_saudacao()}, {nome_usuario}! 👋</h1>", unsafe_allow_html=True)
-        st.markdown("Este é o seu painel de controle central do **WikiSuporte**. Acompanhe os seus indicadores e os alertas do dia.")
+        # Determina o ícone da saudação baseado no período do dia
+        saudacao = obter_saudacao()
+        if "Boa noite" in saudacao:
+            icone_saudacao = "🌕 💻"
+        elif "Boa tarde" in saudacao:
+            icone_saudacao = "🌤️ 💻"
+        else:
+            icone_saudacao = "☀️ 💻"
         
-        # Caption limpa, apenas com as informações de texto
-        st.caption(f"📅 Hoje é **{data_atual}** | 🏢 Ambiente Seguro WikiSuporte")
+# Cabeçalho com saudação personalizada
+        st.header(f"{saudacao}, {nome_usuario}! {icone_saudacao}", anchor=False)
+        
+        # Descrição do painel
+        st.markdown(
+            "Este é o seu painel de controle central do **WikiSuporte**. "
+            "Acompanhe os seus indicadores e os alertas do dia."
+        )
+        
+        # --- AJUSTE CIRÚRGICO: CÁLCULO REAL DE ALERTAS ---
+        # 1. Desempacotamos a tupla nos dois DataFrames correspondentes
+        df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
+        
+        # 2. Contamos quantas linhas (registros reais) existem em cada um
+        total_alertas_reais = len(df_plantao) + len(df_correcoes)
+        
+        # Exibição da data e dos alertas (se houver) em uma linha horizontal
+        if total_alertas_reais > 0:
+            st.write(f"📅 {data_atual}   |   ⚡ **{total_alertas_reais}** alerta(s) no sistema")
+        else:
+            st.write(f"📅 {data_atual}")
+       
+        st.write("")
 
     with col_clima:
-        # O widget do clima é chamado AQUI, dentro da coluna dele, para ser desenhado no canto direito
+        obter_previsao_tempo()
         exibir_widget_clima()
+    
+    st.divider()
+
+    # 1. Primeiro recuperamos o ID e os dados (KPIs)
+    usuario_id = st.session_state.get('usuario_id') 
+
+    if usuario_id:
+        # BUSCA DOS DADOS (Aqui a variável kpis ganha vida)
+        kpis = obter_kpis_home(usuario_id)
+        df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
+
+        # 2. RENDERIZAÇÃO DOS TROFÉUS (Logo após o divisor, antes das notificações)
+        if kpis:
+            renderizar_dashboard_conquistas(kpis)
+        else:
+            st.warning("Não foi possível carregar seus indicadores de desempenho.")
+        
+        st.divider() # Divisor entre o Ranking e as Notificações
+
+        # 1. Padronização dos Alertas em uma Lista de Dicionários
+        notificacoes_atuais = []
+
+        if not df_plantao.empty:
+            entrada_raw = df_plantao.iloc[0]['data_hora_entrada']
+            saida_raw = df_plantao.iloc[0]['data_hora_saida']
+            entrada = entrada_raw.strftime('%H:%M') if isinstance(entrada_raw, datetime) else str(entrada_raw)[:5]
+            saida = saida_raw.strftime('%H:%M') if isinstance(saida_raw, datetime) else str(saida_raw)[:5]
+            
+            notificacoes_atuais.append({
+                'id': f"plantao_{datetime.now().strftime('%Y%m%d')}",
+                'icone': '🚨',
+                'titulo': 'Alerta de Escala: Plantão Hoje',
+                'detalhe': f"Você está escalado para o plantão de hoje, das {entrada} às {saida}. Mantenha-se atento aos acionamentos."
+            })
+
+        if not df_correcoes.empty:
+            for _, row in df_correcoes.iterrows():
+                notificacoes_atuais.append({
+                    'id': f"chamado_{row['nr_chamado']}",
+                    'icone': '⚠️',
+                    'titulo': f"Validação Pendente: Chamado {row['nr_chamado']}",
+                    'detalhe': f"A release {row['versao']} requer a sua validação para o chamado {row['nr_chamado']}. Por favor, realize a conferência técnica."
+                })
+
+        # 2. Separação Lógica (Lidas vs Não Lidas)
+        nao_lidas = [n for n in notificacoes_atuais if n['id'] not in st.session_state['notificacoes_lidas']]
+        lidas = [n for n in notificacoes_atuais if n['id'] in st.session_state['notificacoes_lidas']]
+
+        # 3. Renderização da Interface
+        st.subheader(f"🔔 Central de Notificações ({len(nao_lidas)})", anchor=False)
+        
+        if notificacoes_atuais:
+            aba_pendentes, aba_historico = st.tabs(["Pendentes", "Histórico (Lidas)"])
+            
+            with aba_pendentes:
+                if nao_lidas:
+                    for notif in nao_lidas:
+                        with st.expander(f"{notif['icone']} {notif['titulo']}", expanded=False):
+                            st.write(notif['detalhe'])
+                            # Botão para mover para o histórico
+                            if st.button("Marcar como lida", key=f"btn_read_{notif['id']}"):
+                                st.session_state['notificacoes_lidas'].append(notif['id'])
+                                st.rerun() # Atualiza a tela imediatamente
+                else:
+                    st.info("✅ Tudo limpo! Você não possui notificações pendentes no momento.")
+                    
+            with aba_historico:
+                if lidas:
+                    for notif in lidas:
+                        with st.expander(f"✅ (Lida) {notif['titulo']}", expanded=False):
+                            st.write(notif['detalhe'])
+                            # Permite ao usuário voltar a notificação para a tela principal
+                            if st.button("Restaurar notificação", key=f"btn_restore_{notif['id']}"):
+                                st.session_state['notificacoes_lidas'].remove(notif['id'])
+                                st.rerun()
+                else:
+                    st.caption("Nenhuma notificação foi lida nesta sessão.")
+        else:
+            st.info("Você não possui alertas no momento.")
+    else:
+        st.error("Erro de contexto: Sessão inválida. Por favor, faça login novamente.", icon="🛑")
+
+#===============================================================================================================================================================#
+def renderizar_dashboard_conquistas(kpis):
+    # 1. CABEÇALHO DE NÍVEL E PROGRESSO (UX Gamificada)
+    with st.container(border=True):
+        col_rank_icon, col_progress = st.columns([1, 4])
+        with col_rank_icon:
+            # Mostra o ícone grande do nível atual
+            st.markdown(f"<h1 style='text-align: center; margin:0;'>{kpis['nivel_atual'].split()[-1]}</h1>", unsafe_allow_html=True)
+        with col_progress:
+            st.markdown(f"**Nível Atual:** {kpis['nivel_atual']}")
+            st.progress(kpis['progresso_nivel'])
+            proximo_xp = 1000 - (kpis['meu_xp'] % 1000)
+            st.caption(f"✨ Faltam **{proximo_xp} XP** para o próximo nível")
+
+    st.write("") # Espaçamento
+
+    # 2. GRID DE KPIs PRINCIPAIS (3 Colunas)
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        with st.container(border=True):
+            st.metric(
+                label="⭐ XP Acumulado", 
+                value=f"{kpis['meu_xp']} XP", 
+                delta="Pontos Totais"
+            )
+            st.caption("Baseado em Posts + Upvotes")
+
+    with col2:
+        with st.container(border=True):
+            # Mostra a posição com o troféu se for Top 3
+            pos = kpis['posicao_ranking']
+            label_rank = "🏆 Posição no Ranking" if "1º" in pos or "2º" in pos or "3º" in pos else "🏅 Posição na Equipe"
+            st.metric(label=label_rank, value=pos)
+            st.caption("Ranking de Qualidade")
+
+    with col3:
+        with st.container(border=True):
+            # Impacto Real: Soma de Views + Upvotes
+            impacto_total = kpis['impacto_visualizacoes'] + (kpis['upvotes_recebidos'] * 5)
+            st.metric(label="🚀 Impacto Total", value=impacto_total)
+            st.caption(f"👀 {kpis['impacto_visualizacoes']} views | 👍 {kpis['upvotes_recebidos']} úteis")
+
+    st.write("") # Espaçamento
+
+    # 3. SEÇÃO DE ENGAJAMENTO (Missões e Próximos Passos)
+    if kpis['missoes_ativas']:
+        with st.expander("🎯 **Missões e Desafios da Semana**", expanded=True):
+            for missao in kpis['missoes_ativas']:
+                st.markdown(f"{missao}")
+            st.caption("Complete missões para ganhar bônus de XP e medalhas exclusivas.")
 
     st.divider()
 
-    # --- SISTEMA DE ALERTAS INTELIGENTES ---
-    df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
-    kpis = obter_kpis_home(usuario_id)
+    # 4. MINI-RESUMO DE CONTRIBUIÇÕES (Opcional)
+    st.subheader("📚 Minhas Estatísticas", anchor=False)
+    c1, c2, c3 = st.columns(3)
+    c1.write(f"📂 **Posts Aprovados:** {kpis['minhas_dicas']}")
+    c2.write(f"👍 **Votos Recebidos:** {kpis['upvotes_recebidos']}")
+    c3.write(f"📅 **Última Atividade:** Hoje") # Você pode puxar isso do banco depois
 
-    if not df_plantao.empty or not df_correcoes.empty:
-        with st.container(border=True):
-            if not df_plantao.empty:
-                entrada = df_plantao.iloc[0]['data_hora_entrada'].strftime('%H:%M') if isinstance(df_plantao.iloc[0]['data_hora_entrada'], datetime) else str(df_plantao.iloc[0]['data_hora_entrada'])[:5]
-                saida = df_plantao.iloc[0]['data_hora_saida'].strftime('%H:%M') if isinstance(df_plantao.iloc[0]['data_hora_saida'], datetime) else str(df_plantao.iloc[0]['data_hora_saida'])[:5]
-                st.error(f"🚨 **ALERTA DE ESCALA:** Você está no plantão de hoje! (Horário: {entrada} às {saida})")
 
-            if not df_correcoes.empty:
-                chamados_str = ", ".join([str(n) for n in df_correcoes['nr_chamado'].tolist()])
-                st.warning(f"⚠️ **AÇÃO REQUERIDA:** Você possui validações pendentes de release nos chamados: **{chamados_str}**.")
+    # # --- OS MEUS INDICADORES Contribuições ---
+    # st.subheader("🏆 Meu Desempenho", anchor=False)
+    # col_xp, col_dicas, col_rank = st.columns(3)
 
-    # --- OS MEUS INDICADORES (GAMIFICAÇÃO) ---
-    st.markdown("### 🏆 Meu Desempenho")
-    col_xp, col_dicas, col_rank = st.columns(3)
+    # with col_xp:
+    #     with st.container(border=True):
+    #         st.metric(label="⚡ Meu XP Total", value=f"{kpis.get('meu_xp', 0)} XP", delta="Baseado em aprovações")
+    # with col_dicas:
+    #     with st.container(border=True):
+    #         st.metric(label="📚 Contribuições Oficiais", value=kpis.get('minhas_dicas', 0), delta="Dicas ativas", delta_color="normal")
+    # with col_rank:
+    #     with st.container(border=True):
+    #         st.metric(label="🏅 Posição na Equipe", value=kpis.get('posicao_ranking', 'N/A'), delta="Leaderboard")
 
-    with col_xp:
-        with st.container(border=True):
-            st.metric(label="⚡ Meu XP Total", value=f"{kpis['meu_xp']} XP", delta="Baseado em aprovações")
-    with col_dicas:
-        with st.container(border=True):
-            st.metric(label="📚 Contribuições Oficiais", value=kpis['minhas_dicas'], delta="Dicas ativas", delta_color="normal")
-    with col_rank:
-        with st.container(border=True):
-            st.metric(label="🏅 Posição na Equipe", value=kpis['posicao_ranking'], delta="Leaderboard")
-
-    st.divider()
-
-    # --- MENSAGEM DO SISTEMA ---
-    st.info("💡 **Recado do Psy:** A sua participação faz toda a diferença para manter o WikiSuporte sempre atualizado. Navegue pelo menu lateral, pesquise na Central de Conhecimento e, se encontrar uma solução nova no seu dia a dia, não a guarde só para si. Clique em 'Contribuir' e partilhe com a equipa!")
-
+    # st.divider()
 # ==========================================
 # 7. CONTROLADOR DE FLUXO PRINCIPAL
 # ==========================================
 if not st.session_state['autenticado']:
     tela_login()
-elif not st.session_state['termos_aceitos']:
-    tela_termos_uso()
 else:
     tela_home()

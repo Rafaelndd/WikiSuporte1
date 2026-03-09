@@ -25,7 +25,7 @@ class ChamadoTecnuv(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     nr_chamado = Column(BigInteger, unique=True, nullable=False, index=True)
-    cliente_nome = Column(Text, nullable=True)
+    nome_cliente = Column(Text, nullable=True)
     atendente_tecnuv = Column(Text, nullable=True)
     usuario_epsy = Column(Text, nullable=True)
     status_atual = Column(Text, nullable=True)
@@ -42,13 +42,9 @@ class ChamadoTecnuv(Base):
     usuario_cancelamento = Column(String(100), nullable=True)
     usuario_encerramento = Column(String(100), nullable=True)
     assunto_encerramento = Column(Text, nullable=True)
-    
-    # NOVA COLUNA: Previsão de Conclusão lida dos detalhes do chamado
     previsao_conclusao = Column(Date, nullable=True)
-    
     ultima_alteracao_tecnuv = Column(DateTime, nullable=True)
     ultima_verificacao_robo = Column(DateTime, default=datetime.now)
-
     # RELACIONAMENTOS (Atualizados para incluir Cobranças e Clientes Vinculados)
     transicoes = relationship("HistoricoTransicaoStatus", back_populates="chamado", cascade="all, delete-orphan")
     interacoes = relationship("HistoricoInteracao", back_populates="chamado", cascade="all, delete-orphan")

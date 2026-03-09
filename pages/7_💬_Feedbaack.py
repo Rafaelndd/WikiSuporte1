@@ -6,8 +6,8 @@ import os
 
 # --- 1. CONFIGURAÇÃO INICIAL E SEGURANÇA ---
 st.set_page_config(page_title="Wiki Suporte", page_icon="💬", layout="wide")
-if not st.session_state.get("autenticado") or not st.session_state.get("termos_aceitos"):
-    st.warning("⚠️ Acesso negado. Por favor, faça o login e aceite os termos da LGPD.")
+if not st.session_state.get("autenticado"):
+    st.warning("⚠️ Acesso negado. Por favor, faça o login.")
     st.stop()
 
 # --- 2. INJEÇÃO DE CSS (EFEITOS MODERNOS E INTERATIVOS) ---

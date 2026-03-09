@@ -339,6 +339,185 @@ WHERE
     -- Atualiza apenas registros que ainda não foram vinculados.
     AND ag.id_analista_epsy IS NULL;
 
+
+
+CREATE TABLE log_auditoria_usuarios (
+    id SERIAL PRIMARY KEY,
+    data_hora TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    operacao VARCHAR(10) NOT NULL, -- Guardará INSERT, UPDATE ou DELETE
+    db_user VARCHAR(50) DEFAULT current_user, -- Ex: 'postgres' (Quem conectou no banco)
+    app_user_id INTEGER, -- O ID do usuário logado no Python (WikiSuporte)
+    app_name TEXT DEFAULT current_setting('application_name', true), -- O nome do app conectado
+    dados_anteriores JSONB, -- Estado completo da linha ANTES da mudança
+    dados_novos JSONB -- Estado completo da linha DEPOIS da mudança
+);
+
+
+
+CREATE OR REPLACE FUNCTION trg_audita_usuarios()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_app_user_id INTEGER;
+    v_old_data JSONB;
+    v_new_data JSONB;
+BEGIN
+    -- Captura o ID do usuário do Python
+    BEGIN
+        v_app_user_id := current_setting('myapp.user_id', true)::INTEGER;
+    EXCEPTION WHEN OTHERS THEN
+        v_app_user_id := NULL; 
+    END;
+
+    -- Usa o nome exato da sua coluna para não gravar a senha no log de auditoria
+    IF (TG_OP = 'UPDATE') THEN
+        v_old_data := to_jsonb(OLD) - 'password_has';
+        v_new_data := to_jsonb(NEW) - 'password_hash';
+        INSERT INTO log_auditoria_usuarios (operacao, app_user_id, dados_anteriores, dados_novos)
+        VALUES ('UPDATE', v_app_user_id, v_old_data, v_new_data);
+        RETURN NEW;
+        
+    ELSIF (TG_OP = 'DELETE') THEN
+        v_old_data := to_jsonb(OLD) - 'password_hash';
+        INSERT INTO log_auditoria_usuarios (operacao, app_user_id, dados_anteriores, dados_novos)
+        VALUES ('DELETE', v_app_user_id, v_old_data, NULL);
+        RETURN OLD;
+        
+    ELSIF (TG_OP = 'INSERT') THEN
+        v_new_data := to_jsonb(NEW) - 'password_hash';
+        INSERT INTO log_auditoria_usuarios (operacao, app_user_id, dados_anteriores, dados_novos)
+        VALUES ('INSERT', v_app_user_id, NULL, v_new_data);
+        RETURN NEW;
+    END IF;
+    
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER trg_log_operacoes_usuarios
+AFTER INSERT OR UPDATE OR DELETE ON usuarios
+FOR EACH ROW EXECUTE FUNCTION trg_audita_usuarios();
+
+CREATE OR REPLACE FUNCTION trg_func_hash_senha()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Se o campo de senha estiver vazio/nulo, não faz nada
+    IF NEW.password_hash IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- Proteção contra "Duplo Hash": Só aplica a criptografia se a string NÃO começar com o padrão bcrypt ($2...)
+    IF NEW.password_hash NOT LIKE '$2%' THEN
+        NEW.password_hash = crypt(NEW.password_hash, gen_salt('bf'));
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER trg_protege_senha_usuario
+BEFORE INSERT OR UPDATE OF password_hash
+ON usuarios
+FOR EACH ROW
+EXECUTE FUNCTION trg_func_hash_senha();
+
+-- AJUSTES NA TABELA DE CONHECIMENTO
+ALTER TABLE base_conhecimento 
+ADD COLUMN IF NOT EXISTS qtd_upvotes INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS qtd_visualizacoes INTEGER DEFAULT 0;
+
+-- AJUSTES NA TABELA DE USUARIOS (Para persistir o progresso)
+ALTER TABLE usuarios 
+ADD COLUMN IF NOT EXISTS xp_total INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS medalha_atual VARCHAR(100) DEFAULT 'Iniciante 🌱';
+
+-- TABELA DE VOTOS (Evita fraude e mede qualidade real)
+CREATE TABLE IF NOT EXISTS base_conhecimento_votos (
+    id SERIAL PRIMARY KEY,
+    id_conhecimento INTEGER REFERENCES base_conhecimento(id) ON DELETE CASCADE,
+    id_analista_votante INTEGER REFERENCES usuarios(id),
+    data_voto TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(id_conhecimento, id_analista_votante)
+);
+
+ALTER TABLE base_conhecimento 
+ADD COLUMN IF NOT EXISTS data_ocorrido DATE DEFAULT CURRENT_DATE;
+
+
+
+CREATE OR REPLACE FUNCTION atualizar_xp_usuario()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_id_autor INTEGER;
+    v_xp_calculado INTEGER;
+    v_nova_medalha VARCHAR(100);
+BEGIN
+    -- Identificar o autor
+    IF (TG_TABLE_NAME = 'base_conhecimento') THEN
+        v_id_autor := NEW.id_analista_autor;
+    ELSIF (TG_TABLE_NAME = 'base_conhecimento_votos') THEN
+        SELECT id_analista_autor INTO v_id_autor FROM base_conhecimento 
+        WHERE id = COALESCE(NEW.id_conhecimento, OLD.id_conhecimento);
+    END IF;
+
+    -- RECALCULAR XP COM REGRA TEMPORAL + BÔNUS DE QUALIDADE (UPVOTES)
+    SELECT 
+        SUM(
+            CASE 
+                WHEN (EXTRACT(DAY FROM (criado_em - data_ocorrido)) <= 7) THEN 100
+                WHEN (EXTRACT(DAY FROM (criado_em - data_ocorrido)) <= 14) THEN 50
+                WHEN (EXTRACT(DAY FROM (criado_em - data_ocorrido)) <= 21) THEN 25
+                ELSE 0 
+            END
+        ) + (COALESCE(SUM(qtd_upvotes), 0) * 20)
+    INTO v_xp_calculado
+    FROM base_conhecimento 
+    WHERE id_analista_autor = v_id_autor AND status = 'APROVADO';
+
+    -- NOVA HIERARQUIA DE PATENTES (1k a 1M XP)
+    IF v_xp_calculado >= 1000000 THEN v_nova_medalha := 'Expert';
+    ELSIF v_xp_calculado >= 950000 THEN v_nova_medalha := 'Lenda do Suporte';
+    ELSIF v_xp_calculado >= 850000 THEN v_nova_medalha := 'Referência Técnica';
+    ELSIF v_xp_calculado >= 700000 THEN v_nova_medalha := 'Analista Mestre';
+    ELSIF v_xp_calculado >= 550000 THEN v_nova_medalha := 'Analista Pleno';
+    ELSIF v_xp_calculado >= 400000 THEN v_nova_medalha := 'Analista Jr';
+    ELSIF v_xp_calculado >= 250000 THEN v_nova_medalha := 'Especialista Sênior';
+    ELSIF v_xp_calculado >= 150000 THEN v_nova_medalha := 'Especialista N2';
+    ELSIF v_xp_calculado >= 100000 THEN v_nova_medalha := 'Especialista N1';
+    ELSIF v_xp_calculado >= 75000  THEN v_nova_medalha := 'Contribuidor Pleno';
+    ELSIF v_xp_calculado >= 50000  THEN v_nova_medalha := 'Contribuidor Ativo';
+    ELSIF v_xp_calculado >= 20000  THEN v_nova_medalha := 'Contribuidor Jr';
+    ELSIF v_xp_calculado >= 10000  THEN v_nova_medalha := 'Novato Consistente';
+    ELSIF v_xp_calculado >= 5000   THEN v_nova_medalha := 'Novato Proativo';
+    ELSIF v_xp_calculado >= 1000   THEN v_nova_medalha := 'Novato Aspirante';
+    ELSE v_nova_medalha := 'Estagiário';
+    END IF;
+
+    -- Atualização no Banco
+    UPDATE usuarios 
+    SET xp_total = COALESCE(v_xp_calculado, 0), 
+        medalha_atual = v_nova_medalha 
+    WHERE id = v_id_autor;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- Garante o trigger na tabela de contribuições
+DROP TRIGGER IF EXISTS trg_atualizar_xp_base ON base_conhecimento;
+CREATE TRIGGER trg_atualizar_xp_base
+AFTER INSERT OR UPDATE ON base_conhecimento
+FOR EACH ROW EXECUTE FUNCTION atualizar_xp_usuario();
+
+-- Garante o trigger na tabela de votos (se houver)
+DROP TRIGGER IF EXISTS trg_atualizar_xp_votos ON base_conhecimento_votos;
+CREATE TRIGGER trg_atualizar_xp_votos
+AFTER INSERT OR UPDATE OR DELETE ON base_conhecimento_votos
+FOR EACH ROW EXECUTE FUNCTION atualizar_xp_usuario();
+
+
 -- =================================================================================
 -- FIM DO SCRIPT
 -- =================================================================================

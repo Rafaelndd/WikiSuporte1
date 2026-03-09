@@ -112,7 +112,7 @@ with tab_lancamento:
             st.markdown("<br>", unsafe_allow_html=True)
             
             # Botão de Salvar
-            btn_salvar = st.form_submit_button("✅ Salvar Atendimento", type="primary", use_container_width=True)
+            btn_salvar = st.form_submit_button("✅ Salvar Atendimento", type="primary", use_container_width='stretch')
             
             if btn_salvar:
                 if len(motivo) < 10:
