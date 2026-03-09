@@ -1,6 +1,4 @@
 import os
-print('GOTO_CLIENT_ID:', os.getenv('GOTO_CLIENT_ID'))
-print('GOTO_CLIENT_SECRET:', os.getenv('GOTO_CLIENT_SECRET'))
 import streamlit as st
 import pandas as pd
 import re

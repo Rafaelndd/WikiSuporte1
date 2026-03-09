@@ -91,23 +91,84 @@ def _extrair_apenas_numeros(texto) -> str:
 # Autenticação OAuth2
 # ---------------------------------------------------------------------------
 
+# def obter_token_acesso(client_id: str, client_secret: str) -> dict:
+#     """
+#     Autentica na API do GoTo Connect usando o fluxo OAuth2 Client Credentials
+#     e retorna o token de acesso junto com suas informações.
+
+#     Args:
+#         client_id:     ID do cliente OAuth2 cadastrado no portal GoTo.
+#         client_secret: Senha/segredo do cliente OAuth2.
+
+#     Returns:
+#         Dicionário com chaves: 'access_token', 'token_type', 'expires_in'.
+
+#     Raises:
+#         ConnectionError: Se não for possível conectar ao servidor de autenticação.
+#         ValueError:      Se as credenciais forem inválidas ou a resposta inesperada.
+#     """
+#     # O GoTo usa Basic Auth com as credenciais codificadas em Base64
+#     credenciais = f"{client_id}:{client_secret}"
+#     credenciais_b64 = base64.b64encode(credenciais.encode("utf-8")).decode("utf-8")
+
+#     headers = {
+#         "Authorization": f"Basic {credenciais_b64}",
+#         "Content-Type": "application/x-www-form-urlencoded",
+#         "Accept": "application/json",
+#     }
+#     payload = {"grant_type": "client_credentials"}
+
+#     try:
+#         resposta = requests.post(
+#             GOTO_TOKEN_URL,
+#             headers=headers,
+#             data=payload,
+#             timeout=GOTO_REQUEST_TIMEOUT,
+#         )
+#         resposta.raise_for_status()
+#         dados = resposta.json()
+
+#         if "access_token" not in dados:
+#             raise ValueError(
+#                 f"Resposta inesperada do servidor de autenticação: {dados}"
+#             )
+
+#         logger.info("Token GoTo obtido com sucesso. Expira em %s segundos.", dados.get("expires_in"))
+#         return dados
+
+#     except requests.exceptions.ConnectionError as e:
+#         raise ConnectionError(
+#             "Não foi possível conectar ao servidor de autenticação do GoTo. "
+#             "Verifique a conexão com a Internet."
+#         ) from e
+#     except requests.exceptions.Timeout as e:
+#         raise ConnectionError(
+#             f"Tempo limite excedido ao tentar autenticar no GoTo ({GOTO_REQUEST_TIMEOUT}s)."
+#         ) from e
+#     except requests.exceptions.HTTPError as e:
+#         status = e.response.status_code if e.response is not None else "?"
+#         corpo = e.response.text if e.response is not None else ""
+#         if status == 401:
+#             raise ValueError(
+#                 "Credenciais GoTo inválidas (401 Unauthorized). "
+#                 "Verifique GOTO_CLIENT_ID e GOTO_CLIENT_SECRET no arquivo .env."
+#             ) from e
+#         raise ValueError(
+#             f"Erro HTTP {status} ao autenticar no GoTo: {corpo}"
+#         ) from e
+
 def obter_token_acesso(client_id: str, client_secret: str) -> dict:
     """
-    Autentica na API do GoTo Connect usando o fluxo OAuth2 Client Credentials
-    e retorna o token de acesso junto com suas informações.
-
-    Args:
-        client_id:     ID do cliente OAuth2 cadastrado no portal GoTo.
-        client_secret: Senha/segredo do cliente OAuth2.
-
-    Returns:
-        Dicionário com chaves: 'access_token', 'token_type', 'expires_in'.
-
-    Raises:
-        ConnectionError: Se não for possível conectar ao servidor de autenticação.
-        ValueError:      Se as credenciais forem inválidas ou a resposta inesperada.
+    Autentica na API do GoTo Connect usando o fluxo OAuth2 com Refresh Token
+    e retorna o token de acesso de vida curta para a requisição atual.
     """
-    # O GoTo usa Basic Auth com as credenciais codificadas em Base64
+    refresh_token = os.getenv("GOTO_REFRESH_TOKEN")
+    if not refresh_token:
+        raise ValueError(
+            "GOTO_REFRESH_TOKEN não encontrado no .env. "
+            "É obrigatório para gerar o acesso automatizado."
+        )
+
     credenciais = f"{client_id}:{client_secret}"
     credenciais_b64 = base64.b64encode(credenciais.encode("utf-8")).decode("utf-8")
 
@@ -116,7 +177,12 @@ def obter_token_acesso(client_id: str, client_secret: str) -> dict:
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
     }
-    payload = {"grant_type": "client_credentials"}
+    
+    # MUDANÇA CRÍTICA: Agora usamos o refresh_token no lugar de client_credentials
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token
+    }
 
     try:
         resposta = requests.post(
@@ -133,30 +199,20 @@ def obter_token_acesso(client_id: str, client_secret: str) -> dict:
                 f"Resposta inesperada do servidor de autenticação: {dados}"
             )
 
-        logger.info("Token GoTo obtido com sucesso. Expira em %s segundos.", dados.get("expires_in"))
+        logger.info("Token GoTo renovado com sucesso via Refresh Token. Expira em %s segundos.", dados.get("expires_in"))
         return dados
 
-    except requests.exceptions.ConnectionError as e:
-        raise ConnectionError(
-            "Não foi possível conectar ao servidor de autenticação do GoTo. "
-            "Verifique a conexão com a Internet."
-        ) from e
-    except requests.exceptions.Timeout as e:
-        raise ConnectionError(
-            f"Tempo limite excedido ao tentar autenticar no GoTo ({GOTO_REQUEST_TIMEOUT}s)."
-        ) from e
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code if e.response is not None else "?"
         corpo = e.response.text if e.response is not None else ""
-        if status == 401:
+        if status in [400, 401]:
             raise ValueError(
-                "Credenciais GoTo inválidas (401 Unauthorized). "
-                "Verifique GOTO_CLIENT_ID e GOTO_CLIENT_SECRET no arquivo .env."
+                "Falha de autorização (400/401). Verifique se o GOTO_REFRESH_TOKEN no "
+                "arquivo .env está correto e atualizado."
             ) from e
-        raise ValueError(
-            f"Erro HTTP {status} ao autenticar no GoTo: {corpo}"
-        ) from e
-
+        raise ValueError(f"Erro HTTP {status} ao renovar token: {corpo}") from e
+    except Exception as e:
+        raise ConnectionError(f"Falha de conexão ao autenticar: {e}") from e
 
 def obter_chave_conta(access_token: str) -> str:
     """
@@ -484,13 +540,22 @@ def buscar_atendimentos_goto(
         ConnectionError: Falha de conexão com a API do GoTo.
     """
     # Carrega credenciais do .env se não fornecidas
+    # cid = client_id or os.getenv("GOTO_CLIENT_ID", "")
+    # csecret = client_secret or os.getenv("GOTO_CLIENT_SECRET", "")
+
+    # if not cid or not csecret:
+    #     raise ValueError(
+    #         "Credenciais GoTo não configuradas. "
+    #         "Defina GOTO_CLIENT_ID e GOTO_CLIENT_SECRET no arquivo .env."
+    #     )
     cid = client_id or os.getenv("GOTO_CLIENT_ID", "")
     csecret = client_secret or os.getenv("GOTO_CLIENT_SECRET", "")
+    rtoken = os.getenv("GOTO_REFRESH_TOKEN", "") # Nova linha
 
-    if not cid or not csecret:
+    if not cid or not csecret or not rtoken: # Nova condição
         raise ValueError(
-            "Credenciais GoTo não configuradas. "
-            "Defina GOTO_CLIENT_ID e GOTO_CLIENT_SECRET no arquivo .env."
+            "Credenciais GoTo incompletas. "
+            "Defina GOTO_CLIENT_ID, GOTO_CLIENT_SECRET e GOTO_REFRESH_TOKEN no arquivo .env."
         )
 
     # 1. Autenticação
@@ -529,8 +594,11 @@ def verificar_conectividade(client_id: Optional[str] = None, client_secret: Opti
         cid = client_id or os.getenv("GOTO_CLIENT_ID", "")
         csecret = client_secret or os.getenv("GOTO_CLIENT_SECRET", "")
 
-        if not cid or not csecret:
-            return False, "Credenciais GoTo não configuradas no arquivo .env."
+        # if not cid or not csecret:
+        #     return False, "Credenciais GoTo não configuradas no arquivo .env."
+        if not cid or not csecret or not os.getenv("GOTO_REFRESH_TOKEN"):
+            return False, "Faltam credenciais ou o GOTO_REFRESH_TOKEN no arquivo .env."
+
 
         token_dados = obter_token_acesso(cid, csecret)
         account_key = obter_chave_conta(token_dados["access_token"])
