@@ -3,25 +3,73 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import re
+import os
+import logging
+from dotenv import load_dotenv
 from sqlalchemy import text
+from typing import Tuple, Optional
+from modules.database import get_connection
+from retry_requests import retry
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
-from modules.database import get_connection
 
-try:
-    from modules.auditoria import registrar_log_auditoria
-except:
-    def registrar_log_auditoria(*args): pass
+
+
 
 # ==========================================
 # 1. SEGURANÇA E SESSÃO
 # ==========================================
-st.set_page_config(page_title="Wiki Suporte", page_icon="📊", layout="wide")
 
-if not st.session_state.get('autenticado'):
-    st.switch_page("app.py")
+# Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
+if 'autenticado' not in st.session_state:
+    st.session_state['autenticado'] = False
+if 'notificacoes_lidas' not in st.session_state:
+    st.session_state['notificacoes_lidas'] = []
 
-usuario_id = st.session_state.get('usuario_id')
+
+st.set_page_config(
+    page_title="Wiki-Suporte", 
+    page_icon="💡", 
+    layout="wide", 
+    initial_sidebar_state="collapsed"
+)
+
+
+
+#======================================================================================================================#
+
+#*** Carrega variáveis de ambiente (DB_HOST, DB_NAME, DB_USER, DB_PASS) ***#
+load_dotenv()
+
+#======================================================================================================================#
+
+# Configura o registro de logs: define destino (arquivo), modo de escrita (anexo) e formato da mensagem
+
+pasta_logs = "logs"
+if not os.path.exists(pasta_logs):
+    os.makedirs(pasta_logs)
+caminho_do_log = os.path.join(pasta_logs, "sistema.log")
+
+logging.basicConfig(
+    filename= caminho_do_log,
+    filemode='a',               
+    format='%(asctime)s - %(levelname)s - %(message)s', 
+    level=logging.INFO          
+)
+
+logging.info("--- Aplicação iniciada e logs configurados  ---")
+
+#======================================================================================================================#
+# Tenta importar a função de auditoria (Ajuste o caminho se necessário)
+try:
+    from modules.auditoria import registrar_log_auditoria
+except ImportError:
+    # Fallback caso o ficheiro não exista ainda
+    def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
+
+
+
+
 
 # ==========================================
 # 2. MOTORES DE BUSCA E PROCESSAMENTO
@@ -66,49 +114,159 @@ def limpar_html(html_text):
     texto = soup.get_text(separator=" ")
     return re.sub(r'\s+', ' ', texto).strip()
 
-def detectar_liberacao(texto):
-    return re.search(r"Este chamado foi liberado em vers", texto, re.IGNORECASE) is not None
+
+def extrair_versao_liberacao(texto: str) -> Optional[str]:
+    """
+    Tenta extrair o número da versão informada em uma mensagem de liberação.
+    Ex.: 'Este chamado foi liberado em vers 3.1.4' -> '3.1.4'
+    """
+    if not texto:
+        return None
+    m = re.search(r"vers(?:ão)?\s*([\d\.]+)", texto, flags=re.IGNORECASE)
+    return m.group(1) if m else None
+
 
 def classificar_reincidencia_e_tempo(df_interacoes_chamado, data_abertura, status_atual):
+    """
+    Ajuste: só considera liberação quando a interação é da TecNuv (origem/usuario)
+    e usa detectar_liberacao apenas dentro do loop de interações.
+    """
     if df_interacoes_chamado.empty:
         return "Sem Liberação", pd.NaT
 
     df_ord = df_interacoes_chamado.sort_values("data_interacao").reset_index(drop=True)
-    
+
     liberacao_idx = None
     data_primeira_liberacao = pd.NaT
-    
+
     for idx, row in df_ord.iterrows():
         texto = limpar_html(row.get("descricao_html", ""))
-        if detectar_liberacao(texto):
+        origem = (row.get("origem_interacao") or row.get("origem") or row.get("usuario") or "").lower()
+        if "tecnuv" in origem and detectar_liberacao(texto):
             liberacao_idx = idx
             if pd.isna(data_primeira_liberacao):
-                data_primeira_liberacao = row['data_interacao']
-    
+                data_primeira_liberacao = row["data_interacao"]
+
     if liberacao_idx is None:
         return "Sem Liberação", pd.NaT
 
-    posteriores = df_ord.iloc[liberacao_idx + 1:]
-    
+    posteriores = df_ord.iloc[liberacao_idx + 1 :]
+
     if posteriores.empty:
-        if "Encerrado" in str(status_atual):
-            classificacao = "Resolvido Pós-Liberação"
-        else:
-            classificacao = "Aguardando Validação EPSY"
+        classificacao = "Resolvido Pós-Liberação" if "encerrado" in str(status_atual).lower() else "Aguardando Validação EPSY"
     else:
-        resolveu = False
-        for _, row in posteriores.iterrows():
-            texto = limpar_html(row.get("descricao_html", ""))
-            if "finaliza" in texto.lower() or "encerr" in texto.lower():
-                resolveu = True
-                break
-                
-        if resolveu or "Encerrado" in str(status_atual):
-            classificacao = "Resolvido Pós-Liberação"
-        else:
-            classificacao = "Reincidência"
-            
+        resolveu = posteriores["descricao_html"].fillna("").str.lower().str.contains("finaliza|encerr").any()
+        classificacao = "Resolvido Pós-Liberação" if resolveu or "encerrado" in str(status_atual).lower() else "Reincidência"
+
     return classificacao, data_primeira_liberacao
+
+
+def sincronizar_chamados(
+    ids_helpdesk_abertos: list,
+    ids_banco_abertos: list,
+    buscar_interacoes_helpdesk,          # função externa que retorna lista/dict de interações
+    buscar_status_finalizacao_helpdesk,  # função externa que retorna (status, data, usuario, mensagem)
+):
+    """
+    Fluxo de sincronização resumido:
+    - Compara sets de IDs abertos no helpdesk x banco.
+    - Para cada diferença, busca interações e status final.
+    - Marca liberações apenas se vierem da TecNuv e baterem com detectar_liberacao.
+    """
+    chamados_abertos_helpdesk = set(ids_helpdesk_abertos)
+    chamados_abertos_banco = set(ids_banco_abertos)
+
+    novos_abertos = chamados_abertos_helpdesk - chamados_abertos_banco
+    fechados_no_helpdesk = chamados_abertos_banco - chamados_abertos_helpdesk
+
+    resultados = {
+        "novos_abertos": [],
+        "fechados": [],
+        "liberacoes": [],  # cada item: {id, data, versao, interacao_raw}
+    }
+
+    # Novos chamados detectados no helpdesk
+    for cid in novos_abertos:
+        interacoes = buscar_interacoes_helpdesk(cid)
+        resultados["novos_abertos"].append({"id": cid, "interacoes": interacoes})
+
+    # Chamados que fecharam no helpdesk
+    for cid in fechados_no_helpdesk:
+        status, dt_final, usuario_final, msg = buscar_status_finalizacao_helpdesk(cid)
+        interacoes = buscar_interacoes_helpdesk(cid)
+        resultados["fechados"].append(
+            {
+                "id": cid,
+                "status": status,
+                "data_finalizacao": dt_final,
+                "usuario_finalizador": usuario_final,
+                "mensagem_final": msg,
+                "interacoes": interacoes,
+            }
+        )
+
+    # Processa liberações em todos os chamados divergentes
+    for cid in novos_abertos | fechados_no_helpdesk:
+        interacoes = buscar_interacoes_helpdesk(cid)
+        for interacao in interacoes:
+            origem = (interacao.get("origem") or interacao.get("usuario") or "").lower()
+            if "tecnuv" not in origem:
+                continue
+            texto = interacao.get("descricao_html", "")
+            if detectar_liberacao(texto):
+                resultados["liberacoes"].append(
+                    {
+                        "id": cid,
+                        "data": interacao.get("data_interacao"),
+                        "versao": extrair_versao_liberacao(texto),
+                        "interacao_raw": interacao,
+                    }
+                )
+
+    return resultados
+# def detectar_liberacao(texto):
+#     return re.search(r"Este chamado foi liberado em vers", texto, re.IGNORECASE) is not None
+
+# def classificar_reincidencia_e_tempo(df_interacoes_chamado, data_abertura, status_atual):
+#     if df_interacoes_chamado.empty:
+#         return "Sem Liberação", pd.NaT
+
+#     df_ord = df_interacoes_chamado.sort_values("data_interacao").reset_index(drop=True)
+    
+#     liberacao_idx = None
+#     data_primeira_liberacao = pd.NaT
+    
+#     for idx, row in df_ord.iterrows():
+#         texto = limpar_html(row.get("descricao_html", ""))
+#         if detectar_liberacao(texto):
+#             liberacao_idx = idx
+#             if pd.isna(data_primeira_liberacao):
+#                 data_primeira_liberacao = row['data_interacao']
+    
+#     if liberacao_idx is None:
+#         return "Sem Liberação", pd.NaT
+
+#     posteriores = df_ord.iloc[liberacao_idx + 1:]
+    
+#     if posteriores.empty:
+#         if "Encerrado" in str(status_atual):
+#             classificacao = "Resolvido Pós-Liberação"
+#         else:
+#             classificacao = "Aguardando Validação EPSY"
+#     else:
+#         resolveu = False
+#         for _, row in posteriores.iterrows():
+#             texto = limpar_html(row.get("descricao_html", ""))
+#             if "finaliza" in texto.lower() or "encerr" in texto.lower():
+#                 resolveu = True
+#                 break
+                
+#         if resolveu or "Encerrado" in str(status_atual):
+#             classificacao = "Resolvido Pós-Liberação"
+#         else:
+#             classificacao = "Reincidência"
+            
+#     return classificacao, data_primeira_liberacao
 
 # ==========================================
 # 3. INTERFACE E CARREGAMENTO
@@ -245,9 +403,37 @@ with aba1:
         st.subheader("Classificação de Reincidência Pós-Liberação")
         reinc_data = df['classificacao_reincidencia'].value_counts().reset_index()
         reinc_data.columns = ['Classificação', 'Volume']
-        fig_reinc = px.pie(reinc_data, values='Volume', names='Classificação', hole=0.4, color='Classificação',
-                           color_discrete_map={"Resolvido Pós-Liberação": "#25D366", "Reincidência": "#FF4B4B", "Aguardando Validação EPSY": "#FFA500", "Sem Liberação": "#808080"})
-        st.plotly_chart(fig_reinc, width='stretch')
+        # Calcular percentual para exibir nos textos das barras
+        reinc_data["Percentual"] = (reinc_data["Volume"] / reinc_data["Volume"].sum() * 100).round(1)
+
+        fig_reinc = px.bar(
+            reinc_data,
+            y="Classificação",
+            x="Volume",
+            orientation="h",
+            color="Classificação",
+            color_discrete_map={
+                "Resolvido Pós-Liberação": "#25D366",
+                "Reincidência": "#FF4B4B",
+                "Aguardando Validação EPSY": "#FFA500",
+                "Sem Liberação": "#808080"
+            },
+            text="Percentual"
+        )
+        fig_reinc.update_traces(
+            texttemplate="%{text:.1f}%",
+            textposition="outside",
+            marker=dict(line=dict(color="rgba(0,0,0,0.08)", width=1), opacity=0.92),
+            cliponaxis=False,
+        )
+        fig_reinc.update_layout(
+            margin=dict(t=30, b=15, l=0, r=10),
+            height=320,
+            xaxis_title="Volume",
+            yaxis_title=None,
+            showlegend=False,
+        )
+        st.plotly_chart(fig_reinc, use_container_width=True)
 
     # NOVO: Tabela detalhada de reincidências
     if reincidentes > 0:
