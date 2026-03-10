@@ -1,0 +1,250 @@
+ 
+📘 DOCUMENTO EXECUTIVO – DASHBOARD DE ATENDIMENTOS MULTI360
+🎯 Objetivo do Dashboard
+
+Este dashboard foi desenvolvido para permitir ao coordenador:
+
+Monitorar desempenho individual
+
+Identificar gargalos operacionais
+
+Avaliar qualidade percebida pelo cliente
+
+Controlar cumprimento de SLA
+
+Apoiar decisões estratégicas baseadas em dados
+
+1️⃣ EFICIÊNCIA OPERACIONAL
+🔹 TMA – Tempo Médio de Atendimento
+
+O que é:
+Tempo total entre abertura e finalização do atendimento.
+
+O que indica:
+
+Velocidade de resolução
+
+Complexidade média dos chamados
+
+Eficiência operacional
+
+Como interpretar:
+
+Alto → lentidão ou casos complexos
+
+Muito baixo → risco de superficialidade
+
+🔹 TMA por Atendente
+
+O que é:
+Média de tempo de resolução individual.
+
+O que indica:
+
+Produtividade técnica
+
+Capacidade de gestão de chamados
+
+🔹 TMA por Departamento
+
+O que é:
+Tempo médio por área.
+
+O que indica:
+
+Complexidade estrutural
+
+Possíveis gargalos organizacionais
+
+🔹 Tempo Ocioso
+
+O que é:
+Tempo entre última interação e encerramento.
+
+O que indica:
+
+Demora administrativa
+
+Falha no fluxo de encerramento
+
+2️⃣ PRODUTIVIDADE
+🔹 Volume Total de Atendimentos
+
+O que é:
+Quantidade total de chamados no período.
+
+O que indica:
+
+Demanda operacional
+
+🔹 Volume por Atendente
+
+O que é:
+Total individual de chamados resolvidos.
+
+O que indica:
+
+Capacidade produtiva
+
+Distribuição de carga
+
+🔹 Volume por Hora
+
+O que é:
+Distribuição de chamados ao longo do dia.
+
+O que indica:
+
+Horários críticos
+
+Necessidade de reforço
+
+🔹 Taxa de Finalização
+
+O que é:
+Percentual de chamados finalizados.
+
+O que indica:
+
+Eficiência real de encerramento
+
+Acúmulo de pendências
+
+3️⃣ QUALIDADE
+🔹 Avaliação Média
+
+O que é:
+Nota média dada pelos clientes.
+
+O que indica:
+
+Percepção de qualidade
+
+🔹 Percentual de Avaliações Positivas
+
+O que é:
+Proporção de notas altas.
+
+O que indica:
+
+Satisfação real
+
+🔹 Correlação TMA x Avaliação
+
+O que é:
+Relação entre tempo e satisfação.
+
+O que indica:
+
+Se rapidez impacta a experiência
+
+4️⃣ ESTRATÉGICO
+🔹 Distribuição por Origem
+
+O que é:
+Volume por canal (ex: WhatsApp).
+
+O que indica:
+
+Concentração de atendimento
+
+🔹 TMA por Origem
+
+O que é:
+Tempo médio por canal.
+
+O que indica:
+
+Canal mais eficiente ou problemático
+
+🔹 Volume por Departamento
+
+O que é:
+Quantidade de chamados por área.
+
+O que indica:
+
+Sobrecarga estrutural
+
+🔹 Motivos (Top 10)
+
+O que é:
+Principais causas de chamados.
+
+O que indica:
+
+Problemas recorrentes
+
+Pontos de melhoria sistêmica
+
+5️⃣ MÉTRICAS AVANÇADAS
+🔹 Score de Performance Individual
+
+O que é:
+Índice composto que considera:
+
+Volume (30%)
+
+Eficiência (30%)
+
+Qualidade (20%)
+
+Taxa de Finalização (20%)
+
+O que indica:
+
+Performance real equilibrada
+
+Ranking justo entre atendentes
+
+🔹 SLA
+
+O que é:
+Percentual de chamados dentro do tempo máximo definido.
+
+O que indica:
+
+Cumprimento de metas operacionais
+
+Controle de qualidade de serviço
+
+6️⃣ INDICADORES COMPORTAMENTAIS
+🔹 Encerramentos Fora do Horário Comercial
+
+O que indica:
+
+Sobrecarga
+
+Trabalho extra
+
+🔹 Atendimentos em Fim de Semana
+
+O que indica:
+
+Picos inesperados
+
+Falta de dimensionamento adequado
+
+🔹 Tempo Médio por Dia da Semana
+
+O que indica:
+
+Padrões sazonais
+
+Dias mais críticos
+
+🎯 Decisões que o Coordenador Pode Tomar
+
+Redistribuir carga entre atendentes
+
+Ajustar escala por horário
+
+Definir metas de TMA
+
+Implementar melhorias nos principais motivos
+
+Intervir em baixo desempenho
+
+Identificar talentos de alta performance
+
+Controlar cumprimento de SLA

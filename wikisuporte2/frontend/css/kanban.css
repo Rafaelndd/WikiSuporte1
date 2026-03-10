@@ -1,0 +1,246 @@
+/* ============================================================
+   WikiSuporte 2.0 — Kanban Board
+   ============================================================ */
+
+.kanban-board {
+    display: flex;
+    gap: var(--space-4);
+    overflow-x: auto;
+    padding-bottom: var(--space-4);
+    align-items: flex-start;
+    min-height: 500px;
+}
+
+/* Coluna */
+.kanban-column {
+    flex-shrink: 0;
+    width: 280px;
+    background: var(--gray-100);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 160px);
+}
+
+.kanban-column-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.kanban-column-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+.kanban-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+}
+
+.kanban-count {
+    background: var(--gray-300);
+    color: var(--gray-700);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+}
+
+.kanban-add-btn {
+    background: none;
+    border: none;
+    font-size: 1.125rem;
+    color: var(--gray-400);
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition), color var(--transition);
+}
+.kanban-add-btn:hover { background: var(--gray-200); color: var(--gray-700); }
+
+/* Cards na coluna */
+.kanban-cards {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    scrollbar-width: thin;
+    scrollbar-color: var(--gray-300) transparent;
+}
+
+.kanban-cards::-webkit-scrollbar { width: 4px; }
+.kanban-cards::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 2px; }
+
+/* Drop zone highlighting */
+.kanban-cards.drag-over {
+    background: rgba(79, 70, 229, 0.05);
+    border-radius: var(--radius-md);
+    outline: 2px dashed var(--primary);
+    outline-offset: -2px;
+}
+
+/* Card de tarefa */
+.kanban-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    cursor: grab;
+    transition: box-shadow var(--transition), transform var(--transition);
+    user-select: none;
+}
+
+.kanban-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+.kanban-card:active { cursor: grabbing; }
+
+.kanban-card.dragging {
+    opacity: 0.5;
+    transform: rotate(1deg);
+    box-shadow: var(--shadow-lg);
+}
+
+.card-priority-bar {
+    width: 100%;
+    height: 3px;
+    border-radius: var(--radius-full);
+    margin-bottom: var(--space-2);
+}
+
+.card-priority-bar.urgente { background: #DC2626; }
+.card-priority-bar.alta    { background: #F97316; }
+.card-priority-bar.normal  { background: #3B82F6; }
+.card-priority-bar.baixa   { background: #D1D5DB; }
+
+.card-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: var(--space-2);
+    line-height: 1.4;
+}
+
+.card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.card-due-date { display: flex; align-items: center; gap: 3px; }
+.card-due-date.overdue { color: var(--danger); }
+
+.card-assignees {
+    display: flex;
+    gap: -4px;
+}
+
+.card-assignee-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    background: var(--primary);
+    color: var(--text-inverse);
+    font-size: 0.6rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--surface);
+    margin-left: -4px;
+}
+
+.card-checklist-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.checklist-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--gray-200);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+}
+
+.checklist-bar-fill {
+    height: 100%;
+    background: var(--success);
+    border-radius: var(--radius-full);
+    transition: width 0.3s ease;
+}
+
+/* Botão de adicionar coluna */
+.kanban-add-column {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    background: var(--gray-100);
+    border: 2px dashed var(--gray-300);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.5rem;
+    color: var(--gray-400);
+    transition: all var(--transition);
+    align-self: flex-start;
+}
+
+.kanban-add-column:hover {
+    background: var(--primary-bg);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+/* Toggle List/Kanban */
+.view-toggle {
+    display: flex;
+    background: var(--gray-100);
+    border-radius: var(--radius-md);
+    padding: 2px;
+    gap: 2px;
+}
+
+.view-toggle-btn {
+    padding: var(--space-1) var(--space-3);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: none;
+    color: var(--text-muted);
+    transition: all var(--transition);
+}
+
+.view-toggle-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+}

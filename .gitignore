@@ -1,0 +1,76 @@
+# Byte-compiled / Optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# Environment Variables & Secrets (CRITICAL)
+.env
+.streamlit/secrets.toml
+
+
+# Arquivos de configuração específicos do ambiente
+ramais_config.json
+
+# Logs
+*.log
+oraculo_engine.log
+
+# Data files (Prevent committing customer data)
+*.csv
+*.xlsx
+*.xls
+
+# Conteúdo carregado pelo utilizador
+uploads_wiki/
+documentacoes_sistema/
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+
+# OS Generated files
+.DS_Store
+Thumbs.db
+
+# Backups (Git handles history, avoid committing manual backups)
+backups/
+hist
+docs
+*.bkp
+
+database/init_database.sql
+
+# WikiSuporte 2.0
+wikisuporte2/backend/.env
+wikisuporte2/backend/.venv/
+wikisuporte2/backend/__pycache__/
+wikisuporte2/backend/app/**/__pycache__/
+wikisuporte2/backend/alembic/versions/*.py
+!wikisuporte2/backend/alembic/versions/.gitkeep
