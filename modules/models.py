@@ -9,10 +9,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # 2. Importação correta (Verifique se o arquivo database.py está na mesma pasta)
 try:
-    from database import get_connection
+    from database import get_engine
 except ImportError:
     # Caso o script seja rodado da raiz, tenta a importação absoluta
-    from modules.database import get_connection
+    from modules.database import get_engine
 
 Base = declarative_base()
 
@@ -138,7 +138,7 @@ class LogAuditoria(Base):
 def inicializar_banco():
     print("O PSY está inicializando o banco de dados... Verificando conexões e analisado o ambiente.")
     try:
-        engine = get_connection()
+        engine = get_engine()
         Base.metadata.create_all(bind=engine)
         print("O PSY concluiu a inicialização do banco de dados com sucesso! O ambiente está pronto para uso.")
     except Exception as e:

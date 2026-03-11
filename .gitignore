@@ -73,4 +73,4 @@ wikisuporte2/backend/.venv/
 wikisuporte2/backend/__pycache__/
 wikisuporte2/backend/app/**/__pycache__/
 wikisuporte2/backend/alembic/versions/*.py
-!wikisuporte2/backend/alembic/versions/.gitkeep
+!wikisuporte2/backend/alembic/versions/.gitkeep.env 
