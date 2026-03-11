@@ -16,6 +16,7 @@ import requests_cache
 import numpy as np
 from config import Config
 from datetime import datetime, timedelta
+load_dotenv()
 
 
 from retry_requests import retry
@@ -24,7 +25,7 @@ from sqlalchemy import text
 from typing import Tuple, Optional
 from modules.database import get_connection
 from dotenv import load_dotenv
-from streamlit_mic_recorder import speech_to_text 
+from modules.auditoria import registrar_log_auditoria
 from typing import Union
 from typing import Optional, Dict, Union  
 from modules.utils import inicializar_usuario, calcular_patente
