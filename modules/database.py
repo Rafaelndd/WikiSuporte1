@@ -44,3 +44,9 @@ def carregar_dados_sql(query):
     except Exception as e:
         print(f"Erro ao ler dados do banco: {e}")
         return pd.DataFrame()  # Retorna um DataFrame vazio em caso de erro
+
+def get_connection():
+    return engine_global
+
+def get_engine():
+    return engine_global

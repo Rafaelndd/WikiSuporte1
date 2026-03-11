@@ -16,7 +16,7 @@ import requests_cache
 import numpy as np
 from config import Config
 from datetime import datetime, timedelta
-load_dotenv()
+
 
 
 from retry_requests import retry

@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # 2. Importação correta (Verifique se o arquivo database.py está na mesma pasta)
 try:
-    from database import get_engine
+    from modules.database import get_connection as get_engine
 except ImportError:
     # Caso o script seja rodado da raiz, tenta a importação absoluta
     from modules.database import get_engine

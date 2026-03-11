@@ -29,6 +29,7 @@ MANIFEST
 venv/
 .venv/
 env/
+.env
 
 # Environment Variables & Secrets (CRITICAL)
 .env
@@ -65,12 +66,15 @@ hist
 docs
 *.bkp
 
-database/init_database.sql
+.streamlit/config.toml
 
-# WikiSuporte 2.0
-wikisuporte2/backend/.env
-wikisuporte2/backend/.venv/
-wikisuporte2/backend/__pycache__/
-wikisuporte2/backend/app/**/__pycache__/
-wikisuporte2/backend/alembic/versions/*.py
-!wikisuporte2/backend/alembic/versions/.gitkeep.env 
+.streamlit/secrets.toml
+update_admin_password.py
+testar_goto.py
+sentinela_nicegui.py
+script_carga_clientes.py
+ramais_config.json
+processamento_manuais.py
+oraculo_engine.log
+
+
