@@ -200,8 +200,13 @@ class OraculoBot:
         """
         Acessa o helpdesk, limpa filtros (visão nativa de ativos),
         aplica paginação 500 e percorre TODAS as páginas.
-        Retorna dict {nr_chamado: metadados} de TODOS os chamados ativos (~500).
-        NÃO busca os 6000+ encerrados/cancelados.
+        Retorna dict {nr_chamado: metadados} de chamados considerados ATIVOS.
+
+        Regra de atividade:
+        - Primeiro, lê todos os chamados listados na tela (independente do status_web).
+        - Em seguida, cruza com o banco de dados local e REMOVE todos os que já
+          constam como 'Encerrado' ou 'Cancelado' em chamados_tecnuv.status_atual.
+        Assim, mesmo que a tela liste históricos, a Fase 2 só trabalha com a fila ativa.
         """
         try:
             self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
@@ -300,6 +305,33 @@ class OraculoBot:
                     break
 
             logging.info(f"[FASE 1] Total de chamados ativos encontrados no helpdesk: {len(chamados_helpdesk)}")
+            # Filtro extra: remove da lista tudo que já está ENCERRADO/CANCELADO no banco
+            try:
+                from sqlalchemy import text as sa_text  # import local para evitar conflitos
+                with self.engine.connect() as conn:
+                    rows = conn.execute(
+                        sa_text(
+                            """
+                            SELECT nr_chamado
+                            FROM chamados_tecnuv
+                            WHERE status_atual ILIKE '%encerrado%'
+                               OR status_atual ILIKE '%cancelado%'
+                            """
+                        )
+                    ).fetchall()
+                    encerrados_banco = {int(r[0]) for r in rows if r[0] is not None}
+                if encerrados_banco:
+                    antes = len(chamados_helpdesk)
+                    chamados_helpdesk = {
+                        k: v for k, v in chamados_helpdesk.items() if k not in encerrados_banco
+                    }
+                    logging.info(
+                        f"[FASE 1] Filtro por banco: removidos {antes - len(chamados_helpdesk)} "
+                        f"chamado(s) já Encerrado/Cancelado em chamados_tecnuv."
+                    )
+            except Exception as e:
+                logging.warning(f"[FASE 1] Falha ao filtrar por status do banco: {e}")
+
             return chamados_helpdesk
 
         except Exception as e:
