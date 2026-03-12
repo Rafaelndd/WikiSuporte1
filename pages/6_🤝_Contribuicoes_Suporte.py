@@ -12,9 +12,13 @@ import tempfile  # Faltava esta importação
 from difflib import SequenceMatcher
 import json
 import tempfile
+import google.generativeai as genai
 from dotenv import load_dotenv
+import unicodedata
+import re
 from menus import *
 from utils import inicializar_usuario, calcular_patente
+
 
 
 load_dotenv()

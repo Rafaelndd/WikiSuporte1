@@ -1,0 +1,212 @@
+"""
+Serviço: Roteador de LLM (Gemini + DeepSeek).
+
+Objetivo:
+- Centralizar o uso de LLM para texto (pergunta + contexto) sem alterar
+  o código existente.
+- Usar GEMINI_API_KEY como provedora principal.
+- Usar DEEPSEEK_API_KEY (ou DEEP_SEEk_API_KEY) como fallback, dentro da
+  filosofia de economizar chamadas e aproveitar o plano gratuito.
+
+Importante:
+- Este módulo NÃO é importado automaticamente em nenhuma página.
+- A integração é opcional e deve ser feita manualmente nos pontos de uso
+  de IA (por exemplo, na aba do Assistente em `6_🤝_Contribuicoes_Suporte.py`),
+  substituindo a chamada direta ao Gemini por uma chamada a `gerar_resposta()`.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+
+try:
+    # Carrega .env apenas quando este módulo é usado
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = lambda: None  # type: ignore
+
+
+load_dotenv()
+
+
+@dataclass
+class LLMResposta:
+    """
+    Estrutura de retorno padrão para chamadas de LLM.
+
+    - texto: resposta final em texto.
+    - provedor: 'gemini' ou 'deepseek'.
+    - modelo: nome do modelo utilizado.
+    - meta: dicionário opcional com metadados (tokens, etc.).
+    """
+
+    texto: str
+    provedor: str
+    modelo: str
+    meta: Dict[str, Any]
+
+
+def _get_gemini_api_key() -> Optional[str]:
+    return os.getenv("GEMINI_API_KEY")
+
+
+def _get_deepseek_api_key() -> Optional[str]:
+    # Suporta tanto DEEPSEEK_API_KEY quanto DEEP_SEEk_API_KEY (como está hoje no .env)
+    return os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEP_SEEk_API_KEY")
+
+
+def _tentar_gemini(prompt: str, modelo: str = "gemini-2.5-flash") -> Optional[LLMResposta]:
+    """
+    Tenta gerar resposta via Gemini.
+    Retorna LLMResposta ou None em caso de erro (quota, auth, etc.).
+    """
+    api_key = _get_gemini_api_key()
+    if not api_key:
+        return None
+
+    try:
+        import google.generativeai as genai  # type: ignore
+    except Exception:
+        # Pacote pode não estar instalado no ambiente que roda o Streamlit
+        return None
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(modelo)
+        resposta = model.generate_content(prompt)
+
+        texto = getattr(resposta, "text", "") or ""
+        usage = getattr(resposta, "usage_metadata", None)
+        meta: Dict[str, Any] = {}
+        if usage is not None:
+            # Mantém os mesmos nomes usados hoje em 6_🤝_Contribuicoes_Suporte.py
+            meta["tokens_prompt"] = getattr(usage, "prompt_token_count", None)
+            meta["tokens_resposta"] = getattr(usage, "candidates_token_count", None)
+            meta["tokens_total"] = getattr(usage, "total_token_count", None)
+
+        return LLMResposta(
+            texto=texto.strip(),
+            provedor="gemini",
+            modelo=modelo,
+            meta=meta,
+        )
+    except Exception:
+        # Evita quebrar a aplicação – quem chama decide fallback
+        return None
+
+
+def _tentar_deepseek(prompt: str, modelo: Optional[str] = None) -> Optional[LLMResposta]:
+    """
+    Tenta gerar resposta via DeepSeek (API compatível com OpenAI).
+    Retorna LLMResposta ou None em caso de erro.
+    """
+    api_key = _get_deepseek_api_key()
+    if not api_key:
+        return None
+
+    try:
+        import requests  # já é dependência em vários módulos
+    except Exception:
+        return None
+
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    modelo_final = modelo or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "model": modelo_final,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Você é um assistente técnico da EPSY Sistemas. Responda de forma objetiva, sem inventar fatos que não estejam no contexto.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        # Parâmetros conservadores, pensando em plano gratuito
+        "temperature": float(os.getenv("DEEPSEEK_TEMPERATURE", "0.2")),
+        "max_tokens": int(os.getenv("DEEPSEEK_MAX_TOKENS", "512")),
+    }
+
+    try:
+        resp = requests.post(url, json=data, headers=headers, timeout=30)
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        choices = payload.get("choices") or []
+        if not choices:
+            return None
+        mensagem = choices[0].get("message", {}) or {}
+        texto = (mensagem.get("content") or "").strip()
+
+        usage = payload.get("usage") or {}
+        meta: Dict[str, Any] = {
+            "tokens_prompt": usage.get("prompt_tokens"),
+            "tokens_resposta": usage.get("completion_tokens"),
+            "tokens_total": usage.get("total_tokens"),
+        }
+
+        return LLMResposta(
+            texto=texto,
+            provedor="deepseek",
+            modelo=modelo_final,
+            meta=meta,
+        )
+    except Exception:
+        return None
+
+
+def gerar_resposta(pergunta: str, contexto: str = "") -> LLMResposta:
+    """
+    Roteia a chamada de LLM:
+    1. Tenta Gemini, se GEMINI_API_KEY estiver configurado e o pacote existir.
+    2. Se falhar ou estiver indisponível, tenta DeepSeek se DEEPSEEK_API_KEY (ou DEEP_SEEk_API_KEY) estiver configurado.
+    3. Em último caso, retorna mensagem padrão sem chamar nenhuma API.
+
+    Exemplo de uso na aba do Assistente (substituindo o bloco atual):
+
+        from services.llm_router import gerar_resposta
+        prompt = f\"Responda diretamente. DÚVIDA: {pergunta}\\n\\nCONTEXTO:\\n{texto_contexto}\"
+        resp = gerar_resposta(pergunta=pergunta, contexto=texto_contexto)
+        st.markdown(resp.texto)
+        # meta de tokens em resp.meta
+    """
+    pergunta = (pergunta or "").strip()
+    contexto = (contexto or "").strip()
+
+    if contexto:
+        prompt = f"Responda diretamente em português do Brasil.\n\nDÚVIDA: {pergunta}\n\nCONTEXTO (não cite literalmente, apenas use para fundamentar):\n{contexto}"
+    else:
+        prompt = f"Responda diretamente em português do Brasil à seguinte dúvida:\n\n{pergunta}"
+
+    # 1) Tenta Gemini
+    resposta = _tentar_gemini(prompt)
+    if resposta and resposta.texto:
+        return resposta
+
+    # 2) Fallback: DeepSeek
+    resposta = _tentar_deepseek(prompt)
+    if resposta and resposta.texto:
+        return resposta
+
+    # 3) Fallback final – sem LLM
+    texto = (
+        "Neste momento o motor de IA não está disponível. "
+        "Use os resultados da busca nos manuais e wikis como referência."
+    )
+    return LLMResposta(
+        texto=texto,
+        provedor="nenhum",
+        modelo="offline",
+        meta={},
+    )
+

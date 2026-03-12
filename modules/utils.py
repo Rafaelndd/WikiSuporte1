@@ -4,6 +4,7 @@ from datetime import datetime
 import streamlit as st
 
 
+
 # ==========================================
 # GESTÃO DE ESTADO DO ROBÔ (COOLDOWN E LOGS)
 # ==========================================
