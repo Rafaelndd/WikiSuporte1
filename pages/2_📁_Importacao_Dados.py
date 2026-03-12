@@ -8,10 +8,9 @@ import os
 from sqlalchemy import text
 from modules.database import get_connection
 from dotenv import load_dotenv
-load_dotenv()   
+from services.auth_guard import require_profile
 
-
-
+load_dotenv()
 
 # Importa as suas funções de LGPD e limpeza
 from modules.processador_csv import processar_csv_goto, processar_csv_multi360, ler_arquivo_dinamico
@@ -26,28 +25,28 @@ except ImportError:
 
 try:
     from modules.auditoria import registrar_log_auditoria
-except:
-    def registrar_log_auditoria(*args): pass
+except Exception:
+    def registrar_log_auditoria(*args):  # type: ignore[override]
+        pass
 
 try:
     import modules.oraculo as oraculo
-except:
+except Exception:
     oraculo = None
 
 # ==========================================
 # 1. CADEADO DE SEGURANÇA E SESSÃO
 # ==========================================
 st.set_page_config(page_title="Wiki Suporte", page_icon="📊", layout="wide")
-if not st.session_state.get('autenticado'):
-    st.switch_page("app.py")
 
-usuario_id = st.session_state.get('usuario_id')
-perfil_usuario = str(st.session_state.get('perfil', '')).lower()
-nome_usuario = str(st.session_state.get('usuario_nome', 'Sistema'))
+# Exige login e restringe aos perfis dev / coordenador
+perfil_usuario = require_profile(
+    ["dev", "coordenador"],
+    titulo_bloqueio="⛔ Acesso Negado: Você não tem permissão para acessar esta página.",
+)
 
-if perfil_usuario not in ["dev", "coordenador"]:
-    st.error("⛔ Acesso Negado: Você não tem permissão para acessar esta página.")
-    st.stop()
+usuario_id = st.session_state.get("usuario_id")
+nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
 
 # ==========================================
 # 2. FUNÇÕES AUXILIARES DE BANCO DE DADOS E REGRAS

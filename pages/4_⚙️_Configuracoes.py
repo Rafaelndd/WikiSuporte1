@@ -38,10 +38,18 @@ if not st.session_state.get('autenticado'):
     st.switch_page("app.py")
 
 usuario_id = st.session_state.get('usuario_id')
-perfil_usuario = str(st.session_state.get('perfil', '')).lower()
+perfil_usuario_raw = str(st.session_state.get('perfil', '')).strip().lower()
 
-# Apenas administradores ou coordenadores devem aceder a esta tela
-if perfil_usuario not in ["desenvolvedor", "coordenação"]:
+# Normaliza perfis para a convenção atual: dev / coordenador / analista
+if perfil_usuario_raw in ("desenvolvedor", "dev"):
+    perfil_usuario = "dev"
+elif perfil_usuario_raw in ("coordenação", "coordenador"):
+    perfil_usuario = "coordenador"
+else:
+    perfil_usuario = perfil_usuario_raw
+
+# Apenas desenvolvedores ou coordenadores devem aceder a esta tela
+if perfil_usuario not in ["dev", "coordenador"]:
     st.error("⛔ WikiSuporte - Acesso Negado: Você não tem permissão para acessar esta página.")
     st.stop()
 

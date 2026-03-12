@@ -56,10 +56,27 @@ st.set_page_config(
 )
 
 # Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
-if 'autenticado' not in st.session_state:
-    st.session_state['autenticado'] = False
-if 'notificacoes_lidas' not in st.session_state:
-    st.session_state['notificacoes_lidas'] = []
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+if "notificacoes_lidas" not in st.session_state:
+    st.session_state["notificacoes_lidas"] = []
+
+# Cadeado de segurança: exige login e perfil adequado
+if not st.session_state.get("autenticado", False):
+    st.switch_page("app.py")
+
+perfil_logado_raw = str(st.session_state.get("perfil", "analista")).strip().lower()
+# Aceita tanto nomenclatura nova quanto antiga, se existir
+if perfil_logado_raw in ("desenvolvedor", "dev"):
+    perfil_logado = "dev"
+elif perfil_logado_raw in ("coordenação", "coordenador"):
+    perfil_logado = "coordenador"
+else:
+    perfil_logado = perfil_logado_raw
+
+if perfil_logado not in ["dev", "coordenador"]:
+    st.error("⛔ Acesso Negado: Esta página é restrita a perfis de Coordenação e Desenvolvimento.")
+    st.stop()
 
 
 # ==========================================

@@ -12,7 +12,6 @@ import tempfile  # Faltava esta importação
 from difflib import SequenceMatcher
 import json
 import tempfile
-import google.generativeai as genai
 from dotenv import load_dotenv
 import unicodedata
 import re
@@ -276,25 +275,53 @@ with aba_gemini:
                     acesso_ia_liberado = perfil_logado in ['coordenador', 'dev']
                     
                     if acesso_ia_liberado:
-                        import google.generativeai as genai
+                        from google import genai
                         from dotenv import load_dotenv
                         try:
                             load_dotenv()
-                            genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-                            model = genai.GenerativeModel('gemini-2.5-flash')
-                            prompt = f"Responda diretamente. DÚVIDA: {pergunta}\n\nCONTEXTO:\n{texto_contexto}" if texto_contexto else f"Diga que não achou manuais para: {', '.join(fatias_nova)}."
-                            resposta_ia = model.generate_content(prompt)
-                            t_prompt = resposta_ia.usage_metadata.prompt_token_count
-                            t_resp = resposta_ia.usage_metadata.candidates_token_count
-                            t_total = resposta_ia.usage_metadata.total_token_count
-                            
+                            api_key = os.getenv("GEMINI_API_KEY")
+                            if not api_key:
+                                raise RuntimeError("GEMINI_API_KEY não configurada.")
+                            client = genai.Client(api_key=api_key)
+                            prompt = (
+                                f"Responda diretamente. DÚVIDA: {pergunta}\n\nCONTEXTO:\n{texto_contexto}"
+                                if texto_contexto
+                                else f"Diga que não achou manuais para: {', '.join(fatias_nova)}."
+                            )
+                            resposta_ia = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=prompt,
+                            )
+                            usage = getattr(resposta_ia, "usage_metadata", None)
+                            t_prompt = getattr(usage, "input_tokens", None) if usage else None
+                            t_resp = getattr(usage, "output_tokens", None) if usage else None
+                            t_total = getattr(usage, "total_tokens", None) if usage else None
+
                             st.success("⚡ Resposta gerada!")
                             st.markdown(resposta_ia.text)
-                            st.caption(f"🔋 Tokens: {t_total}")
+                            if t_total is not None:
+                                st.caption(f"🔋 Tokens: {t_total}")
                             try:
-                                with engine.begin() as conn_log: conn_log.execute(text("INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) VALUES (:u, :p, :r, :tp, :tr, :tt)"), {"u": usuario_logado_id, "p": pergunta.strip(), "r": resposta_ia.text, "tp": t_prompt, "tr": t_resp, "tt": t_total})
-                            except Exception as db_e: st.error(f"Erro BD: {db_e}")
-                        except Exception as e: st.error(f"❌ Erro IA: {e}")
+                                with engine.begin() as conn_log:
+                                    conn_log.execute(
+                                        text(
+                                            "INSERT INTO historico_buscas_psy "
+                                            "(usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) "
+                                            "VALUES (:u, :p, :r, :tp, :tr, :tt)"
+                                        ),
+                                        {
+                                            "u": usuario_logado_id,
+                                            "p": pergunta.strip(),
+                                            "r": resposta_ia.text,
+                                            "tp": t_prompt or 0,
+                                            "tr": t_resp or 0,
+                                            "tt": t_total or 0,
+                                        },
+                                    )
+                            except Exception as db_e:
+                                st.error(f"Erro BD: {db_e}")
+                        except Exception as e:
+                            st.error(f"❌ Erro IA: {e}")
                     else:
                         st.info("⚡ Motor a Combustão: IA desativada para este perfil. Veja manuais abaixo:")
                     
@@ -749,8 +776,8 @@ with aba_nova:
                             if ext in ['txt', 'sql', 'xml', 'csv']:
                                 texto_extraido = arquivo_anexo.getvalue().decode('utf-8', errors='ignore')
                             elif ext == 'pdf':
-                                import PyPDF2
-                                pdf_reader = PyPDF2.PdfReader(arquivo_anexo)
+                                import pypdf
+                                pdf_reader = pypdf.PdfReader(arquivo_anexo)
                                 texto_extraido = " ".join([p.extract_text() for p in pdf_reader.pages if p.extract_text()])
                             elif ext in ['xlsx', 'xls']:
                                 import pandas as pd

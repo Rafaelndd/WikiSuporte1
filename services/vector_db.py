@@ -122,26 +122,28 @@ def _chunk_texto(texto: str, tamanho: int = CHUNK_SIZE, sobreposicao: int = CHUN
 
 def gerar_embedding_gemini(texto: str) -> Optional[List[float]]:
     """
-    Gera embedding usando a API do Gemini (quando disponível).
+    Gera embedding usando a API do Gemini (via google-genai).
     Configure GEMINI_API_KEY no .env.
     Retorna lista de floats ou None em caso de falha.
     """
     try:
-        import google.generativeai as genai
+        from google import genai
         from dotenv import load_dotenv
+
         load_dotenv()
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             return None
-        genai.configure(api_key=api_key)
-        # Modelo de embedding do Gemini (ajuste se mudar o nome)
-        result = genai.embed_content(
-            model="models/text-embedding-004",
-            content=texto,
+
+        client = genai.Client(api_key=api_key)
+        result = client.models.embed_content(
+            model="text-embedding-004",
+            contents=texto,
             task_type="retrieval_document",
         )
-        if result and "embedding" in result:
-            return result["embedding"]
+        emb = getattr(result, "embedding", None)
+        if emb:
+            return list(emb)
     except Exception:
         pass
     return None

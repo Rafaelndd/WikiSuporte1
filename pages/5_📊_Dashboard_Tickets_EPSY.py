@@ -3,14 +3,15 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import text
 from modules.database import get_connection
+from services.auth_guard import require_login
 
 # ==========================================
 # 1. CONFIGURAÇÕES DA PÁGINA E SEGURANÇA
 # ==========================================
 st.set_page_config(page_title="Wiki Suporte", page_icon="📊", layout="wide")
 
-if not st.session_state.get('autenticado'): 
-    st.switch_page("app.py")
+# Exige login (todos os perfis autenticados podem ver este dashboard)
+perfil_logado = require_login()
 
 # ==========================================
 # 2. CARREGAMENTO DE DADOS E CORREÇÃO SQL

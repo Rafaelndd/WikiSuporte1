@@ -21,20 +21,25 @@ from bs4 import BeautifulSoup
 # ==========================================
 
 # Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
-if 'autenticado' not in st.session_state:
-    st.session_state['autenticado'] = False
-if 'notificacoes_lidas' not in st.session_state:
-    st.session_state['notificacoes_lidas'] = []
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+if "notificacoes_lidas" not in st.session_state:
+    st.session_state["notificacoes_lidas"] = []
 
 
 st.set_page_config(
-    page_title="Wiki-Suporte", 
-    page_icon="💡", 
-    layout="wide", 
-    initial_sidebar_state="collapsed"
+    page_title="Wiki-Suporte",
+    page_icon="💡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
+# Cadeado: impede acesso direto sem login
+if not st.session_state.get("autenticado", False):
+    st.switch_page("app.py")
 
+# ID do usuário logado (usado nos logs de auditoria)
+usuario_id = st.session_state.get("usuario_id")
 
 #======================================================================================================================#
 
@@ -98,14 +103,46 @@ def carregar_interacoes():
     try:
         try:
             df = pd.read_sql("SELECT * FROM historico_interacao", engine)
-        except:
+        except Exception:
             df = pd.read_sql("SELECT * FROM historico_interacoes", engine)
             
         if not df.empty and 'data_interacao' in df.columns:
             df['data_interacao'] = pd.to_datetime(df['data_interacao'], errors='coerce')
         return df
-    except:
+    except Exception:
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
+def carregar_releases_chamados():
+    """
+    Carrega o número de releases em que cada chamado aparece.
+    Usa a tabela de ligação oficial (chamados_corrigidos_releases) e
+    faz fallback para release_chamados_correcao se necessário.
+    """
+    engine = get_connection()
+    try:
+        try:
+            df_rel = pd.read_sql(
+                """
+                SELECT nr_chamado, COUNT(*) AS qtd_releases
+                FROM chamados_corrigidos_releases
+                GROUP BY nr_chamado
+                """,
+                engine,
+            )
+        except Exception:
+            df_rel = pd.read_sql(
+                """
+                SELECT nr_chamado, COUNT(*) AS qtd_releases
+                FROM release_chamados_correcao
+                GROUP BY nr_chamado
+                """,
+                engine,
+            )
+        return df_rel
+    except Exception:
+        return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
 
 def limpar_html(html_text):
     if not html_text or pd.isna(html_text):
@@ -276,6 +313,7 @@ st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, 
 
 df_raw = carregar_dados_tecnuv()
 df_int = carregar_interacoes()
+df_releases = carregar_releases_chamados()
 
 if df_raw.empty:
     st.warning("WikiSuporte ainda não se conectou ao banco de dados. Entre em contato com o desenvolvedor para resolver o problema.")
@@ -288,18 +326,35 @@ with st.expander("⚙️ Filtros: ", expanded=True):
     col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
     
     with col_f1:
-        min_data = df_raw['data_abertura'].min().date() if not df_raw['data_abertura'].isna().all() else (datetime.now() - timedelta(days=30)).date()
-        max_data = df_raw['data_abertura'].max().date() if not df_raw['data_abertura'].isna().all() else datetime.now().date()
-        
-        datas_selecionadas = st.date_input("📅 Período (Abertura):", value=(min_data, max_data), max_value=datetime.now().date() + timedelta(days=1))
+        # Período padrão: últimos 90 dias (para evitar carregar todo o histórico de uma vez)
+        if not df_raw['data_abertura'].isna().all():
+            data_max = df_raw['data_abertura'].max().date()
+            data_min = df_raw['data_abertura'].min().date()
+        else:
+            data_max = datetime.now().date()
+            data_min = (datetime.now() - timedelta(days=90)).date()
+
+        default_inicio = max(data_min, data_max - timedelta(days=90))
+
+        datas_selecionadas = st.date_input(
+            "📅 Período (Abertura):",
+            value=(default_inicio, data_max),
+            max_value=datetime.now().date() + timedelta(days=1),
+        )
         
     with col_f2:
         lista_analistas = ["Todos"] + sorted([a for a in df_raw['usuario_epsy'].unique() if a and str(a).strip() != "Não Informado"])
         analista_filtro = st.selectbox("👤 Analista EPSY:", options=lista_analistas, help="Lista com todos analistas")
         
     with col_f3:
-        lista_status = ["Todos", "Chamados Ativos (Abertos)", "Resolvidos (Encerrados ou Cancelados)"]
-        status_filtro = st.selectbox("📌 Status do Chamado:", options=lista_status)
+        # Removido "Todos" para garantir que encerrados/cancelados só apareçam quando filtrados explicitamente
+        lista_status = [
+            "Chamados Ativos (Abertos)",
+            "Encerrados",
+            "Cancelados",
+            "Encerrados ou Cancelados",
+        ]
+        status_filtro = st.selectbox("📌 Status do Chamado:", options=lista_status, index=0)
         
     with col_f4:
         st.write("")
@@ -319,11 +374,15 @@ if len(datas_selecionadas) == 2:
 if analista_filtro != "Todos":
     df = df[df['usuario_epsy'] == analista_filtro]
 
-# Lógica robusta de fila ativa (Exclui Encerrados e Cancelados)
+# Lógica de status: por padrão, apenas chamados ativos (abertos)
 if status_filtro == "Chamados Ativos (Abertos)":
     df = df[~df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)]
-elif status_filtro == "Resolvidos (Encerrados)":
+elif status_filtro == "Encerrados":
     df = df[df['status_atual'].str.contains("Encerrado", case=False, na=False)]
+elif status_filtro == "Cancelados":
+    df = df[df['status_atual'].str.contains("Cancelado", case=False, na=False)]
+elif status_filtro == "Encerrados ou Cancelados":
+    df = df[df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)]
 
 if df.empty:
     st.info("Nenhum chamado encontrado com os filtros aplicados. Revise o período ou ajuste os critérios para refinar a busca.")
@@ -338,9 +397,14 @@ agora = pd.to_datetime(datetime.now())
 df['dias_aberto'] = (agora - df['data_abertura']).dt.days
 df['is_aberto'] = ~df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)
 
-# 2. Reincidência e Tempo até Liberação
+# 2. Reincidência e Tempo até Liberação (baseado em releases)
 resultados_reincidencia = []
 tempos_liberacao = []
+
+# Mapa: nr_chamado -> quantidade de releases em que apareceu
+map_releases = {}
+if not df_releases.empty:
+    map_releases = df_releases.set_index("nr_chamado")["qtd_releases"].to_dict()
 
 for _, row in df.iterrows():
     nr = row['nr_chamado']
@@ -348,8 +412,24 @@ for _, row in df.iterrows():
     dt_abertura = row['data_abertura']
     
     interacoes_chamado = df_int[df_int['nr_chamado'] == nr] if not df_int.empty else pd.DataFrame()
-    classificacao, dt_primeira_lib = classificar_reincidencia_e_tempo(interacoes_chamado, dt_abertura, status)
-    
+    # Usa as interações apenas para medir tempo até a primeira liberação
+    _, dt_primeira_lib = classificar_reincidencia_e_tempo(interacoes_chamado, dt_abertura, status)
+
+    qtd_rel = int(map_releases.get(nr, 0) or 0)
+    status_lower = str(status).lower()
+    encerrado_ou_cancelado = "encerrado" in status_lower or "cancelado" in status_lower
+
+    if qtd_rel == 0:
+        classificacao = "Sem Liberação"
+    else:
+        if not encerrado_ou_cancelado:
+            classificacao = "Aguardando Validação EPSY"
+        else:
+            if qtd_rel == 1:
+                classificacao = "Resolvido Pós-Liberação"
+            else:
+                classificacao = "Reincidência"
+
     resultados_reincidencia.append(classificacao)
     
     if pd.notna(dt_primeira_lib) and pd.notna(dt_abertura):

@@ -68,24 +68,28 @@ def _tentar_gemini(prompt: str, modelo: str = "gemini-2.5-flash") -> Optional[LL
         return None
 
     try:
-        import google.generativeai as genai  # type: ignore
+        from google import genai
     except Exception:
-        # Pacote pode não estar instalado no ambiente que roda o Streamlit
         return None
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(modelo)
-        resposta = model.generate_content(prompt)
+        client = genai.Client(api_key=api_key)
+        resposta = client.models.generate_content(
+            model=modelo,
+            contents=prompt,
+        )
 
         texto = getattr(resposta, "text", "") or ""
         usage = getattr(resposta, "usage_metadata", None)
         meta: Dict[str, Any] = {}
         if usage is not None:
-            # Mantém os mesmos nomes usados hoje em 6_🤝_Contribuicoes_Suporte.py
-            meta["tokens_prompt"] = getattr(usage, "prompt_token_count", None)
-            meta["tokens_resposta"] = getattr(usage, "candidates_token_count", None)
-            meta["tokens_total"] = getattr(usage, "total_token_count", None)
+            meta["tokens_prompt"] = getattr(usage, "input_tokens", None) or getattr(
+                usage, "prompt_token_count", None
+            )
+            meta["tokens_resposta"] = getattr(usage, "output_tokens", None) or getattr(
+                usage, "candidates_token_count", None
+            )
+            meta["tokens_total"] = getattr(usage, "total_tokens", None)
 
         return LLMResposta(
             texto=texto.strip(),
@@ -94,7 +98,6 @@ def _tentar_gemini(prompt: str, modelo: str = "gemini-2.5-flash") -> Optional[LL
             meta=meta,
         )
     except Exception:
-        # Evita quebrar a aplicação – quem chama decide fallback
         return None
 
 
