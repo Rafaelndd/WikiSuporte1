@@ -1,7 +1,9 @@
-import streamlit as st
-import pandas as pd
+import io
 import re
 from datetime import datetime, date
+
+import pandas as pd
+import streamlit as st
 from sqlalchemy import text
 
 from modules.database import get_connection
@@ -41,11 +43,12 @@ with st.form("form_novo_release", clear_on_submit=True):
         autor = st.text_input("Autor", placeholder="Ex.: Cristiano Felicidade")
 
     arquivo_release = st.file_uploader(
-        "Arquivo do release (texto ou Word)",
-        type=["txt", "md", "doc", "docx"],
+        "Arquivo do release (texto, Word, RTF ou PDF)",
+        type=["txt", "md", "doc", "docx", "rtf", "pdf"],
         help=(
             "Envie o arquivo contendo as notas de versão. "
-            "O sistema irá identificar automaticamente os números de chamados no texto (ex.: (13645))."
+            "O sistema irá identificar automaticamente os números de chamados no texto (ex.: (13645)). "
+            "Suporta arquivos TXT, DOC/DOCX, RTF e PDF."
         ),
     )
 
@@ -72,6 +75,7 @@ with st.form("form_novo_release", clear_on_submit=True):
                 nome_arquivo = arquivo_release.name or ""
                 nome_lower = nome_arquivo.lower()
 
+                # DOC / DOCX
                 if nome_lower.endswith((".doc", ".docx")):
                     try:
                         import docx  # type: ignore
@@ -79,8 +83,35 @@ with st.form("form_novo_release", clear_on_submit=True):
                         doc = docx.Document(arquivo_release)
                         text_content = "\n".join(p.text for p in doc.paragraphs)
                     except Exception:
-                        # Fallback best-effort: tenta decodificar como texto simples
                         text_content = raw_bytes.decode("utf-8", errors="ignore")
+
+                # RTF
+                elif nome_lower.endswith(".rtf"):
+                    raw_text = raw_bytes.decode("latin-1", errors="ignore")
+                    # Remove cabeçalho {\rtf... e grupos { ... }
+                    s = re.sub(r"{\\.*?}|{.*?}", " ", raw_text)
+                    # Remove comandos \palavra
+                    s = re.sub(r"\\[a-zA-Z]+\d*", " ", s)
+                    # Quebras de parágrafo \par
+                    s = s.replace("\\par", "\n")
+                    # Limpa escapes de unicode simples \'xx
+                    s = re.sub(r"\\'[0-9a-fA-F]{2}", " ", s)
+                    text_content = re.sub(r"\s+", " ", s).replace("\n ", "\n").strip()
+
+                # PDF
+                elif nome_lower.endswith(".pdf"):
+                    try:
+                        from pypdf import PdfReader  # type: ignore
+
+                        reader = PdfReader(io.BytesIO(raw_bytes))
+                        pages_text = []
+                        for page in reader.pages:
+                            pages_text.append(page.extract_text() or "")
+                        text_content = "\n".join(pages_text)
+                    except Exception:
+                        text_content = raw_bytes.decode("utf-8", errors="ignore")
+
+                # TXT / MD / outros textos
                 else:
                     text_content = raw_bytes.decode("utf-8", errors="ignore")
 
@@ -97,14 +128,21 @@ with st.form("form_novo_release", clear_on_submit=True):
                     titulo = first_line[:255]
                     versao = first_line[:100]
 
-                    # Extrai chamados no padrão (12345)
-                    chamados_nums = []
-                    for match in re.findall(r"\((\d{4,6})\)", text_content):
-                        try:
-                            chamados_nums.append(int(match))
-                        except ValueError:
+                    # Extrai chamados e assunto (linha em que aparecem)
+                    chamados_assunto = {}
+                    for line in text_content.splitlines():
+                        clean_line = line.strip()
+                        if not clean_line:
                             continue
-                    chamados_nums = sorted(set(chamados_nums))
+                        for match in re.findall(r"\((\d{4,6})\)", clean_line):
+                            try:
+                                nr = int(match)
+                            except ValueError:
+                                continue
+                            if nr not in chamados_assunto:
+                                chamados_assunto[nr] = clean_line
+
+                    chamados_nums = sorted(chamados_assunto.keys())
 
                     with engine.begin() as conn:
                         id_rel = conn.execute(
@@ -144,9 +182,16 @@ with st.form("form_novo_release", clear_on_submit=True):
                     if chamados_nums:
                         st.success(
                             f"Release registrado com sucesso (ID={id_rel}). "
-                            f"Foram identificados e vinculados {len(chamados_nums)} chamado(s): "
-                            f"{', '.join(str(n) for n in chamados_nums)}."
+                            f"Foram identificados e vinculados {len(chamados_nums)} chamado(s)."
                         )
+                        # Mostra uma pequena tabela com chamado x assunto para conferência rápida
+                        df_preview = pd.DataFrame(
+                            {
+                                "Chamado": chamados_nums,
+                                "Assunto (linha)": [chamados_assunto[nr][:200] for nr in chamados_nums],
+                            }
+                        )
+                        st.dataframe(df_preview, hide_index=True, use_container_width=True)
                     else:
                         st.success(
                             f"Release registrado com sucesso (ID={id_rel}), "
