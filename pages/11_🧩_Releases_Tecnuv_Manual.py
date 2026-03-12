@@ -13,17 +13,10 @@ import streamlit as st
 from modules.database import get_connection
 from services.auth_guard import require_profile
 from services.db_homologacao import (
-    create_ciclo,
-    ensure_chamado,
-    ensure_release,
     get_ciclos_aguardando,
+    processar_release_completo,
+    salvar_arquivo_release,
     update_ciclo_status,
-)
-
-# Módulos conhecidos para extração automática (ex.: POSTOGESTOR, COMERCIAL, VENDAS)
-MODULOS_CONHECIDOS = (
-    "POSTOGESTOR", "COMERCIAL", "VENDAS", "FISCAL", "PDV", "FINANCEIRO",
-    "ESTOQUE", "COMPRAS", "NF-E", "NFE", "SPED", "CONTRABILIDADE",
 )
 
 st.set_page_config(page_title="Releases Tecnuv (Manual)", page_icon="🧩", layout="wide")
@@ -47,14 +40,6 @@ st.markdown("---")
 # -----------------------------
 st.subheader("📤 Novo release")
 
-def _extrair_modulo(linha: str) -> str | None:
-    """Extrai módulo conhecido da linha, se houver."""
-    linha_upper = linha.upper()
-    for m in MODULOS_CONHECIDOS:
-        if m in linha_upper:
-            return m
-    return None
-
 with st.form("form_novo_release", clear_on_submit=True):
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -76,8 +61,8 @@ with st.form("form_novo_release", clear_on_submit=True):
         salvar = st.form_submit_button("Processar e salvar", type="primary", use_container_width=True)
     with colb2:
         st.caption(
-            "Serão criados: release em `releases`, chamados em `chamados` (se não existirem) "
-            "e ciclos em `ciclos_homologacao` com status 'Aguardando'."
+            "Será criado o release, o arquivo será anexado em `releases_tecnuv/` e "
+            "os chamados/ciclos registrados com status 'Aguardando'."
         )
 
     if salvar:
@@ -128,29 +113,33 @@ with st.form("form_novo_release", clear_on_submit=True):
                     )
                     versao = first_line[:50].strip()
 
-                    chamados_assunto: dict[str, str] = {}
-                    for line in text_content.splitlines():
-                        clean = line.strip()
-                        if not clean:
-                            continue
-                        for match in re.findall(r"\((\d{4,6})\)", clean):
-                            if match not in chamados_assunto:
-                                chamados_assunto[match] = clean
+                    # Salva o arquivo em disco e obtém o caminho
+                    caminho = salvar_arquivo_release(
+                        raw_bytes, nome_arquivo, versao
+                    )
 
-                    # ETL: release -> chamados -> ciclos
-                    id_release = ensure_release(versao)
-                    criados = 0
-                    for id_chamado, assunto_linha in sorted(chamados_assunto.items()):
-                        modulo = _extrair_modulo(assunto_linha)
-                        ensure_chamado(id_chamado, assunto=assunto_linha[:2000], modulo_sistema=modulo)
-                        if create_ciclo(id_chamado, id_release):
-                            criados += 1
+                    # ETL: release + chamados + ciclos (com anexo)
+                    qtd_vinculados, qtd_ciclos = processar_release_completo(
+                        versao=versao,
+                        texto_completo=text_content,
+                        autor=autor.strip(),
+                        nome_arquivo=nome_arquivo,
+                        caminho_arquivo=caminho,
+                    )
 
                     st.success(
-                        f"Release **{versao}** registrado. "
-                        f"{len(chamados_assunto)} chamado(s) vinculado(s), {criados} novo(s) ciclo(s) criado(s)."
+                        f"Release **{versao}** registrado e arquivo anexado em `{caminho}`. "
+                        f"{qtd_vinculados} chamado(s) vinculado(s), {qtd_ciclos} novo(s) ciclo(s)."
                     )
-                    if chamados_assunto:
+                    if qtd_vinculados > 0:
+                        chamados_assunto = {}
+                        for line in text_content.splitlines():
+                            clean = line.strip()
+                            if not clean:
+                                continue
+                            for match in re.findall(r"\((\d{4,6})\)", clean):
+                                if match not in chamados_assunto:
+                                    chamados_assunto[match] = clean
                         df_prev = pd.DataFrame({
                             "Chamado": list(chamados_assunto.keys()),
                             "Assunto": [v[:150] for v in chamados_assunto.values()],

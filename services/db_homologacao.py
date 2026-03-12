@@ -95,12 +95,22 @@ def processar_release_completo(
     versao: str,
     texto_completo: str,
     autor: Optional[str] = None,
+    nome_arquivo: Optional[str] = None,
+    caminho_arquivo: Optional[str] = None,
 ) -> tuple[int, int]:
     """
     Processa um release: extrai chamados do texto, cria chamados/ciclos.
     Usado pelo bot de varredura e pelo fluxo manual.
     Retorna (qtd_chamados_vinculados, qtd_ciclos_criados).
     """
+    id_release = ensure_release(
+        versao_release=versao[:50].strip(),
+        autor=autor or "Processamento Automático",
+        texto_completo=texto_completo[:100000],
+        nome_arquivo=(nome_arquivo or "").strip()[:255] or None,
+        caminho_arquivo=(caminho_arquivo or "").strip()[:512] or None,
+    )
+
     chamados_assunto: dict[str, str] = {}
     for line in texto_completo.splitlines():
         clean = line.strip()
@@ -109,12 +119,6 @@ def processar_release_completo(
         for match in re.findall(r"\((\d{4,6})\)", clean):
             if match not in chamados_assunto:
                 chamados_assunto[match] = clean
-
-    id_release = ensure_release(
-        versao_release=versao[:50].strip(),
-        autor=autor or "Processamento Automático",
-        texto_completo=texto_completo[:100000],
-    )
 
     modulos_conhecidos = (
         "POSTOGESTOR", "COMERCIAL", "VENDAS", "FISCAL", "PDV", "FINANCEIRO",

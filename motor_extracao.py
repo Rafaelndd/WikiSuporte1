@@ -19,6 +19,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 # Importações do nosso ecossistema
 from modules.OraculoLogistica import OraculoLogistica
 from modules.utils import ler_estado_robo, salvar_estado_robo
+from services.db_homologacao import processar_release_completo
 
 
 # ==========================================
@@ -87,34 +88,47 @@ class MotorExtracao:
             print(f"❌ Falha no login: O Fantasma não conseguiu entrar. Erro: {e}")
             return False
 
-    # 1. COLE A NOVA FUNÇÃO AQUI:
     def extrair_releases(self):
+        """Extrai releases da Home do helpdesk e persiste no novo modelo (releases, chamados, ciclos_homologacao)."""
         print("📦 Lendo janelas de Releases...")
         try:
-            # Encontra todos os links de releases na tela Home
             links_releases = self.driver.find_elements(By.CLASS_NAME, "loadNoticia")
-            
+            total_vinculados = 0
+            total_ciclos = 0
+
             for link in links_releases:
-                link.click() # O Selenium clica para abrir a janela
-                
-                # Espera a janela abrir e o texto aparecer
+                link.click()
                 textarea = WebDriverWait(self.driver, 10).until(
                     EC.visibility_of_element_located((By.CLASS_NAME, "msg3-noticia"))
                 )
-                
                 titulo_release = self.driver.find_element(By.CLASS_NAME, "msg1-noticia").text
-                texto_release = textarea.get_attribute("value") 
-                
-    
-                chamados_citados = re.findall(r'\((\d+)\)', texto_release)
-                
-                print(f"✅ Versão: {titulo_release} | Chamados Corrigidos: {chamados_citados}")
-                
-                # Fecha a janela para não dar erro no próximo clique
+                texto_release = textarea.get_attribute("value") or ""
+
+                if not texto_release.strip():
+                    btn_fechar = self.driver.find_element(By.CSS_SELECTOR, "div.modal-header button.close")
+                    btn_fechar.click()
+                    time.sleep(1)
+                    continue
+
+                try:
+                    qtd_vinculados, qtd_ciclos = processar_release_completo(
+                        versao=titulo_release[:50].strip(),
+                        texto_completo=texto_release,
+                        autor="Processamento Automático (bot)",
+                    )
+                    total_vinculados += qtd_vinculados
+                    total_ciclos += qtd_ciclos
+                    chamados = re.findall(r"\((\d{4,6})\)", texto_release)
+                    print(f"✅ Versão: {titulo_release} | Chamados: {chamados} | Ciclos criados: {qtd_ciclos}")
+                except Exception as ex:
+                    print(f"⚠️ Erro ao persistir release {titulo_release}: {ex}")
+
                 btn_fechar = self.driver.find_element(By.CSS_SELECTOR, "div.modal-header button.close")
                 btn_fechar.click()
-                time.sleep(1) # Respiro para a animação do site
-                
+                time.sleep(1)
+
+            if total_vinculados > 0 or total_ciclos > 0:
+                print(f"📊 Total: {total_vinculados} chamados vinculados, {total_ciclos} ciclos criados.")
         except Exception as e:
             print(f"❌ Erro ao ler os Releases: {e}")
 
