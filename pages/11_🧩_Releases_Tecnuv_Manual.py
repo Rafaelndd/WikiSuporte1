@@ -87,16 +87,19 @@ with st.form("form_novo_release", clear_on_submit=True):
 
                 # RTF
                 elif nome_lower.endswith(".rtf"):
-                    raw_text = raw_bytes.decode("latin-1", errors="ignore")
-                    # Remove cabeçalho {\rtf... e grupos { ... }
-                    s = re.sub(r"{\\.*?}|{.*?}", " ", raw_text)
-                    # Remove comandos \palavra
-                    s = re.sub(r"\\[a-zA-Z]+\d*", " ", s)
-                    # Quebras de parágrafo \par
-                    s = s.replace("\\par", "\n")
-                    # Limpa escapes de unicode simples \'xx
-                    s = re.sub(r"\\'[0-9a-fA-F]{2}", " ", s)
-                    text_content = re.sub(r"\s+", " ", s).replace("\n ", "\n").strip()
+                    try:
+                        from striprtf.striprtf import rtf_to_text  # type: ignore
+
+                        raw_text = raw_bytes.decode("latin-1", errors="ignore")
+                        text_content = rtf_to_text(raw_text)
+                    except Exception:
+                        # Fallback: limpeza básica, pode manter algum ruído
+                        raw_text = raw_bytes.decode("latin-1", errors="ignore")
+                        s = re.sub(r"{\\.*?}|{.*?}", " ", raw_text)
+                        s = re.sub(r"\\[a-zA-Z]+\d*", " ", s)
+                        s = s.replace("\\par", "\n")
+                        s = re.sub(r"\\'[0-9a-fA-F]{2}", " ", s)
+                        text_content = re.sub(r"\s+", " ", s).replace("\n ", "\n").strip()
 
                 # PDF
                 elif nome_lower.endswith(".pdf"):
@@ -145,17 +148,23 @@ with st.form("form_novo_release", clear_on_submit=True):
                     chamados_nums = sorted(chamados_assunto.keys())
 
                     with engine.begin() as conn:
-                        id_rel = conn.execute(
+                        # Alguns ambientes podem não ter sequência/default configurado para id_release,
+                        # por isso calculamos manualmente o próximo ID.
+                        novo_id = conn.execute(
+                            text("SELECT COALESCE(MAX(id_release), 0) + 1 FROM releases_tecnuv")
+                        ).scalar_one()
+
+                        conn.execute(
                             text(
                                 """
                                 INSERT INTO releases_tecnuv
-                                    (versao, data_lancamento, titulo, autor, notas_atualizacao, link_download, data_extracao, nr_chamado)
+                                    (id_release, versao, data_lancamento, titulo, autor, notas_atualizacao, link_download, data_extracao, nr_chamado)
                                 VALUES
-                                    (:versao, :data_lancamento, :titulo, :autor, :notas, :link_download, :data_extracao, NULL)
-                                RETURNING id_release
+                                    (:id_release, :versao, :data_lancamento, :titulo, :autor, :notas, :link_download, :data_extracao, NULL)
                                 """
                             ),
                             {
+                                "id_release": novo_id,
                                 "versao": versao,
                                 "data_lancamento": data_release,
                                 "titulo": titulo,
@@ -164,10 +173,20 @@ with st.form("form_novo_release", clear_on_submit=True):
                                 "link_download": "",
                                 "data_extracao": datetime.now(),
                             },
-                        ).scalar_one()
+                        )
+                        id_rel = novo_id
 
                         if chamados_nums:
                             for nr in chamados_nums:
+                                # Garante que o chamado existe na base antes de vincular (respeita FK)
+                                existe = conn.execute(
+                                    text(
+                                        "SELECT 1 FROM chamados_tecnuv WHERE nr_chamado = :nr LIMIT 1"
+                                    ),
+                                    {"nr": nr},
+                                ).scalar()
+                                if not existe:
+                                    continue
                                 conn.execute(
                                     text(
                                         """
