@@ -2,7 +2,10 @@
 Módulo de acesso a dados para Ciclos de Homologação.
 Gerencia chamados, releases e ciclos de teste (aprovação/reprovação).
 """
+import os
+import re
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -10,10 +13,25 @@ from sqlalchemy import text
 
 from modules.database import get_connection
 
+# Pasta para salvar arquivos de releases (relativa à raiz do projeto)
+PASTA_RELEASES = "releases_tecnuv"
 
-def ensure_release(versao_release: str) -> int:
+
+def _sanitizar_nome_arquivo(nome: str) -> str:
+    """Remove caracteres inválidos para nome de arquivo."""
+    nome = re.sub(r'[<>:"/\\|?*]', "_", nome)
+    return nome.strip() or "release"
+
+
+def ensure_release(
+    versao_release: str,
+    autor: Optional[str] = None,
+    nome_arquivo: Optional[str] = None,
+    texto_completo: Optional[str] = None,
+    caminho_arquivo: Optional[str] = None,
+) -> int:
     """
-    Garante que a versão existe em releases. Cria se não existir.
+    Garante que a versão existe em releases. Cria ou atualiza com dados opcionais.
     Retorna o id_release.
     """
     engine = get_connection()
@@ -21,15 +39,100 @@ def ensure_release(versao_release: str) -> int:
         result = conn.execute(
             text(
                 """
-                INSERT INTO releases (versao_release)
-                VALUES (:versao)
-                ON CONFLICT (versao_release) DO UPDATE SET data_liberacao = CURRENT_TIMESTAMP
+                INSERT INTO releases (versao_release, autor, nome_arquivo, texto_completo, caminho_arquivo)
+                VALUES (:versao, :autor, :nome_arquivo, :texto_completo, :caminho)
+                ON CONFLICT (versao_release) DO UPDATE SET
+                    data_liberacao = CURRENT_TIMESTAMP,
+                    autor = COALESCE(EXCLUDED.autor, releases.autor),
+                    nome_arquivo = COALESCE(EXCLUDED.nome_arquivo, releases.nome_arquivo),
+                    texto_completo = COALESCE(EXCLUDED.texto_completo, releases.texto_completo),
+                    caminho_arquivo = COALESCE(EXCLUDED.caminho_arquivo, releases.caminho_arquivo)
                 RETURNING id_release
                 """
             ),
-            {"versao": versao_release.strip()},
+            {
+                "versao": versao_release.strip(),
+                "autor": (autor or "").strip() or None,
+                "nome_arquivo": (nome_arquivo or "").strip()[:255] or None,
+                "texto_completo": (texto_completo or "").strip()[:100000] or None,
+                "caminho": (caminho_arquivo or "").strip()[:512] or None,
+            },
         )
         return result.scalar_one()
+
+
+def salvar_arquivo_release(
+    raw_bytes: bytes,
+    nome_arquivo: str,
+    versao: str,
+    base_dir: Optional[str] = None,
+) -> str:
+    """
+    Salva o arquivo em releases_tecnuv/ e retorna o caminho relativo.
+    Se o arquivo já existir, adiciona sufixo numérico.
+    """
+    base = Path(base_dir or os.getcwd())
+    pasta = base / PASTA_RELEASES
+    pasta.mkdir(parents=True, exist_ok=True)
+
+    nome_sanitizado = _sanitizar_nome_arquivo(nome_arquivo)
+    stem = Path(nome_sanitizado).stem
+    ext = Path(nome_sanitizado).suffix or ".txt"
+    caminho_rel = f"{PASTA_RELEASES}/{stem}{ext}"
+    caminho_abs = pasta / f"{stem}{ext}"
+
+    contador = 1
+    while caminho_abs.exists():
+        caminho_rel = f"{PASTA_RELEASES}/{stem}_{contador}{ext}"
+        caminho_abs = pasta / f"{stem}_{contador}{ext}"
+        contador += 1
+
+    caminho_abs.write_bytes(raw_bytes)
+    return caminho_rel
+
+
+def processar_release_completo(
+    versao: str,
+    texto_completo: str,
+    autor: Optional[str] = None,
+) -> tuple[int, int]:
+    """
+    Processa um release: extrai chamados do texto, cria chamados/ciclos.
+    Usado pelo bot de varredura e pelo fluxo manual.
+    Retorna (qtd_chamados_vinculados, qtd_ciclos_criados).
+    """
+    chamados_assunto: dict[str, str] = {}
+    for line in texto_completo.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        for match in re.findall(r"\((\d{4,6})\)", clean):
+            if match not in chamados_assunto:
+                chamados_assunto[match] = clean
+
+    id_release = ensure_release(
+        versao_release=versao[:50].strip(),
+        autor=autor or "Processamento Automático",
+        texto_completo=texto_completo[:100000],
+    )
+
+    modulos_conhecidos = (
+        "POSTOGESTOR", "COMERCIAL", "VENDAS", "FISCAL", "PDV", "FINANCEIRO",
+        "ESTOQUE", "COMPRAS", "NF-E", "NFE", "SPED", "CONTRABILIDADE",
+    )
+
+    criados = 0
+    for id_chamado, assunto_linha in sorted(chamados_assunto.items()):
+        modulo = None
+        for m in modulos_conhecidos:
+            if m in assunto_linha.upper():
+                modulo = m
+                break
+        ensure_chamado(id_chamado, assunto=assunto_linha[:2000], modulo_sistema=modulo)
+        if create_ciclo(id_chamado, id_release):
+            criados += 1
+
+    return len(chamados_assunto), criados
 
 
 def ensure_chamado(id_chamado: str, assunto: str = "", modulo_sistema: Optional[str] = None) -> None:
