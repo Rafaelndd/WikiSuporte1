@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from typing import Tuple, Optional
 from modules.database import get_connection
+from services.db_homologacao import get_metricas_homologacao
 from retry_requests import retry
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
@@ -444,11 +445,12 @@ df['tempo_ate_liberacao_dias'] = tempos_liberacao
 # 6. CONSTRUÇÃO DO DASHBOARD (INTERFACE)
 # ==========================================
 
-aba1, aba2, aba3, aba4 = st.tabs([
+aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "🎯 Visão Geral",
     "⏳ Tempo de espera e gargalos nos chamados com a desenvolvedora.",
     "🐛 Detalhamento de Versões",
-    "👥 Chamados por Analistas EPSY & Clientes"
+    "👥 Chamados por Analistas EPSY & Clientes",
+    "📋 Qualidade de Homologação"
 ])
 
 # ------------------------------------------
@@ -645,5 +647,57 @@ with aba4:
             clientes_agg.rename(columns={'cliente_nome': 'Cliente', 'Total_Chamados': 'Total Abertos (Período)', 'Fila_Ativa': 'Ainda Pendentes'}, inplace=True)
             
             st.dataframe(clientes_agg, hide_index=True, width='stretch')
+
+# ------------------------------------------
+# ABA 5: QUALIDADE DE HOMOLOGAÇÃO (ciclos_homologacao)
+# ------------------------------------------
+with aba5:
+    st.subheader("📋 Métricas de Qualidade de Homologação")
+    st.markdown("Indicadores baseados na tabela `ciclos_homologacao` (registo manual na Page 11 - Releases).")
+
+    try:
+        m = get_metricas_homologacao()
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric(
+            "Taxa de Retrabalho Global",
+            f"{m['taxa_retrabalho_global']:.1f}%",
+            help="Percentual de ciclos marcados como Reprovado em relação ao total testado.",
+        )
+        col2.metric(
+            "Gargalo de Homologação",
+            m["gargalo_homologacao"],
+            help="Quantidade de ciclos aguardando teste pelo suporte.",
+        )
+        col3.metric("Top Ofensores (chamados)", len(m["ranking_reincidencia"]))
+        col4.metric("Módulos com Reprovações", len(m["vulnerabilidade_modulo"]))
+
+        st.divider()
+
+        r1, r2 = st.columns(2)
+        with r1:
+            st.markdown("#### 🔴 Ranking de Reincidência (Top Ofensores)")
+            df_rank = m["ranking_reincidencia"]
+            if df_rank.empty:
+                st.info("Nenhum chamado com múltiplos ciclos ainda.")
+            else:
+                df_rank.columns = ["Chamado", "Qtd. Ciclos", "Reprovações"]
+                st.dataframe(df_rank, hide_index=True, use_container_width=True)
+
+        with r2:
+            st.markdown("#### 📊 Vulnerabilidade por Módulo")
+            df_mod = m["vulnerabilidade_modulo"]
+            if df_mod.empty:
+                st.info("Nenhuma reprovação registrada por módulo.")
+            else:
+                df_mod.columns = ["Módulo", "Reprovações"]
+                st.dataframe(df_mod, hide_index=True, use_container_width=True)
+
+    except Exception as e:
+        st.warning(
+            "As tabelas de homologação (`chamados`, `releases`, `ciclos_homologacao`) "
+            "podem não existir ainda. Execute o script `database/migracao_ciclos_homologacao.sql`."
+        )
+        st.error(str(e))
 
 registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD_CHAMADOS", "Acessou Dashboard Analítico - Chamados Tecnuv (EPSY)")
