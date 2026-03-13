@@ -117,30 +117,19 @@ def carregar_interacoes():
 @st.cache_data(ttl=300)
 def carregar_releases_chamados():
     """
-    Carrega o número de releases em que cada chamado aparece.
-    Usa a tabela de ligação oficial (chamados_corrigidos_releases) e
-    faz fallback para release_chamados_correcao se necessário.
+    Carrega o número de releases/ciclos em que cada chamado aparece.
+    Usa ciclos_homologacao (novo modelo de qualidade).
     """
     engine = get_connection()
     try:
-        try:
-            df_rel = pd.read_sql(
-                """
-                SELECT nr_chamado, COUNT(*) AS qtd_releases
-                FROM chamados_corrigidos_releases
-                GROUP BY nr_chamado
-                """,
-                engine,
-            )
-        except Exception:
-            df_rel = pd.read_sql(
-                """
-                SELECT nr_chamado, COUNT(*) AS qtd_releases
-                FROM release_chamados_correcao
-                GROUP BY nr_chamado
-                """,
-                engine,
-            )
+        df_rel = pd.read_sql(
+            """
+            SELECT id_chamado::integer AS nr_chamado, COUNT(*) AS qtd_releases
+            FROM ciclos_homologacao
+            GROUP BY id_chamado
+            """,
+            engine,
+        )
         return df_rel
     except Exception:
         return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])

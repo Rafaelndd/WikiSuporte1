@@ -7,6 +7,7 @@ import datetime
 import os
 from sqlalchemy import text
 from modules.database import get_connection
+from modules.processador_csv import gerar_hash_lgpd
 from dotenv import load_dotenv
 from services.auth_guard import require_profile
 
@@ -359,33 +360,75 @@ with aba2:
                 if tipo_identificado == "GOTO":
                     with st.spinner("🔄 Cruzando telefones com o banco de dados do CRM..."):
                         try:
-                            engine = get_connection()
-                            with engine.connect() as conn:
-                                df_crm = pd.read_sql(text("""
-                                    SELECT c.razao_social, t.numero as telefone_bd 
-                                    FROM clientes_telefones t
-                                    JOIN clientes_crm c ON t.id_cliente = c.id_cliente
-                                    WHERE t.numero IS NOT NULL AND t.numero != ''
-                                """), conn)
-                            
-                            mapa_clientes = dict(zip(df_crm['telefone_bd'], df_crm['razao_social']))
-                            
-                            def extrair_numero_cliente(row):
-                                if str(row.get('direcao', '')).lower() == 'recebida':
-                                    return apenas_numeros(row.get('telefone_origem', ''))
-                                else:
-                                    nums = re.findall(r'\+55\d+', str(row.get('participantes', '')))
-                                    if nums: return apenas_numeros(nums[0])
-                                    return apenas_numeros(row.get('telefone_origem', ''))
-
-                            numeros_para_busca = df_processado.apply(extrair_numero_cliente, axis=1)
-                            df_processado['cliente_nome'] = numeros_para_busca.map(mapa_clientes).fillna("Não Identificado")
-                            
+                            from services.clientes_service import obter_mapa_hash_cliente
+                            mapa_hash = obter_mapa_hash_cliente()
+                            df_processado['cliente_nome'] = df_processado['telefone_hash'].map(mapa_hash).fillna("Não Identificado")
                             sucesso_crm = len(df_processado[df_processado['cliente_nome'] != "Não Identificado"])
-                            st.success(f"🎯 **Identificação Concluída:** {sucesso_crm} chamadas foram vinculadas a clientes cadastrados!")
-                        except Exception as e:
-                            st.warning(f"⚠️ Aviso: O cruzamento com o CRM falhou. Erro: {e}")
+                            st.success(f"🎯 **Identificação:** {sucesso_crm} chamadas vinculadas a clientes.")
+                            # Números sem vínculo para cadastro opcional
+                            hashes_sem_vinculo = df_processado[df_processado['cliente_nome'] == "Não Identificado"]['telefone_hash'].dropna().unique().tolist()
+                            if hashes_sem_vinculo:
+                                df_raw = ler_arquivo_dinamico(arquivo_upload)
+                                col_de = df_raw.get('De', pd.Series(dtype=str))
+                                numeros_raw = col_de.apply(apenas_numeros)
+                                numeros_raw = numeros_raw[numeros_raw.str.len() >= 8]
+                                mapa_raw_hash = {gerar_hash_lgpd(str(n)): str(n) for n in numeros_raw.unique() if n}
+                                sem_vinculo_raw = [(mapa_raw_hash.get(h, ""), h) for h in hashes_sem_vinculo if mapa_raw_hash.get(h)]
+                                st.session_state['import_numero_sem_vinculo'] = sem_vinculo_raw[:50]
+                                st.info(f"📋 **{len(sem_vinculo_raw)}** números sem cliente vinculado. Deseja cadastrar antes de salvar?")
+                            st.session_state['import_df_processado'] = df_processado.copy()
+                            st.session_state['import_nome_tabela'] = nome_tabela_bd
+                            st.session_state['import_tipo'] = tipo_identificado
+                            st.session_state['import_arquivo_nome'] = arquivo_upload.name
+                        except ImportError:
                             df_processado['cliente_nome'] = "Não Identificado"
+                        except Exception as e:
+                            st.warning(f"⚠️ Cruzamento CRM: {e}")
+                            df_processado['cliente_nome'] = "Não Identificado"
+
+                if tipo_identificado == "MULTI360":
+                    with st.spinner("🔄 Cruzando com CRM..."):
+                        try:
+                            from services.clientes_service import obter_mapa_hash_cliente
+                            mapa_hash = obter_mapa_hash_cliente()
+                            df_processado['cliente_nome'] = df_processado['telefone_hash'].map(mapa_hash).fillna("Não Identificado")
+                        except Exception:
+                            df_processado['cliente_nome'] = df_processado.get('cliente_nome', "Não Identificado")
+
+                # Cadastro one-by-one de números sem vínculo
+                nums_sem_vinculo = st.session_state.get('import_numero_sem_vinculo', [])
+                if nums_sem_vinculo and tipo_identificado == "GOTO":
+                    with st.container(border=True):
+                        st.markdown("#### 📞 Cadastrar clientes para números sem vínculo")
+                        raw, _ = nums_sem_vinculo[0]
+                        mask = f"(**) *****-{raw[-4:]}" if len(raw) >= 4 else "****"
+                        st.caption(f"Número {mask} ({len(nums_sem_vinculo)} restantes)")
+                        with st.form("form_cadastro_numero"):
+                            razao_cad = st.text_input("Razão Social *", key="cad_razao")
+                            cnpj_cad = st.text_input("CNPJ", key="cad_cnpj")
+                            if st.form_submit_button("Salvar e próximo"):
+                                if razao_cad.strip():
+                                    try:
+                                        from services.clientes_service import vincular_telefone_cliente
+                                        ok, msg = vincular_telefone_cliente(razao_cad, raw, cnpj_cad)
+                                        if ok:
+                                            h = gerar_hash_lgpd(raw)
+                                            df_p = st.session_state.get('import_df_processado')
+                                            if df_p is not None and 'telefone_hash' in df_p.columns:
+                                                df_p.loc[df_p['telefone_hash'] == h, 'cliente_nome'] = razao_cad.strip()
+                                                st.session_state['import_df_processado'] = df_p
+                                            st.session_state['import_numero_sem_vinculo'] = nums_sem_vinculo[1:]
+                                            st.success("Cadastrado!")
+                                            st.rerun()
+                                        else:
+                                            st.error(msg)
+                                    except Exception as ex:
+                                        st.error(str(ex))
+                                else:
+                                    st.warning("Informe a Razão Social.")
+                        if st.button("Pular cadastro (continuar sem vincular estes)", key="pular_cad"):
+                            st.session_state['import_numero_sem_vinculo'] = []
+                            st.rerun()
 
                 with st.container(border=True):
                     st.markdown("### 🔍 Pré-visualização dos Dados (Prontos para o Banco)")
@@ -403,11 +446,15 @@ with aba2:
                         col_m3.metric("Data Final", df_processado['data_inicio'].max().strftime('%d/%m/%Y'))
                 
                 if st.button("💾 Salvar", type="primary", width='stretch'):
+                    df_para_salvar = st.session_state.get('import_df_processado', df_processado)
                     with st.spinner("Gravando dados no WikiSuporte..."):
-                        sucesso, msg = salvar_no_banco(df_processado, nome_tabela_bd, tipo_identificado)
+                        sucesso, msg = salvar_no_banco(df_para_salvar, nome_tabela_bd, tipo_identificado)
                         if sucesso:
-                            st.success(f"{len(df_processado)} registros foram salvos com sucesso.")
+                            st.success(f"{len(df_para_salvar)} registros foram salvos com sucesso.")
                             registrar_log_auditoria(usuario_id, "IMPORT_CSV", f"Importado {arquivo_upload.name}")
+                            for k in ['import_df_processado', 'import_numero_sem_vinculo', 'import_nome_tabela', 'import_tipo', 'import_arquivo_nome']:
+                                st.session_state.pop(k, None)
+                            st.rerun()
                         else: st.error(f"❌ Erro ao salvar o arquivo: {msg}")
 
 # ------------------------------------------

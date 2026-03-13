@@ -104,11 +104,12 @@ def obter_alertas_usuario(usuario_id: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
             df_plantao = pd.read_sql(query_plantao, conn, params={"uid": usuario_id})
             
             query_release = text("""
-                SELECT r.versao, c.nr_chamado 
-                FROM release_chamados_correcao rc
-                JOIN releases_tecnuv r ON rc.id_release = r.id_release
-                JOIN chamados_tecnuv c ON rc.nr_chamado = c.nr_chamado
-                WHERE c.id_analista_epsy = :uid AND rc.validado_epsy = FALSE
+                SELECT r.versao_release AS versao, c.id_chamado AS nr_chamado
+                FROM ciclos_homologacao ch
+                JOIN releases r ON ch.id_release = r.id_release
+                JOIN chamados c ON ch.id_chamado = c.id_chamado
+                JOIN chamados_tecnuv ct ON ct.nr_chamado::text = c.id_chamado AND ct.id_analista_epsy = :uid
+                WHERE ch.status_teste = 'Aguardando'
             """)
             df_release = pd.read_sql(query_release, conn, params={"uid": usuario_id})
             

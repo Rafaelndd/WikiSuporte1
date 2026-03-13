@@ -26,6 +26,14 @@ from modules.models import ChamadoTecnuv, HistoricoInteracao, HistoricoTransicao
 
 # Memória do Robô
 from modules.utils import ler_estado_robo, salvar_estado_robo
+from services.bot_control import (
+    consumir_tarefa,
+    definir_etapa,
+    iniciar_execucao,
+    finalizar_execucao,
+    ler_estado,
+    pode_executar_raspagem,
+)
 
 
 # Configuração de Logs
@@ -902,20 +910,66 @@ class OraculoBot:
 # CÉREBRO DO PSY Assistente WikiSuporte
 # ==============================================================================
 
+def _executar_ciclo_chamados():
+    """Abre o bot, faz login, coleta chamados, compara e auto-cura."""
+    bot = None
+    try:
+        definir_etapa("Chamados: iniciando navegador")
+        bot = OraculoBot()
+        definir_etapa("Chamados: autenticando no HelpDesk")
+        if bot.login():
+            definir_etapa("Chamados: coletando abertos no HelpDesk")
+            chamados_helpdesk = bot.coletar_abertos_helpdesk()
+            if chamados_helpdesk:
+                definir_etapa(f"Chamados: processando {len(chamados_helpdesk)} registros")
+                bot.comparar_e_processar(chamados_helpdesk)
+            definir_etapa("Chamados: auto-cura de falhas")
+            bot.recuperar_falhas_raspagem()
+        else:
+            logging.error("Falha no login. Abortando ciclo de chamados.")
+    except Exception as e_bot:
+        logging.error(f"Erro durante execução do bot: {e_bot}")
+    finally:
+        if bot:
+            definir_etapa("Chamados: encerrando navegador")
+            bot.encerrar()
+
+
 def iniciar_psy_assistente_wikisuporte_bot():
     """
-    Mantém o robô ativo em segundo plano. Intervalo padrão: 30 minutos.
+    Mantém o robô ativo em segundo plano.
+    Reage a tarefa_solicitada == 'chamados' e ao ciclo automático.
     """
     logging.info("🤖 PSY Assistente WikiSuporte Iniciado. Aguardando comandos...")
 
     while True:
         try:
-            estado = ler_estado_robo()
-            agora = datetime.now()
+            estado = ler_estado()
 
             if estado.get("em_andamento", False):
-                time.sleep(30)
+                time.sleep(10)
                 continue
+
+            tarefa = consumir_tarefa()
+            if tarefa == "chamados":
+                ok, motivo = pode_executar_raspagem(ler_estado())
+                if not ok:
+                    logging.warning(f"Raspagem 'chamados' bloqueada: {motivo}")
+                    time.sleep(30)
+                    continue
+
+                logging.info("Tarefa solicitada: chamados")
+                iniciar_execucao("Preparando raspagem: chamados")
+                try:
+                    _executar_ciclo_chamados()
+                finally:
+                    finalizar_execucao()
+                logging.info("Tarefa 'chamados' concluída.")
+                time.sleep(10)
+                continue
+
+            if tarefa and tarefa != "chamados":
+                pass
 
             auto_ativo = estado.get("auto_ativo", False)
             if not auto_ativo:
@@ -926,53 +980,39 @@ def iniciar_psy_assistente_wikisuporte_bot():
             ultima_exec_str = estado.get("ultima_execucao")
 
             executar_agora = False
-
             if not ultima_exec_str:
                 executar_agora = True
             else:
                 try:
                     ultima_exec = datetime.fromisoformat(ultima_exec_str)
                     proxima_exec = ultima_exec + timedelta(minutes=intervalo_minutos)
-                    if agora >= proxima_exec:
+                    if datetime.now() >= proxima_exec:
                         executar_agora = True
-                except:
+                except Exception:
                     executar_agora = True
 
             if executar_agora:
-                logging.info(f"🚀 Iniciando ciclo automático (Intervalo: {intervalo_minutos} min).")
+                ok, motivo = pode_executar_raspagem(ler_estado())
+                if ok:
+                    logging.info(f"Ciclo automático (Intervalo: {intervalo_minutos} min).")
+                    iniciar_execucao("Ciclo automático: chamados")
+                    try:
+                        _executar_ciclo_chamados()
+                    finally:
+                        finalizar_execucao()
+                    logging.info("Ciclo automático finalizado.")
+                else:
+                    logging.warning(f"Ciclo automático bloqueado: {motivo}")
 
-                estado["em_andamento"] = True
-                salvar_estado_robo(estado)
-
-                try:
-                    bot = OraculoBot()
-                    if bot.login():
-                        # FLUXO PRINCIPAL:
-                        # 1. Coleta TODOS os abertos no helpdesk (visão nativa ~500)
-                        chamados_helpdesk = bot.coletar_abertos_helpdesk()
-                        # 2. Compara com o banco e processa diferenças
-                        if chamados_helpdesk:
-                            bot.comparar_e_processar(chamados_helpdesk)
-                        # 3. Auto-Cura para dados faltantes
-                        bot.recuperar_falhas_raspagem()
-                    bot.encerrar()
-                except Exception as e_bot:
-                    logging.error(f"Erro durante execução do bot: {e_bot}")
-                finally:
-                    estado = ler_estado_robo()
-                    estado["ultima_execucao"] = datetime.now().isoformat()
-                    estado["em_andamento"] = False
-                    salvar_estado_robo(estado)
-                    logging.info("💤 Ciclo finalizado. Robô a dormir até o próximo intervalo.")
+            time.sleep(30)
 
         except Exception as e:
             logging.error(f"Erro crítico no Cérebro do PSY: {e}")
-            estado = ler_estado_robo()
-            if estado.get("em_andamento"):
-                estado["em_andamento"] = False
-                salvar_estado_robo(estado)
-
-        time.sleep(60)
+            try:
+                finalizar_execucao()
+            except Exception:
+                pass
+            time.sleep(60)
 
 
 if __name__ == "__main__":

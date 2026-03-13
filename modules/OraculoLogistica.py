@@ -157,40 +157,41 @@ class OraculoLogistica:
 
     def processar_html_releases(self, html_content):
         """
-        Extrai as Notas de Atualização e utiliza Expressões Regulares para encontrar 
-        os números de chamados corrigidos, cruzando-os com a base ativa.
+        Extrai as Notas de Atualização e persiste no novo modelo (releases, chamados, ciclos_homologacao).
         """
         print("🤖 [PSY - Assistente WikiSuporte] A caçar Correções nos Releases...")
+        try:
+            from services.db_homologacao import processar_release_completo
+        except ImportError:
+            print("⚠️ db_homologacao não disponível. Pulando processamento de releases.")
+            return
+
         soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # Encontra o bloco de texto de atualização
         textareas = soup.find_all('textarea')
-        
-        sucesso = 0
-        with self.engine.begin() as conn:
-            # Cria um Release "Fantasma" Genérico para atrelar as correções de hoje, caso não haja a data extraída
-            query_release = text("INSERT INTO releases_tecnuv (versao, notas_atualizacao) VALUES ('Último Release', 'Processamento Automático') RETURNING id_release")
-            id_release_atual = conn.execute(query_release).scalar()
-            
-            for ta in textareas:
-                texto_release = ta.text
-                
-                # A MÁGICA: Expressão Regular para encontrar padrões como (13555) ou (12495)
-                chamados_corrigidos = re.findall(r'\((\d{4,5})\)', texto_release)
-                
-                for numero_chamado in chamados_corrigidos:
-                    try:
-                        # Tenta inserir na tabela de correções
-                        query_insert = text("""
-                            INSERT INTO release_chamados_correcao (id_release, nr_chamado, validado_epsy) 
-                            VALUES (:id_rel, :nr, FALSE)
-                            ON CONFLICT (id_release, nr_chamado) DO NOTHING
-                        """)
-                        conn.execute(query_insert, {"id_rel": id_release_atual, "nr": int(numero_chamado)})
-                        sucesso += 1
-                    except: pass
-                    
-        print(f"✅ [PSY - Assistente WikiSuporte] Varredura de Código finalizada: {sucesso} possíveis chamados corrigidos pela Tecnuv identificados.")
+        total_vinculados = 0
+        total_ciclos = 0
+
+        for i, ta in enumerate(textareas):
+            texto_release = (ta.text or "").strip()
+            if not texto_release:
+                continue
+            first_line = next(
+                (ln.strip() for ln in texto_release.splitlines() if ln.strip()),
+                f"Release {i + 1}",
+            )
+            versao = first_line[:50].strip()
+            try:
+                qtd_v, qtd_c = processar_release_completo(
+                    versao=versao,
+                    texto_completo=texto_release,
+                    autor="Processamento Automático (OraculoLogistica)",
+                )
+                total_vinculados += qtd_v
+                total_ciclos += qtd_c
+            except Exception as ex:
+                print(f"⚠️ Erro ao processar release '{versao}': {ex}")
+
+        print(f"✅ [PSY - Assistente] Releases: {total_vinculados} chamados vinculados, {total_ciclos} ciclos criados.")
 
 
     def processar_html_tickets(self, html_content):

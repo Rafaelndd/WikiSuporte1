@@ -20,6 +20,15 @@ from webdriver_manager.chrome import ChromeDriverManager
 from modules.OraculoLogistica import OraculoLogistica
 from modules.utils import ler_estado_robo, salvar_estado_robo
 from services.db_homologacao import processar_release_completo
+from services.bot_control import (
+    consumir_tarefa,
+    definir_etapa,
+    iniciar_execucao,
+    finalizar_execucao,
+    ler_estado,
+    pode_executar_raspagem,
+    MIN_INTERVALO_ENTRE_REQUISICOES_SEG,
+)
 
 
 # ==========================================
@@ -202,65 +211,86 @@ class MotorExtracao:
 
 
     
+    def _pausa_servidor(self):
+        """Pausa entre requisições para não sobrecarregar o servidor da Tecnuv."""
+        time.sleep(MIN_INTERVALO_ENTRE_REQUISICOES_SEG)
+
+    def raspar_releases(self):
+        definir_etapa("Releases: acessando Home")
+        print("\n📥 Acessando Home (Releases)...")
+        self.driver.get("https://postogestor.com.br/helpdesk/home")
+        self._pausa_servidor()
+        definir_etapa("Releases: extraindo dados")
+        self.extrair_releases()
+
+    def raspar_plantoes(self):
+        definir_etapa("Plantões: acessando página")
+        print("\n📥 Acessando Plantões...")
+        self.driver.get(URL_PLANTOES)
+        self._pausa_servidor()
+        definir_etapa("Plantões: processando HTML")
+        self.oraculo.processar_html_plantoes(self.driver.page_source)
+
+    def raspar_tickets(self):
+        definir_etapa("Tickets: acessando fila")
+        self.extrair_todos_os_tickets()
+        self._pausa_servidor()
+        definir_etapa("Tickets: processando última página")
+        self.oraculo.processar_html_tickets(self.driver.page_source)
+
+    def raspar_manuais(self):
+        definir_etapa("Manuais: acessando biblioteca")
+        print("\n📥 Acessando Biblioteca de Manuais...")
+        self.driver.get("https://postogestor.com.br/helpdesk/sistema/manuais/busca")
+        try:
+            btn_busca_manuais = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Buscar']"))
+            )
+            btn_busca_manuais.click()
+        except Exception:
+            pass
+        try:
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href$='.pdf']"))
+            )
+        except Exception:
+            pass
+        self._pausa_servidor()
+        definir_etapa("Manuais: processando HTML")
+        self.oraculo.processar_html_manuais(self.driver.page_source)
+
+    def raspar_wikis(self):
+        definir_etapa("Wikis: iniciando mergulho")
+        self.extrair_todas_as_wikis()
+
+    def raspar_fonte(self, tipo: str):
+        """Executa uma raspagem individual por tipo."""
+        mapa = {
+            "releases": self.raspar_releases,
+            "plantoes": self.raspar_plantoes,
+            "tickets": self.raspar_tickets,
+            "manuais": self.raspar_manuais,
+            "wikis": self.raspar_wikis,
+        }
+        fn = mapa.get(tipo)
+        if fn:
+            fn()
+        else:
+            print(f"⚠️ Tipo de raspagem '{tipo}' não tem handler no motor_extracao.")
+
     def raspar_todas_as_fontes(self):
         try:
-            # 1. Releases (Página Home) - LÓGICA NOVA COM CLIQUES
-            print("\n📥 Acessando Home (Releases)...")            
-            self.driver.get("https://postogestor.com.br/helpdesk/home")
-            time.sleep(3) 
-            # Em vez de mandar o HTML cego para o oráculo, mandamos o motor clicar nas janelas!
-            self.extrair_releases()
-            
-            # 2. Plantões (Mantém igual)
-            print("\n📥 Acessando Plantões...")
-            self.driver.get(URL_PLANTOES)
-            time.sleep(3)
-            self.oraculo.processar_html_plantoes(self.driver.page_source)
-            
-            # 3. Tickets da EPSY (Nova Lógica com Paginação)
-            self.extrair_todos_os_tickets()
-            time.sleep(3)
-            self.oraculo.processar_html_tickets(self.driver.page_source)
-            
-            # ==========================================
-            # 4. Manuais (Sincronização RAG)
-            # ==========================================
-            print("\n📥 Acessando Biblioteca de Manuais...")
-            self.driver.get("https://postogestor.com.br/helpdesk/sistema/manuais/busca") 
-            
-            # Clica no botão de busca para forçar o recarregamento da tabela completa
-            try:
-                btn_busca_manuais = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Buscar']"))
-                )
-                print("⏳ Pressionando botão de Busca dos Manuais...")
-                btn_busca_manuais.click()
-            except Exception as e:
-                print("👁️ Botão de busca não encontrado ou clicável. Aguardando a tabela...")
-
-            # O CÃO DE GUARDA INTELIGENTE:
-            # Esperamos até que a linha do "MANUAL DE CADASTRO DE ENTIDADE" (ou qualquer manual) apareça!
-            try:
-                print("⏳ Aguardando os dados do servidor da Tecnuv chegarem na tela...")
-                WebDriverWait(self.driver, 20).until(
-                    # Procura por qualquer tag <a> que tenha 'href' apontando para um .pdf
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "a[href$='.pdf']"))
-                )
-                print("✅ CHUVA DE PDFs! A tabela carregou completamente.")
-            except Exception as e:
-                print("⚠️ Aviso: Os PDFs não carregaram a tempo. A extração pode falhar.")
-            
-            # Um fôlego final de 2 segundos para o JavaScript estabilizar o layout
-            time.sleep(2) 
-            
-            html_pagina = self.driver.page_source
-            self.oraculo.processar_html_manuais(html_pagina)
-            
-            # ==========================================
-            # 5. Wikis da Tecnuv (Modo Mergulhador)
-            # ==========================================
-            self.extrair_todas_as_wikis()
+            self.raspar_releases()
+            self._pausa_servidor()
+            self.raspar_plantoes()
+            self._pausa_servidor()
+            self.raspar_tickets()
+            self._pausa_servidor()
+            self.raspar_manuais()
+            self._pausa_servidor()
+            self.raspar_wikis()
         finally:
+            definir_etapa(None)
             print("✅ Extração de todas as fontes concluída!")
    
 
@@ -356,43 +386,100 @@ class MotorExtracao:
 # ==========================================
 # O PSY Assistente WikiSuporte (MOTOR EM SEGUNDO PLANO)
 # ==========================================
+
+def _executar_motor(tarefa: str | None = None):
+    """
+    Cria o motor, faz login e executa a raspagem.
+    Se `tarefa` for um tipo específico (ex: 'releases'), executa só ele.
+    Se None, executa todas as fontes.
+    """
+    motor = MotorExtracao()
+    try:
+        definir_etapa("Iniciando navegador")
+        motor.iniciar_navegador()
+        definir_etapa("Autenticando no HelpDesk")
+        if motor.fazer_login():
+            if tarefa and tarefa != "all":
+                motor.raspar_fonte(tarefa)
+            else:
+                motor.raspar_todas_as_fontes()
+        else:
+            print("❌ Falha no login. Abortando ciclo.")
+    except Exception as e:
+        print(f"Erro Crítico no Motor: {e}")
+    finally:
+        definir_etapa("Encerrando navegador")
+        motor.fechar()
+
+
 def iniciar_psy_assistente():
     print("🤖 PSY Assistente do WikiSuporte Iniciado. Aguardando ordens do painel de controle...")
-    
+
     while True:
-        # Lê o painel de configurações que criámos no Streamlit
-        config = ler_estado_robo()
-        
-        if config.get("auto_ativo", False):
-            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iniciando ciclo de raspagem...")
-            
-            # Atualiza o status visual no painel para "A Executar"
-            config["em_andamento"] = True
-            salvar_estado_robo(config)
-            
-            motor = MotorExtracao()
+        try:
+            estado = ler_estado()
+
+            if estado.get("em_andamento"):
+                time.sleep(10)
+                continue
+
+            tarefa = consumir_tarefa()
+            if tarefa:
+                ok, motivo = pode_executar_raspagem(ler_estado())
+                if not ok:
+                    print(f"⛔ Raspagem '{tarefa}' bloqueada: {motivo}")
+                    time.sleep(30)
+                    continue
+
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Tarefa solicitada: {tarefa}")
+                iniciar_execucao(f"Preparando raspagem: {tarefa}")
+                try:
+                    _executar_motor(tarefa)
+                finally:
+                    finalizar_execucao()
+                print(f"✅ Tarefa '{tarefa}' concluída.")
+                time.sleep(10)
+                continue
+
+            if estado.get("auto_ativo", False):
+                from datetime import timedelta
+                intervalo_minutos = estado.get("intervalo", 60)
+                ultima = estado.get("ultima_execucao")
+
+                executar_agora = False
+                if not ultima:
+                    executar_agora = True
+                else:
+                    try:
+                        dt_ultima = datetime.fromisoformat(ultima)
+                        if datetime.now() >= dt_ultima + timedelta(minutes=intervalo_minutos):
+                            executar_agora = True
+                    except Exception:
+                        executar_agora = True
+
+                if executar_agora:
+                    ok, motivo = pode_executar_raspagem(ler_estado())
+                    if ok:
+                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iniciando ciclo automático (intervalo {intervalo_minutos} min)...")
+                        iniciar_execucao("Ciclo automático: todas as fontes")
+                        try:
+                            _executar_motor()
+                        finally:
+                            finalizar_execucao()
+                        print(f"⏳ Ciclo concluído. Próximo em {intervalo_minutos} min.")
+                    else:
+                        print(f"⛔ Ciclo automático bloqueado: {motivo}")
+
+            time.sleep(30)
+
+        except Exception as e:
+            print(f"❌ Erro crítico no loop principal: {e}")
             try:
-                motor.iniciar_navegador()
-                if motor.fazer_login():
-                    motor.raspar_todas_as_fontes()
-            except Exception as e:
-                print(f"Erro Crítico no Motor: {e}")
-            finally:
-                motor.fechar()
-                
-                # Atualiza o status visual no painel para "Em Espera"
-                config = ler_estado_robo() # Lê de novo para não sobrescrever caso alguém tenha mexido
-                config["em_andamento"] = False
-                config["ultima_execucao"] = datetime.now().isoformat()
-                salvar_estado_robo(config)
-                
-            intervalo_minutos = config.get("intervalo", 60)
-            print(f"⏳ Ciclo concluído. O Fantasma vai dormir por {intervalo_minutos} minutos.")
-            time.sleep(intervalo_minutos * 60)
-            
-        else:
-            # Se a chavinha estiver desligada no Streamlit, dorme 1 minuto e verifica novamente
+                finalizar_execucao()
+            except Exception:
+                pass
             time.sleep(60)
+
 
 if __name__ == "__main__":
     iniciar_psy_assistente()

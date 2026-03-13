@@ -11,14 +11,25 @@ import streamlit as st
 ARQUIVO_ESTADO_ROBO = "robo_state.json"
 
 def ler_estado_robo():
+    try:
+        from services.bot_control import ler_estado
+        return ler_estado()
+    except ImportError:
+        pass
     if os.path.exists(ARQUIVO_ESTADO_ROBO):
         try:
             with open(ARQUIVO_ESTADO_ROBO, 'r') as f:
                 return json.load(f)
         except: pass
-    return {"ultima_execucao": None, "em_andamento": False, "auto_ativo": False}
+    return {"ultima_execucao": None, "em_andamento": False, "auto_ativo": False, "intervalo": 60}
 
 def salvar_estado_robo(estado):
+    try:
+        from services.bot_control import salvar_estado
+        salvar_estado(estado)
+        return
+    except ImportError:
+        pass
     with open(ARQUIVO_ESTADO_ROBO, 'w') as f:
         json.dump(estado, f)
 
