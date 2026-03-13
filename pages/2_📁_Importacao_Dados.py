@@ -30,11 +30,6 @@ except Exception:
     def registrar_log_auditoria(*args):  # type: ignore[override]
         pass
 
-try:
-    import modules.oraculo as oraculo
-except Exception:
-    oraculo = None
-
 # ==========================================
 # 1. CADEADO DE SEGURANÇA E SESSÃO
 # ==========================================
@@ -103,12 +98,11 @@ def is_plantao_normal(dt):
 # 3. INTERFACE DE USUÁRIO (UX) - ABAS
 # ==========================================
 st.title("📁 Importação e Exportação de Relatórios")
-st.markdown("Importe relatórios mensais, faça a gestão do CRM de clientes e extraia análises de Plantão diário.")
+st.markdown("Importe relatórios mensais e extraia análises de Plantão diário. Cadastro de clientes CRM em Configurações.")
 
-aba1, aba2, aba3, aba4 = st.tabs([
+aba1, aba2, aba3 = st.tabs([
     "🔌 Buscar via API GoTo",
     "📥 Importar Mensal / Relatórios",
-    "🔗 Cadastrar Clientes (CRM)",
     "📥 Extrator de Plantões Diário",
 ])
 
@@ -458,77 +452,9 @@ with aba2:
                         else: st.error(f"❌ Erro ao salvar o arquivo: {msg}")
 
 # ------------------------------------------
-# ABA 3: VÍNCULO DE CLIENTES (CRM)
+# ABA 3: ANÁLISE DE PLANTÕES (GOTO)
 # ------------------------------------------
 with aba3:
-    st.markdown("### 🔗 Cadastro de Clientes (CRM)")
-    st.caption("Cadastre o nome do cliente e associe seus números de telefone (CNPJ). Isso fará com que o Dashboard identifique as ligações por nome.")
-    col_crm1, col_crm2 = st.columns([1.5, 1])
-    
-    with col_crm1:
-        with st.container(border=True):
-            with st.form("form_crm"):
-                nome_cliente = st.text_input("Razão Social / Nome do Cliente (Obrigatório):", placeholder="Ex: Posto Avenida LTDA")
-                cnpj_limpo = apenas_numeros(st.text_input("CNPJ do Cliente (Opcional):", placeholder="Ex: 00.000.000/0000-00"))
-                telefone_limpo = apenas_numeros(st.text_input("Telefone ou WhatsApp (Obrigatório):", placeholder="Ex: 4899999999"))
-                
-                btn_vincular = st.form_submit_button("🔗 Salvar e Vincular Cliente", type="primary", width='stretch')
-                
-                if btn_vincular:
-                    if nome_cliente and telefone_limpo:
-                        try:
-                            engine = get_connection()
-                            with engine.begin() as conn:
-                                query_check = text("""
-                                    SELECT id_cliente FROM clientes_crm 
-                                    WHERE razao_social ILIKE :nome 
-                                       OR (:cnpj != '' AND cnpj IS NOT NULL AND cnpj = :cnpj) 
-                                    LIMIT 1
-                                """)
-                                id_cliente = conn.execute(query_check, {"nome": f"%{nome_cliente}%", "cnpj": cnpj_limpo}).scalar()
-                                
-                                if not id_cliente:
-                                    query_insert_cliente = text("""
-                                        INSERT INTO clientes_crm (razao_social, cnpj, id_analista_epsy, nome_analista_epsy)
-                                        VALUES (:nome, :cnpj, :id_an, :nome_an)
-                                        RETURNING id_cliente
-                                    """)
-                                    id_cliente = conn.execute(query_insert_cliente, {
-                                        "nome": nome_cliente.strip().upper(), "cnpj": cnpj_limpo, 
-                                        "id_an": usuario_id, "nome_an": nome_usuario
-                                    }).scalar()
-                                
-                                query_insert_tel = text("""
-                                    INSERT INTO clientes_telefones (id_cliente, numero, origem_dado)
-                                    VALUES (:id_c, :tel, 'VINCULO_MANUAL')
-                                """)
-                                conn.execute(query_insert_tel, {"id_c": id_cliente, "tel": telefone_limpo})
-
-                            st.success(f"✅ Sucesso! O cliente **{nome_cliente.upper()}** agora está mapeado com o número **{telefone_limpo}**.")
-                            registrar_log_auditoria(usuario_id, "VINCULO_CRM", f"Vinculou tel {telefone_limpo} ao cliente {nome_cliente}")
-                            
-                            if oraculo:
-                                with st.spinner("🕸️ Acionando sincronização externa..."):
-                                    linhas_afetadas = oraculo.sincronizar_vinculos_goto()
-                                    if linhas_afetadas > 0: st.info(f"🚀 Oráculo sincronizou {linhas_afetadas} registros legados.")
-                                    
-                        except Exception as e:
-                            st.error(f"❌ Erro ao gravar cliente no banco de dados. Detalhe: {e}")
-                    else: 
-                        st.warning("⚠️ Preencha no mínimo o Nome do Cliente e o Telefone.")
-
-    with col_crm2:
-        with st.container(border=True):
-            st.markdown("#### 📊 Validação de Cadastro")
-            st.caption("Os dados serão salvos de forma limpa, e o controle de segurança será feito pela própria Engine do banco de dados (PostgreSQL).")
-            if nome_cliente: st.success(f"👤 **Cliente:** {nome_cliente.upper()}")
-            if cnpj_limpo: st.success(f"🏢 **CNPJ:** {cnpj_limpo}")
-            if telefone_limpo: st.success(f"📞 **Telefone:** {telefone_limpo}")
-
-# ------------------------------------------
-# ABA 4: ANÁLISE DE PLANTÕES (GOTO)
-# ------------------------------------------
-with aba4:
     st.subheader("Extrator Inteligente de Plantões")
     st.info("🤖 **Psy:** Olá! Faça o upload do arquivo do GoTo. Eu buscarei automaticamente no arquivo inteiro quais ligações pertencem ao plantão, separando cada plantonista caso haja imprevistos e substituições!")
     

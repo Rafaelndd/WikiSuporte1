@@ -1,1 +1,14 @@
-{"ultima_execucao": null, "em_andamento": false, "auto_ativo": true, "intervalo": 30}
+{
+  "ultima_execucao": null,
+  "em_andamento": false,
+  "auto_ativo": true,
+  "intervalo": 30,
+  "etapa_atual": null,
+  "tarefa_solicitada": "plantoes",
+  "raspagens_por_hora": 0,
+  "ultima_raspagem_hora": null,
+  "min_intervalo": 30,
+  "max_raspagens_hora": 3,
+  "horario_inicio": null,
+  "horario_fim": null
+}

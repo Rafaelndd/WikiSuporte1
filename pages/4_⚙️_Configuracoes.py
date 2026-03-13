@@ -315,7 +315,7 @@ with aba_clientes:
 
     try:
         df_cli = pd.read_sql("""
-            SELECT c.id_cliente, c.razao_social, c.cnpj, COUNT(t.id_telefone) as qtd_telefones
+            SELECT c.id_cliente, c.razao_social, c.cnpj, COUNT(t.id_cliente) as qtd_telefones
             FROM clientes_crm c
             LEFT JOIN clientes_telefones t ON t.id_cliente = c.id_cliente
             GROUP BY c.id_cliente, c.razao_social, c.cnpj
