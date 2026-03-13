@@ -638,57 +638,228 @@ with aba2:
         )
 
 # ------------------------------------------
-# ABA 3: ENGENHARIA & VERSÕES
+# ABA 3: VERSÕES — ABERTOS POR VERSÃO, CATEGORIAS, CONSULTA DE SEGURANÇA (sem gráfico pizza)
 # ------------------------------------------
+def _semver_tuple(v: str) -> tuple:
+    if not v or not str(v).strip():
+        return (0, 0, 0)
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", str(v))
+    if m:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return (0, 0, 0)
+
+
+def _status_aberto(st) -> bool:
+    if pd.isna(st):
+        return True
+    s = str(st).lower()
+    return "encerrado" not in s and "cancelado" not in s
+
+
+def _eh_erro(cat) -> bool:
+    c = str(cat or "").lower()
+    return "erro" in c or "bug" in c or "falha" in c
+
+
+def _eh_melhoria(cat) -> bool:
+    return "melhoria" in str(cat or "").lower()
+
+
+def _eh_fiscal(cat) -> bool:
+    c = str(cat or "").lower()
+    return "fiscal" in c or "adequa" in c or "sped" in c or "nfe" in c
+
+
 with aba3:
-    st.subheader("🐛 Análise de Bugs por Versão e Assunto")
-    
-    df_ver = df[~df['versao_sistema'].isin(["Não Informada", "Não Informado", ""])].copy()
-    
-    if df_ver.empty:
-        st.info("O WikiSuporte não conseguiu identificar as versões dos sistemas nos chamados.")
+    st.subheader("🐛 Versões do sistema — abertos, categorias e consulta de segurança")
+    st.caption(
+        "Todas as versões registradas nos chamados (cliente na abertura). "
+        "**Erro ainda ativo** = chamado classificado como erro e ainda aberto. **Corrigido** = encerrado; quando houver **release_itens**, indica-se em qual versão o chamado foi citado."
+    )
+
+    dfv = df_raw.copy()
+    bad_ver = {"não informada", "não informado", "", "nan", "none"}
+    dfv["versao_sistema"] = dfv.get("versao_sistema", pd.Series(dtype=str)).astype(str).str.strip()
+    dfv = dfv[~dfv["versao_sistema"].str.lower().isin(bad_ver)]
+    dfv["aberto"] = dfv["status_atual"].apply(_status_aberto)
+    dfv["categoria_ia"] = dfv.get("categoria_ia", pd.Series(index=dfv.index, dtype=object)).fillna("Não classificada").astype(str)
+    dfv["eh_erro"] = dfv["categoria_ia"].apply(_eh_erro)
+    dfv["Resumo"] = dfv.get("erro_relatado", pd.Series(dtype=str)).fillna("").astype(str).str[:200]
+    cn = dfv.get("cliente_nome", dfv.get("nome_cliente", pd.Series("", index=dfv.index)))
+    dfv["Cliente"] = cn.astype(str).replace("", "Necessário cadastro")
+
+    if dfv.empty:
+        st.info("Nenhuma versão de sistema preenchida nos chamados.")
     else:
-        v1, v2 = st.columns([1, 1])
-        
-        with v1:
-            st.markdown("#### Chamados por Versão")
-            versoes = df_ver["versao_sistema"].value_counts().reset_index().head(10)
-            versoes.columns = ['Versão', 'Volume']
-            st.plotly_chart(px.bar(versoes, x='Volume', y='Versão', orientation='h', color='Volume', color_continuous_scale='Reds'), width='stretch')
-            
-        with v2:
-            st.markdown("#### Tempo Médio até a 1ª Liberação da Desenvolvedora")
-            tma_dev = df['tempo_ate_liberacao_dias'].mean()
-            st.metric("Tempo Médio (Dias)", f"{tma_dev:.1f} Dias" if pd.notna(tma_dev) else "N/A", help="Tempo médio entre a abertura do chamado e a primeira liberação da desenvolvedora, indicando a agilidade na resposta inicial.")
-            
+        # --- 1) Todas as versões: total de ABERTOS por versão (ordenado semver) ---
+        agg_abertos = (
+            dfv[dfv["aberto"]]
+            .groupby("versao_sistema", as_index=False)
+            .agg(Chamados_abertos=("nr_chamado", "count"))
+        )
+        agg_total = dfv.groupby("versao_sistema", as_index=False).agg(Total_chamados=("nr_chamado", "count"))
+        por_versao = agg_total.merge(agg_abertos, on="versao_sistema", how="left").fillna(0)
+        por_versao["Chamados_abertos"] = por_versao["Chamados_abertos"].astype(int)
+        por_versao["_ord"] = por_versao["versao_sistema"].apply(_semver_tuple)
+        por_versao = por_versao.sort_values("_ord", ascending=True)
+
+        st.markdown("#### 📌 Versões (da mais antiga à mais recente) — chamados **ainda abertos** naquele contexto de versão")
+        st.dataframe(
+            por_versao[["versao_sistema", "Chamados_abertos", "Total_chamados"]].rename(
+                columns={"versao_sistema": "Versão", "Chamados_abertos": "Abertos agora", "Total_chamados": "Total histórico"}
+            ),
+            hide_index=True,
+            use_container_width=True,
+            height=min(420, 40 + len(por_versao) * 35),
+        )
+
+        fig_v = px.bar(
+            por_versao.sort_values("Chamados_abertos", ascending=True),
+            x="Chamados_abertos",
+            y="versao_sistema",
+            orientation="h",
+            labels={"Chamados_abertos": "Chamados abertos", "versao_sistema": "Versão"},
+            color="Chamados_abertos",
+            color_continuous_scale="Reds",
+        )
+        fig_v.update_layout(showlegend=False, height=max(320, len(por_versao) * 22))
+        st.plotly_chart(fig_v, use_container_width=True)
+
+        # --- 2) Categorias (abertos) — mais aberturas com a desenvolvedora ---
+        st.markdown("#### 📊 Categorias (IA) — volume entre chamados **ainda abertos** (sem pizza)")
+        ab = dfv[dfv["aberto"]]
+        if ab.empty:
+            st.info("Nenhum chamado aberto no recorte.")
+        else:
+            cat_cnt = ab["categoria_ia"].value_counts().reset_index()
+            cat_cnt.columns = ["Categoria", "Volume"]
+            fig_c = px.bar(
+                cat_cnt.sort_values("Volume", ascending=True),
+                x="Volume",
+                y="Categoria",
+                orientation="h",
+                color="Volume",
+                color_continuous_scale="Blues",
+            )
+            fig_c.update_layout(showlegend=False, height=max(280, len(cat_cnt) * 24))
+            st.plotly_chart(fig_c, use_container_width=True)
+
+        # --- 3) Mapa nr_chamado -> versões em release (para “corrigido na versão X”) ---
+        map_nr_releases: dict = {}
+        try:
+            engine = get_connection()
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
+                ri = pd.read_sql(
+                    text(
+                        """
+                        SELECT nr_chamado, versao FROM release_itens
+                        WHERE versao IS NOT NULL AND TRIM(versao) <> ''
+                        """
+                    ),
+                    conn,
+                )
+            if not ri.empty:
+                for _, r in ri.iterrows():
+                    nr = int(r["nr_chamado"])
+                    v = str(r["versao"]).strip()
+                    map_nr_releases.setdefault(nr, set()).add(v)
+        except Exception:
+            pass
+
+        def releases_txt(nr: int) -> str:
+            s = map_nr_releases.get(int(nr), set())
+            if not s:
+                return "—"
+            return ", ".join(sorted(s, key=_semver_tuple))
+
+        # --- 4) Consulta: versão segura? + lista filtrável ---
         st.divider()
-        st.markdown("#### 🔍 Detalhamento de Versões")
-        st.markdown("Visualize os chamados por versão: cliente, categoria semântica (IA) e resumo. Cliente em branco indica necessidade de cadastro em Configurações.")
-        # Nome do cliente: exibir "Necessário efetuar cadastro" quando vazio ou Não Informado
-        df_ver = df_ver.copy()
-        mask_sem_cliente = (
-            df_ver["cliente_nome"].isna()
-            | (df_ver["cliente_nome"].astype(str).str.strip() == "")
-            | df_ver["cliente_nome"].isin(["Não Informado", "Não Informada"])
+        st.markdown("#### 🛡️ Consulta por versão (ex.: atualizar rede para 2.9.252?)")
+        lista_ver = por_versao["versao_sistema"].tolist()
+        v_consulta = st.selectbox("Versão a analisar", options=lista_ver[::-1] or lista_ver, index=0)
+        sub = dfv[dfv["versao_sistema"] == v_consulta]
+        erros_sub = sub[sub["eh_erro"]]
+        abertos_erro = erros_sub[erros_sub["aberto"]]
+        fechados_erro = erros_sub[~erros_sub["aberto"]]
+        n_aberto_erro = len(abertos_erro)
+        n_fech_erro = len(fechados_erro)
+
+        if n_aberto_erro > 0:
+            st.error(
+                f"**Atenção:** na versão **{v_consulta}** existem **{n_aberto_erro}** chamado(s) classificados como **erro** ainda **ativos** — risco para rollout até normalizar ou subir versão com correções."
+            )
+        else:
+            st.success(
+                f"Nenhum chamado de **erro** ainda **aberto** vinculado à versão **{v_consulta}** no histórico analisado. "
+                "Ainda assim confira melhorias/fiscais abaixo."
+            )
+        st.metric("Erros já encerrados (histórico nesta versão)", n_fech_erro)
+        if n_fech_erro and map_nr_releases:
+            com_release = sum(1 for _, r in fechados_erro.iterrows() if int(r["nr_chamado"]) in map_nr_releases)
+            st.caption(f"Desses, **{com_release}** aparecem em pelo menos um **release** (citados em nota de versão).")
+
+        st.markdown("##### Filtros da lista detalhada")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            f_cat = st.multiselect(
+                "Categoria (IA)",
+                options=sorted(dfv["categoria_ia"].unique()),
+                default=[],
+            )
+        with c2:
+            f_tipo = st.selectbox("Tipo", ["Todos", "Só erros", "Só melhorias", "Só fiscal/adequação", "Só abertos"])
+        with c3:
+            q = st.text_input("Pesquisa (resumo / nr chamado)", "")
+
+        det = sub.copy()
+        if f_cat:
+            det = det[det["categoria_ia"].isin(f_cat)]
+        if f_tipo == "Só erros":
+            det = det[det["eh_erro"]]
+        elif f_tipo == "Só melhorias":
+            det = det[det["categoria_ia"].apply(_eh_melhoria)]
+        elif f_tipo == "Só fiscal/adequação":
+            det = det[det["categoria_ia"].apply(_eh_fiscal)]
+        elif f_tipo == "Só abertos":
+            det = det[det["aberto"]]
+        if q.strip():
+            m = det["Resumo"].str.contains(q, case=False, na=False) | det["nr_chamado"].astype(str).str.contains(
+                re.escape(q.strip()), na=False
+            )
+            det = det[m]
+
+        det["Status"] = det["aberto"].map({True: "Aberto", False: "Encerrado/Cancelado"})
+        det["Correções (releases)"] = det["nr_chamado"].apply(releases_txt)
+        det["Situação erro"] = det.apply(
+            lambda r: "Ainda aguardando correção (aberto)"
+            if r["eh_erro"] and r["aberto"]
+            else ("Encerrado — ver releases citados" if r["eh_erro"] and not r["aberto"] else "—"),
+            axis=1,
         )
-        df_ver["Cliente"] = df_ver["cliente_nome"].astype(str)
-        df_ver.loc[mask_sem_cliente, "Cliente"] = "Necessário efetuar cadastro"
-        # Categoria IA (classificação semântica): Erro / Melhoria / Adequação Fiscal
-        df_ver["Categoria (IA)"] = df_ver.get("categoria_ia", pd.Series(dtype=object)).fillna("Não classificada").astype(str)
-        df_ver["Resumo"] = df_ver["erro_relatado"].fillna("").astype(str).str[:120] + "..."
-        # Filtro por categoria IA
-        categorias_disp = sorted(df_ver["Categoria (IA)"].unique().tolist())
-        categoria_sel = st.selectbox(
-            "Filtrar por Categoria (IA):",
-            options=["Todas"] + categorias_disp,
-            index=0,
+        show_cols = [
+            "nr_chamado",
+            "Cliente",
+            "versao_sistema",
+            "categoria_ia",
+            "Status",
+            "Situação erro",
+            "Correções (releases)",
+            "Resumo",
+            "data_abertura",
+            "usuario_epsy",
+        ]
+        show_cols = [c for c in show_cols if c in det.columns]
+        st.dataframe(
+            det[show_cols].sort_values(["aberto", "nr_chamado"], ascending=[False, False]),
+            hide_index=True,
+            use_container_width=True,
+            height=420,
         )
-        if categoria_sel != "Todas":
-            df_ver = df_ver[df_ver["Categoria (IA)"] == categoria_sel]
-        agrupamento_bugs = df_ver[
-            ["versao_sistema", "nr_chamado", "Cliente", "Categoria (IA)", "Resumo"]
-        ].sort_values(by=["versao_sistema", "nr_chamado"], ascending=[False, False])
-        st.dataframe(agrupamento_bugs, hide_index=True, use_container_width='stretch')
+        st.caption(
+            "**Correções (releases):** versões em que o número do chamado constou na nota de release. "
+            "Chamado **aberto** = problema ainda não encerrado no Helpdesk. Migração **release_itens** + raspagem/manual de releases enriquece esta coluna."
+        )
 
 # ------------------------------------------
 # ABA 4: PERFORMANCE EPSY & OFENSORES
