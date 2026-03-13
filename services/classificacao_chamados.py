@@ -41,7 +41,7 @@ def _popular_embeddings_categorias():
         with _engine().begin() as conn:
             conn.execute(
                 text(
-                    "UPDATE categorias_chamados SET embedding = :emb::vector WHERE id = :id"
+                    "UPDATE categorias_chamados SET embedding = CAST(:emb AS vector) WHERE id = :id"
                 ),
                 {"emb": emb_str, "id": id_cat},
             )
@@ -89,7 +89,7 @@ def classificar_chamado(nr_chamado: int) -> Tuple[bool, Optional[str], Optional[
                 text(
                     """
                     UPDATE chamados_tecnuv
-                    SET embedding = :emb::vector
+                    SET embedding = CAST(:emb AS vector)
                     WHERE nr_chamado = :nr
                     """
                 ),
@@ -110,10 +110,10 @@ def classificar_chamado(nr_chamado: int) -> Tuple[bool, Optional[str], Optional[
         result = conn.execute(
             text(
                 """
-                SELECT nome, (embedding <=> :emb::vector) AS dist
+                SELECT nome, (embedding <=> CAST(:emb AS vector)) AS dist
                 FROM categorias_chamados
                 WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> :emb::vector
+                ORDER BY embedding <=> CAST(:emb AS vector)
                 LIMIT 1
                 """
             ),

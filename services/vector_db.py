@@ -21,7 +21,9 @@ try:
 except ImportError:
     get_connection = None
 
-# Dimensão do embedding (Gemini text-embedding-004 usa 768; ajuste conforme o modelo)
+# Dimensão padrão do embedding para Gemini.
+# `gemini-embedding-001` aceita `output_dimensionality=768`, o que mantém
+# compatibilidade com a estrutura vetorial usada no projeto.
 EMBEDDING_DIM = 768
 # Tabela de chunks vetorizados
 TABELA_EMBEDDINGS = "base_conhecimento_embeddings"
@@ -128,6 +130,7 @@ def gerar_embedding_gemini(texto: str) -> Optional[List[float]]:
     """
     try:
         from google import genai
+        from google.genai import types
         from dotenv import load_dotenv
 
         load_dotenv()
@@ -137,15 +140,18 @@ def gerar_embedding_gemini(texto: str) -> Optional[List[float]]:
 
         client = genai.Client(api_key=api_key)
         result = client.models.embed_content(
-            model="text-embedding-004",
+            model=os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001"),
             contents=texto,
-            task_type="retrieval_document",
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_DOCUMENT",
+                output_dimensionality=EMBEDDING_DIM,
+            ),
         )
-        emb = getattr(result, "embedding", None)
-        if emb:
-            return list(emb)
-    except Exception:
-        pass
+        embeddings = getattr(result, "embeddings", None) or []
+        if embeddings and getattr(embeddings[0], "values", None):
+            return list(embeddings[0].values)
+    except Exception as e:
+        print(f"[vector_db] Falha ao gerar embedding Gemini: {e}")
     return None
 
 
@@ -191,7 +197,7 @@ def indexar_documento(
                 text(f"""
                     INSERT INTO {TABELA_EMBEDDINGS}
                     (id_conhecimento, chunk_index, texto_chunk, embedding, titulo, origem)
-                    VALUES (:id_c, :idx, :txt, :emb::vector, :tit, :orig)
+                    VALUES (:id_c, :idx, :txt, CAST(:emb AS vector), :tit, :orig)
                     ON CONFLICT (id_conhecimento, chunk_index) DO UPDATE
                     SET texto_chunk = EXCLUDED.texto_chunk, embedding = EXCLUDED.embedding
                 """),
@@ -261,10 +267,10 @@ def buscar_similares(
         params["query_emb"] = emb_str
         sql = f"""
             SELECT id_conhecimento, titulo, origem, texto_chunk,
-                   1 - (embedding <=> :query_emb::vector) as similaridade
+                   1 - (embedding <=> CAST(:query_emb AS vector)) as similaridade
             FROM {TABELA_EMBEDDINGS}
             WHERE embedding IS NOT NULL {filtro_origem}
-            ORDER BY embedding <=> :query_emb::vector
+            ORDER BY embedding <=> CAST(:query_emb AS vector)
             LIMIT :top_k
         """
     else:
