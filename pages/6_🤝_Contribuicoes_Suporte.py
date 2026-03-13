@@ -73,6 +73,40 @@ if perfil_logado not in PERFIS_VALIDOS:  # Sugestão: Validação de perfil
 UPLOAD_DIR = "uploads_wiki"
 os.makedirs(UPLOAD_DIR, exist_ok=True)  # Em produção, considere usar armazenamento em nuvem para maior segurança
 
+engine = get_connection()
+
+
+def _notificar_email_obsoleto(email_autor: str, nome_autor: str, titulo: str, quem: str, motivo: str) -> None:
+    """Aviso por e-mail ao autor quando a contribuição for marcada obsoleta (secrets opcional)."""
+    if not email_autor or not str(email_autor).strip():
+        return
+    try:
+        import smtplib
+        from email.message import EmailMessage
+        smtp_server = st.secrets["email"]["smtp_server"]
+        smtp_port = int(st.secrets["email"]["smtp_port"])
+        smtp_user = st.secrets["email"]["smtp_user"]
+        smtp_pass = st.secrets["email"]["smtp_password"]
+        remetente = st.secrets["email"].get("from_addr", smtp_user)
+        msg = EmailMessage()
+        msg["Subject"] = "[WikiSuporte] Sua contribuição foi marcada como obsoleta"
+        msg["From"] = remetente
+        msg["To"] = email_autor
+        msg.set_content(
+            f"Olá, {nome_autor or 'analista'}.\n\n"
+            f"A contribuição \"{titulo}\" foi marcada como OBSOLETA por {quem}.\n"
+            f"Motivo / orientação: {motivo or '(não informado)'}\n\n"
+            "Acesse WikiSuporte → Central de Conhecimento → Minhas Contribuições, "
+            "atualize o texto e reenvie para a fila de avaliação.\n"
+        )
+        with smtplib.SMTP(smtp_server, smtp_port) as s:
+            s.starttls()
+            s.login(smtp_user, smtp_pass)
+            s.send_message(msg)
+    except Exception:
+        pass  # e-mail opcional
+
+
 # ==========================================
 # 2. FUNÇÕES DE CACHE (Trazidas das Pages 6 e 8)
 # ==========================================
@@ -146,7 +180,6 @@ with aba_ranking:
     # Importamos a lista de níveis para o sumário visual (expander)
     from utils import NIVEIS_CONHECIMENTO, calcular_patente
 
-    engine = get_connection()
     with engine.connect() as conn:
         # A query agora busca diretamente as colunas xp_total e medalha_atual do banco
         query_ranking = text("""
@@ -837,69 +870,133 @@ with aba_nova:
                     st.error(f"❌ Erro ao salvar: {str(e)}")
 
 # ==========================================
-# ABA 7: MINHAS CONTRIBUIÇÕES (Com Correção de Rejeitados)
+# ABA 7: MINHAS CONTRIBUIÇÕES (editar/excluir: pendente, rejeitado, obsoleto; aprovado só leitura)
 # ==========================================
+def _icone_status(sts: str) -> str:
+    if sts == "APROVADO":
+        return "🟢"
+    if sts == "PENDENTE" or sts == "REVISAO_PENDENTE":
+        return "🟡"
+    if sts == "OBSOLETO":
+        return "🟠"
+    if sts == "REJEITADO":
+        return "🔴"
+    return "⚪"
+
+
 with aba_minhas:
     st.subheader("📚 Minhas Contribuições")
+    st.caption(
+        "Você pode **editar ou excluir** contribuições **Pendentes**, **Rejeitadas** ou **Obsoletas**. "
+        "**Aprovadas** não podem ser alteradas até alguém marcar como obsoleta."
+    )
     with engine.connect() as conn:
-        # Trazendo a nova coluna qtd_tentativas
         query_minhas = text("""
-            SELECT id, titulo, categoria, subcategoria, status, motivo_rejeicao, conteudo, caminho_anexo, qtd_tentativas 
-            FROM base_conhecimento 
-            WHERE origem = 'CONHECIMENTO_SUPORTE' AND id_analista_autor = :a 
+            SELECT id, titulo, categoria, subcategoria, status, motivo_rejeicao, conteudo, caminho_anexo,
+                   COALESCE(qtd_tentativas, 1) AS qtd_tentativas
+            FROM base_conhecimento
+            WHERE origem = 'CONHECIMENTO_SUPORTE' AND id_analista_autor = :a
             ORDER BY criado_em DESC
         """)
         df_minhas = pd.read_sql(query_minhas, conn, params={"a": usuario_logado_id})
-        
+
+    obsoletas = df_minhas[df_minhas["status"].astype(str).str.upper() == "OBSOLETO"] if not df_minhas.empty else pd.DataFrame()
+    if not obsoletas.empty:
+        st.warning(
+            f"**📢 Atenção:** {len(obsoletas)} contribuição(ões) sua(s) foram marcadas como **OBSOLETAS**. "
+            "Atualize o conteúdo e reenvie para a fila de avaliação."
+        )
+
     if not df_minhas.empty:
         for _, row in df_minhas.iterrows():
-            cor_status = "🟢" if row['status'] == "APROVADO" else "🟡" if row['status'] == "PENDENTE" else "🔴"
-            
-            with st.expander(f"{cor_status} {row['titulo']} (Status: {row['status']})"):
+            sts = str(row["status"]).upper()
+            cor = _icone_status(sts)
+            with st.expander(f"{cor} {row['titulo']} (Status: {sts})"):
                 st.write(f"**Categoria:** `{row['categoria']}` ➔ `{row['subcategoria']}`")
-                st.caption(f"🔄 Tentativas de aprovação: {row.get('qtd_tentativas', 1)}")
-                
-                if row['caminho_anexo'] and os.path.exists(row['caminho_anexo']):
-                    with open(row['caminho_anexo'], "rb") as f: 
-                        st.download_button("📎 Anexo", f, file_name=os.path.basename(row['caminho_anexo']), key=f"dl_m_{row['id']}")
-                
-                if row['status'] == 'REJEITADO':
-                    st.error(f"⚠️ **Motivo da Rejeição:** {row['motivo_rejeicao']}")
-                    st.info("Corrija o conteúdo abaixo com base no feedback e reenvie para avaliação.")
-                    
-                    # Formulário de Reenvio Interativo
-                    with st.form(key=f"form_reenvio_{row['id']}"):
-                        novo_titulo = st.text_input("Corrigir Título:", value=row['titulo'])
-                        novo_conteudo = st.text_area("Corrigir Conteúdo:", value=row['conteudo'], height=200)
-                        
-                        col_btn1, col_btn2 = st.columns([1, 1])
-                        with col_btn1:
-                            if st.form_submit_button("🚀 Corrigir e Reenviar", type="primary"):
-                                try:
-                                    with engine.begin() as conn_upd:
-                                        query_upd = text("""
-                                            UPDATE base_conhecimento 
-                                            SET titulo = :t, conteudo = :c, status = 'PENDENTE', 
-                                                motivo_rejeicao = NULL, qtd_tentativas = COALESCE(qtd_tentativas, 1) + 1 
-                                            WHERE id = :id
-                                        """)
-                                        conn_upd.execute(query_upd, {"t": novo_titulo, "c": novo_conteudo, "id": row['id']})
-                                    st.success("Reenviado para avaliação!"); time.sleep(1); st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro ao reenviar: {e}")
-                        
-                        # Mantém a opção de excluir permanentemente caso ele desista
-                        with col_btn2:
-                            if st.form_submit_button("🗑️ Desistir e Excluir"):
-                                try:
-                                    with engine.begin() as conn_del: 
-                                        conn_del.execute(text("DELETE FROM base_conhecimento WHERE id = :id"), {"id": row['id']})
-                                    st.success("Excluído permanentemente!"); time.sleep(1); st.rerun()
-                                except Exception as e: 
-                                    st.error(f"Erro ao excluir: {e}")
-                else: 
-                    st.write(row['conteudo'])
-    else: 
+                st.caption(f"🔄 Tentativas na fila: {row.get('qtd_tentativas', 1)}")
+
+                if row["caminho_anexo"] and os.path.exists(row["caminho_anexo"]):
+                    with open(row["caminho_anexo"], "rb") as f:
+                        st.download_button(
+                            "📎 Anexo",
+                            f,
+                            file_name=os.path.basename(row["caminho_anexo"]),
+                            key=f"dl_m_{row['id']}",
+                        )
+
+                # --- APROVADO: só leitura (não some daqui; na Explorar continua público) ---
+                if sts == "APROVADO":
+                    st.success("Publicada na base. Não é possível editar enquanto estiver aprovada.")
+                    st.write(row["conteudo"])
+                    continue
+
+                # --- OBSOLETO: aviso + edição → PENDENTE ---
+                if sts == "OBSOLETO":
+                    st.error(
+                        f"**⚠️ Marcada como obsoleta.** Orientação: {row.get('motivo_rejeicao') or 'Atualize o conteúdo conforme o processo atual.'}"
+                    )
+                    st.info("Após salvar, a contribuição volta para a **fila de avaliação** (status Pendente).")
+
+                # --- REJEITADO ---
+                if sts == "REJEITADO":
+                    st.error(f"**Motivo da rejeição:** {row.get('motivo_rejeicao') or '—'}")
+
+                # --- PENDENTE / REVISAO_PENDENTE ---
+                if sts in ("PENDENTE", "REVISAO_PENDENTE"):
+                    st.info("Aguardando avaliação. Você ainda pode ajustar o texto ou excluir antes da aprovação.")
+
+                # Editar + excluir: PENDENTE, REJEITADO, OBSOLETO, REVISAO_PENDENTE
+                if sts in ("PENDENTE", "REJEITADO", "OBSOLETO", "REVISAO_PENDENTE"):
+                    with st.form(key=f"form_edit_{row['id']}"):
+                        novo_titulo = st.text_input("Título:", value=row["titulo"], key=f"t_{row['id']}")
+                        novo_conteudo = st.text_area("Conteúdo:", value=row["conteudo"], height=220, key=f"c_{row['id']}")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            salvar = st.form_submit_button("💾 Salvar e enviar à fila", type="primary")
+                        with c2:
+                            excluir = st.form_submit_button("🗑️ Excluir definitivamente")
+                        if salvar:
+                            try:
+                                with engine.begin() as conn_upd:
+                                    conn_upd.execute(
+                                        text("""
+                                            UPDATE base_conhecimento
+                                            SET titulo = :t, conteudo = :c, status = 'PENDENTE',
+                                                motivo_rejeicao = NULL,
+                                                qtd_tentativas = COALESCE(qtd_tentativas, 1) + 1
+                                            WHERE id = :id AND id_analista_autor = :a
+                                              AND status IN ('PENDENTE','REJEITADO','OBSOLETO','REVISAO_PENDENTE')
+                                        """),
+                                        {
+                                            "t": novo_titulo.strip(),
+                                            "c": novo_conteudo.strip(),
+                                            "id": int(row["id"]),
+                                            "a": usuario_logado_id,
+                                        },
+                                    )
+                                st.success("Enviado à fila de avaliação.")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao salvar: {e}")
+                        if excluir:
+                            try:
+                                with engine.begin() as conn_del:
+                                    conn_del.execute(
+                                        text(
+                                            "DELETE FROM base_conhecimento WHERE id = :id AND id_analista_autor = :a "
+                                            "AND status IN ('PENDENTE','REJEITADO','OBSOLETO','REVISAO_PENDENTE')"
+                                        ),
+                                        {"id": int(row["id"]), "a": usuario_logado_id},
+                                    )
+                                st.success("Contribuição excluída.")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao excluir: {e}")
+                else:
+                    st.write(row["conteudo"])
+    else:
         st.info("Nenhuma contribuição sua encontrada. Participe e ganhe pontos no ranking!")
 
 # ==========================================
@@ -999,25 +1096,28 @@ with aba_explorar:
         with col_cat:
             try:
                 with engine.connect() as conn:
-                    cat_query = text("SELECT DISTINCT categoria FROM base_conhecimento WHERE status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE' ORDER BY categoria")
+                    cat_query = text(
+                        "SELECT DISTINCT categoria FROM base_conhecimento "
+                        "WHERE status IN ('APROVADO','OBSOLETO') AND origem = 'CONHECIMENTO_SUPORTE' ORDER BY categoria"
+                    )
                     categorias_disponiveis = [row[0] for row in conn.execute(cat_query).fetchall() if row[0]]
-            except:
+            except Exception:
                 categorias_disponiveis = []
                 
             categorias_disponiveis.insert(0, "Todas as Categorias")
             categoria_selecionada = st.selectbox("Filtrar por Categoria:", categorias_disponiveis)
 
-    # --- 2. MONTAGEM DA QUERY ---
+    # --- 2. MONTAGEM DA QUERY (APROVADO + OBSOLETO: obsoletas permanecem listadas) ---
     query_base = """
-        SELECT b.id, b.titulo, b.categoria, b.subcategoria, b.conteudo, b.caminho_anexo, 
-               COALESCE(b.qtd_upvotes, 0) as qtd_upvotes, 
+        SELECT b.id, b.titulo, b.categoria, b.subcategoria, b.conteudo, b.caminho_anexo,
+               COALESCE(b.qtd_upvotes, 0) as qtd_upvotes,
                COALESCE(b.qtd_visualizacoes, 0) as qtd_visualizacoes,
-               to_char(b.criado_em, 'DD/MM/YYYY') as data_pub, u.nome AS autor,
-               EXISTS(SELECT 1 FROM base_conhecimento_votos v 
+               to_char(b.criado_em, 'DD/MM/YYYY') as data_pub, u.nome AS autor, b.status as status_row,
+               EXISTS(SELECT 1 FROM base_conhecimento_votos v
                       WHERE v.id_conhecimento = b.id AND v.id_analista_votante = :uid) as ja_curtiu
-        FROM base_conhecimento b 
-        LEFT JOIN usuarios u ON b.id_analista_autor = u.id 
-        WHERE b.origem = 'CONHECIMENTO_SUPORTE' AND b.status = 'APROVADO'
+        FROM base_conhecimento b
+        LEFT JOIN usuarios u ON b.id_analista_autor = u.id
+        WHERE b.origem = 'CONHECIMENTO_SUPORTE' AND b.status IN ('APROVADO', 'OBSOLETO')
     """
     
     if termo_pesquisa.strip():
@@ -1038,36 +1138,100 @@ with aba_explorar:
         if df_conhecimento.empty:
             st.info("Nenhuma contribuição encontrada.")
         else:
+            nome_marcador = st.session_state.get("usuario_nome") or "Equipe"
             for _, row in df_conhecimento.iterrows():
+                is_obsoleto = str(row.get("status_row", "")).upper() == "OBSOLETO"
                 with st.container(border=True):
                     col_txt, col_btn = st.columns([4, 1.2])
-                    
-                    with col_txt:
-                        st.markdown(f"### {row['titulo']}")
-                        st.caption(f"📂 {row['categoria']} | ✍️ {row['autor']} | 📅 {row['data_pub']}")
-                    
-                    with col_btn:
-                        # Botão de Curtir/Descurtir
-                        label = f"❤️ {row['qtd_upvotes']}" if row['ja_curtiu'] else f"🤍 {row['qtd_upvotes']}"
-                        if st.button(label, key=f"lk_{row['id']}", use_container_width=True):
-                            with engine.begin() as conn_voto:
-                                if row['ja_curtiu']:
-                                    conn_voto.execute(text("DELETE FROM base_conhecimento_votos WHERE id_conhecimento = :pid AND id_analista_votante = :uid"), {"pid": row['id'], "uid": usuario_id})
-                                    # Ajuste: Decrementar qtd_upvotes na tabela base_conhecimento (se não houver trigger no BD)
-                                    conn_voto.execute(text("UPDATE base_conhecimento SET qtd_upvotes = qtd_upvotes - 1 WHERE id = :pid AND qtd_upvotes > 0"), {"pid": row['id']})
-                                else:
-                                    conn_voto.execute(text("INSERT INTO base_conhecimento_votos (id_conhecimento, id_analista_votante) VALUES (:pid, :uid)"), {"pid": row['id'], "uid": usuario_id})
-                                    # Ajuste: Incrementar qtd_upvotes na tabela base_conhecimento (se não houver trigger no BD)
-                                    conn_voto.execute(text("UPDATE base_conhecimento SET qtd_upvotes = COALESCE(qtd_upvotes, 0) + 1 WHERE id = :pid"), {"pid": row['id']})
-                            st.rerun()
 
-                        # Botão Obsoleto
-                        if st.button("⚠️ Obsoleto", key=f"obs_{row['id']}", use_container_width=True):
-                            with engine.begin() as conn_obs:
-                                conn_obs.execute(text("UPDATE base_conhecimento SET status = 'REVISAO_PENDENTE' WHERE id = :pid"), {"pid": row['id']})
-                            st.warning("Enviado para revisão!")
-                            time.sleep(1)
-                            st.rerun()
+                    with col_txt:
+                        badge = " **🟠 OBSOLETA — aguardando atualização do autor**" if is_obsoleto else ""
+                        st.markdown(f"### {row['titulo']}{badge}")
+                        st.caption(f"📂 {row['categoria']} | ✍️ {row['autor']} | 📅 {row['data_pub']}")
+                        if is_obsoleto and row.get("conteudo"):
+                            st.caption("Conteúdo ainda visível; não entra no assistente até ser reavaliada.")
+
+                    with col_btn:
+                        if not is_obsoleto:
+                            label = f"❤️ {row['qtd_upvotes']}" if row["ja_curtiu"] else f"🤍 {row['qtd_upvotes']}"
+                            if st.button(label, key=f"lk_{row['id']}", use_container_width=True):
+                                with engine.begin() as conn_voto:
+                                    if row["ja_curtiu"]:
+                                        conn_voto.execute(
+                                            text(
+                                                "DELETE FROM base_conhecimento_votos WHERE id_conhecimento = :pid AND id_analista_votante = :uid"
+                                            ),
+                                            {"pid": row["id"], "uid": usuario_id},
+                                        )
+                                        conn_voto.execute(
+                                            text(
+                                                "UPDATE base_conhecimento SET qtd_upvotes = qtd_upvotes - 1 WHERE id = :pid AND qtd_upvotes > 0"
+                                            ),
+                                            {"pid": row["id"]},
+                                        )
+                                    else:
+                                        conn_voto.execute(
+                                            text(
+                                                "INSERT INTO base_conhecimento_votos (id_conhecimento, id_analista_votante) VALUES (:pid, :uid)"
+                                            ),
+                                            {"pid": row["id"], "uid": usuario_id},
+                                        )
+                                        conn_voto.execute(
+                                            text(
+                                                "UPDATE base_conhecimento SET qtd_upvotes = COALESCE(qtd_upvotes, 0) + 1 WHERE id = :pid"
+                                            ),
+                                            {"pid": row["id"]},
+                                        )
+                                st.rerun()
+                        else:
+                            st.caption("Votos pausados (obsoleta).")
+
+                        # Marcar obsoleto: só APROVADO; coord/dev (evita abuso)
+                        if perfil_logado in ("coordenador", "dev") and not is_obsoleto:
+                            with st.expander("⚠️ Marcar obsoleta", expanded=False):
+                                motivo_obs = st.text_input(
+                                    "Motivo / o que o autor deve atualizar",
+                                    key=f"mot_obs_{row['id']}",
+                                    placeholder="Ex.: Procedure mudou na v2.9; incluir novo print",
+                                )
+                                if st.button("Confirmar obsoleta + avisar autor", key=f"obs_{row['id']}", use_container_width=True):
+                                    if not (motivo_obs or "").strip():
+                                        st.warning("Informe um motivo para o autor.")
+                                    else:
+                                        agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                        texto_motivo = f"[Obsoleta em {agora} por {nome_marcador}] {motivo_obs.strip()}"
+                                        try:
+                                            ra = None
+                                            with engine.begin() as conn_obs:
+                                                ra = conn_obs.execute(
+                                                    text(
+                                                        "SELECT u.email, u.nome FROM base_conhecimento b JOIN usuarios u ON b.id_analista_autor = u.id WHERE b.id = :pid"
+                                                    ),
+                                                    {"pid": row["id"]},
+                                                ).fetchone()
+                                                conn_obs.execute(
+                                                    text(
+                                                        "UPDATE base_conhecimento SET status = 'OBSOLETO', motivo_rejeicao = :m WHERE id = :pid AND status = 'APROVADO'"
+                                                    ),
+                                                    {"m": texto_motivo, "pid": row["id"]},
+                                                )
+                                            if ra:
+                                                _notificar_email_obsoleto(
+                                                    ra[0], ra[1], row["titulo"], nome_marcador, motivo_obs.strip()
+                                                )
+                                            try:
+                                                registrar_log_auditoria(
+                                                    usuario_logado_id,
+                                                    "MARCOU_OBSOLETO",
+                                                    f"id={row['id']} {row['titulo'][:40]}",
+                                                )
+                                            except Exception:
+                                                pass
+                                            st.success("Marcada como obsoleta. O autor foi avisado (e-mail, se configurado).")
+                                            time.sleep(1)
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Erro: {e}")
 
                     with st.expander("📖 Ler solução"):
                         # Ajuste: Incrementar qtd_visualizacoes ao abrir o expander (considerando que o expander só é "acessado" quando expandido)
