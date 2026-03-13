@@ -669,17 +669,27 @@ class OraculoBot:
 
             try:
                 html_motivo = self.driver.find_element(By.ID, "tecnuv_motivo").get_attribute("innerHTML").strip()
-            except:
+            except Exception:
                 html_motivo = ""
+            try:
+                from modules.html_texto import html_para_exibicao
+
+                texto_limpo = html_para_exibicao(html_motivo, title_case=True)
+            except Exception:
+                texto_limpo = html_motivo
 
             chamado = session.query(ChamadoTecnuv).filter_by(nr_chamado=nr_chamado).first()
             if chamado:
-                chamado.cliente_nome = get_val("Cliente:")
+                if hasattr(chamado, "nome_cliente"):
+                    chamado.nome_cliente = get_val("Cliente:")
+                elif hasattr(chamado, "cliente_nome"):
+                    chamado.cliente_nome = get_val("Cliente:")
                 chamado.atendente_tecnuv = get_val("Atendente:")
                 chamado.usuario_epsy = get_val("Usuário:")
                 chamado.versao_sistema = versao
-                chamado.motivo_abertura_html = html_motivo
-                chamado.assunto_html = html_motivo
+                # Grava texto limpo (sem tags) para amostragem no sistema
+                chamado.motivo_abertura_html = texto_limpo or html_motivo
+                chamado.assunto_html = texto_limpo or html_motivo
 
                 # Previsão de Conclusão
                 previsao_str = get_val("Previsão de conclusão:")

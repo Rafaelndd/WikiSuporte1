@@ -20,9 +20,14 @@ DIM_GEMINI = 768
 def _limpar_html(html_text: Optional[str]) -> str:
     if not html_text or str(html_text).strip() == "":
         return ""
-    soup = BeautifulSoup(str(html_text), "html.parser")
-    texto = soup.get_text(separator=" ")
-    return re.sub(r"\s+", " ", texto).strip()
+    try:
+        from modules.html_texto import limpar_html_bruto
+
+        return limpar_html_bruto(html_text)
+    except Exception:
+        soup = BeautifulSoup(str(html_text), "html.parser")
+        texto = soup.get_text(separator=" ")
+        return re.sub(r"\s+", " ", texto).strip()
 
 
 def _texto_chamado(assunto_html: Optional[str], motivo_abertura: Optional[str]) -> str:

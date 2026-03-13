@@ -109,8 +109,14 @@ def carregar_dados_tecnuv():
                     df['cliente_nome'] = df.apply(preencher_cliente, axis=1)
             except Exception:
                 pass
-            df['cliente_nome'] = df.get('cliente_nome', pd.Series(dtype=str)).fillna("Não Informado").astype(str)
-            df['erro_relatado'] = df.get('motivo_abertura_html', pd.Series(dtype=str)).apply(limpar_html)
+            df["cliente_nome"] = df.get("cliente_nome", pd.Series(dtype=str)).fillna("Não Informado").astype(str)
+            # Motivo/assunto: sempre texto limpo + Title Case na amostragem (colunas originais no DF para UI)
+            for col in ("motivo_abertura_html", "assunto_html"):
+                if col in df.columns:
+                    df[col] = df[col].apply(limpar_html)
+            df["erro_relatado"] = df.get("motivo_abertura_html", pd.Series(dtype=str)).apply(
+                lambda x: x if isinstance(x, str) else limpar_html(x)
+            )
             # categoria_ia (classificação semântica) se existir
             if 'categoria_ia' not in df.columns:
                 df['categoria_ia'] = None
@@ -167,11 +173,17 @@ def carregar_releases_chamados():
             return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
 
 def limpar_html(html_text):
-    if not html_text or pd.isna(html_text):
-        return ""
-    soup = BeautifulSoup(str(html_text), "html.parser")
-    texto = soup.get_text(separator=" ")
-    return re.sub(r'\s+', ' ', texto).strip()
+    """Compatível com código antigo; preferir modules.html_texto.html_para_exibicao."""
+    try:
+        from modules.html_texto import html_para_exibicao
+
+        return html_para_exibicao(html_text, title_case=True)
+    except Exception:
+        if not html_text or pd.isna(html_text):
+            return ""
+        soup = BeautifulSoup(str(html_text), "html.parser")
+        texto = soup.get_text(separator=" ")
+        return re.sub(r"\s+", " ", texto).strip()
 
 
 def extrair_versao_liberacao(texto: str) -> Optional[str]:
@@ -775,12 +787,63 @@ with aba6:
     )
     engine = get_connection()
     try:
-        sql = """
+        cols = set(
+            pd.read_sql(
+                text(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'chamados_tecnuv'
+                    """
+                ),
+                engine,
+            )["column_name"].str.lower()
+        )
+        # Cliente: instalações antigas = cliente_nome; modelo atual / ORM = nome_cliente
+        if "nome_cliente" in cols:
+            expr_cliente = "COALESCE(c.nome_cliente, '—')"
+        elif "cliente_nome" in cols:
+            expr_cliente = "COALESCE(c.cliente_nome, '—')"
+        else:
+            expr_cliente = """COALESCE((
+                SELECT v.nome_cliente FROM clientes_vinculados_chamado v
+                WHERE v.nr_chamado = c.nr_chamado LIMIT 1
+            ), '—')"""
+        if "usuario_epsy" in cols and "nome_analista_epsy" in cols:
+            expr_quem = "COALESCE(c.usuario_epsy, c.nome_analista_epsy, '—')"
+        elif "usuario_epsy" in cols:
+            expr_quem = "COALESCE(c.usuario_epsy, '—')"
+        elif "nome_analista_epsy" in cols:
+            expr_quem = "COALESCE(c.nome_analista_epsy, '—')"
+        else:
+            expr_quem = "'—'"
+
+        tem_release_itens = False
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
+            tem_release_itens = True
+        except Exception:
+            pass
+
+        if tem_release_itens:
+            sub_ri = """
+            SELECT nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
+            FROM release_itens GROUP BY nr_chamado
+            """
+        else:
+            sub_ri = """
+            SELECT id_chamado::integer AS nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
+            FROM ciclos_homologacao GROUP BY id_chamado
+            """
+
+        cat_select = "COALESCE(c.categoria_ia, '—') AS categoria_ia" if "categoria_ia" in cols else "'—' AS categoria_ia"
+
+        sql = f"""
         SELECT
             c.nr_chamado,
-            COALESCE(c.cliente_nome, c.nome_cliente, '—') AS cliente,
+            {expr_cliente} AS cliente,
             c.data_abertura,
-            COALESCE(c.usuario_epsy, '—') AS quem_abriu,
+            {expr_quem} AS quem_abriu,
             c.status_atual,
             COALESCE(ri.qtd_releases, 0) AS vezes_em_releases,
             CASE
@@ -788,14 +851,10 @@ with aba6:
                 WHEN COALESCE(ri.qtd_releases, 0) = 1 THEN '1 liberação em release'
                 ELSE 'Não consta em release'
             END AS situacao_release,
-            COALESCE(c.categoria_ia, '—') AS categoria_ia,
+            {cat_select},
             LEFT(COALESCE(c.motivo_abertura_html, c.assunto_encerramento, ''), 120) AS resumo
         FROM chamados_tecnuv c
-        LEFT JOIN (
-            SELECT nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
-            FROM release_itens
-            GROUP BY nr_chamado
-        ) ri ON ri.nr_chamado = c.nr_chamado
+        LEFT JOIN ( {sub_ri} ) ri ON ri.nr_chamado = c.nr_chamado
         WHERE 1=1
         """
         if filtro_fila.startswith("Somente ativos"):
@@ -810,13 +869,20 @@ with aba6:
             ) """
         sql += " ORDER BY c.data_abertura DESC NULLS LAST LIMIT 2000"
         df_fila = pd.read_sql(text(sql), engine)
+        if not df_fila.empty and "resumo" in df_fila.columns:
+            df_fila["resumo"] = df_fila["resumo"].apply(limpar_html)
+        if not tem_release_itens:
+            st.info(
+                "Tabela **`release_itens`** ainda não existe — contagem de releases veio de **`ciclos_homologacao`**. "
+                "Para uma linha por bullet no release, execute `database/migracao_release_itens.sql` e reprocesse na Page 11."
+            )
         if df_fila.empty:
-            st.info("Nenhum registro. Rode a migração `release_itens` e processe releases na Page 11.")
+            st.info("Nenhum registro com os filtros atuais.")
         else:
             st.metric("Registros", len(df_fila))
             st.dataframe(df_fila, use_container_width=True, hide_index=True)
     except Exception as e:
-        st.warning("Tabela `release_itens` ausente ou erro de consulta. Execute `database/migracao_release_itens.sql`.")
+        st.warning("Erro na consulta da aba Fila/releases. Verifique tabelas `chamados_tecnuv` e `ciclos_homologacao`.")
         st.code(str(e))
 
 registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD_CHAMADOS", "Acessou Dashboard Analítico - Chamados Tecnuv (EPSY)")
