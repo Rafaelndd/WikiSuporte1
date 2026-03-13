@@ -36,6 +36,7 @@ from services.bot_control import (
 # ==========================================
 URL_LOGIN = "https://postogestor.com.br/helpdesk/sistema/login"
 URL_HOME = "https://postogestor.com.br/helpdesk/sistema/home"
+URL_HOME_ALT = "https://postogestor.com.br/helpdesk/home"
 URL_PLANTOES = "https://postogestor.com.br/helpdesk/sistema/plantao" 
 URL_TICKETS = "https://postogestor.com.br/helpdesk/sistema/tickets" 
 URL_MANUAIS = "https://postogestor.com.br/helpdesk/sistema/manuais/busca" 
@@ -97,25 +98,122 @@ class MotorExtracao:
             print(f"❌ Falha no login: O Fantasma não conseguiu entrar. Erro: {e}")
             return False
 
-    def extrair_releases(self):
-        """Extrai releases da Home do helpdesk e persiste no novo modelo (releases, chamados, ciclos_homologacao)."""
-        print("📦 Lendo janelas de Releases...")
+    def _texto_modal_release(self) -> str:
+        """Conteúdo do release no modal: textarea, div ou body do modal."""
+        seletores = [
+            (By.CSS_SELECTOR, "textarea.msg3-noticia"),
+            (By.CLASS_NAME, "msg3-noticia"),
+            (By.CSS_SELECTOR, ".modal-body textarea"),
+            (By.CSS_SELECTOR, "#modalNoticia textarea"),
+            (By.CSS_SELECTOR, "div.msg3-noticia"),
+            (By.CSS_SELECTOR, ".modal-content .modal-body"),
+        ]
+        for by, sel in seletores:
+            try:
+                el = self.driver.find_element(by, sel)
+                t = (el.get_attribute("value") or el.get_attribute("innerHTML") or el.text or "").strip()
+                if len(t) > 50:
+                    return t
+            except Exception:
+                continue
         try:
-            links_releases = self.driver.find_elements(By.CLASS_NAME, "loadNoticia")
-            total_vinculados = 0
-            total_ciclos = 0
+            modal = self.driver.find_element(By.CSS_SELECTOR, ".modal.in, .modal.show, div.modal")
+            return (modal.text or "").strip()
+        except Exception:
+            return ""
 
-            for link in links_releases:
-                link.click()
-                textarea = WebDriverWait(self.driver, 10).until(
-                    EC.visibility_of_element_located((By.CLASS_NAME, "msg3-noticia"))
+    def _fechar_modal_release(self):
+        for sel in (
+            "div.modal-header button.close",
+            "button.close[data-dismiss='modal']",
+            ".modal .close",
+            "button.btn-default[data-dismiss='modal']",
+        ):
+            try:
+                self.driver.find_element(By.CSS_SELECTOR, sel).click()
+                time.sleep(0.5)
+                return
+            except Exception:
+                continue
+        try:
+            self.driver.execute_script(
+                "document.querySelectorAll('.modal').forEach(m=>{m.style.display='none'; m.classList.remove('in','show');});"
+            )
+        except Exception:
+            pass
+
+    def extrair_releases(self):
+        """Extrai releases da Home do helpdesk e persiste (releases, ciclos, release_itens)."""
+        print("📦 Lendo janelas de Releases...")
+        total_vinculados = 0
+        total_ciclos = 0
+        try:
+            time.sleep(2)
+            # Vários jeitos de achar cliques que abrem o modal de notícia/release
+            links_releases = []
+            for by, sel in [
+                (By.CLASS_NAME, "loadNoticia"),
+                (By.CSS_SELECTOR, "a.loadNoticia"),
+                (By.CSS_SELECTOR, "[class*='loadNoticia']"),
+                (By.CSS_SELECTOR, "a[onclick*='Noticia']"),
+                (By.CSS_SELECTOR, "a[onclick*='noticia']"),
+                (By.XPATH, "//a[contains(@class,'loadNoticia')]"),
+                (By.XPATH, "//*[contains(@onclick,'loadNoticia')]"),
+            ]:
+                try:
+                    found = self.driver.find_elements(by, sel)
+                    if found:
+                        links_releases = [e for e in found if e.is_displayed()]
+                        if links_releases:
+                            print(f"   → {len(links_releases)} link(s) de release encontrados via {sel}")
+                            break
+                except Exception:
+                    continue
+
+            if not links_releases:
+                print(
+                    "⚠️ Nenhum elemento .loadNoticia na página. "
+                    "Confirme URL da Home (deve listar notícias/releases). HTML pode ter mudado."
                 )
-                titulo_release = self.driver.find_element(By.CLASS_NAME, "msg1-noticia").text
-                texto_release = textarea.get_attribute("value") or ""
+                snippet = (self.driver.page_source or "")[:2500]
+                if "loadNoticia" in snippet or "noticia" in snippet.lower():
+                    print("   (página contém 'noticia' — tente ampliar seletores no motor_extracao.py)")
+                return
 
+            for idx, link in enumerate(links_releases):
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", link)
+                    time.sleep(0.3)
+                    link.click()
+                except Exception as ex:
+                    print(f"⚠️ Clique release #{idx + 1}: {ex}")
+                    continue
+
+                try:
+                    WebDriverWait(self.driver, 12).until(
+                        EC.visibility_of_element_located(
+                            (By.CSS_SELECTOR, ".modal.in, .modal.show, .modal-dialog, .msg1-noticia")
+                        )
+                    )
+                except Exception:
+                    print(f"⚠️ Modal não abriu após clique #{idx + 1}")
+                    self._fechar_modal_release()
+                    time.sleep(1)
+                    continue
+
+                try:
+                    titulo_el = self.driver.find_element(By.CLASS_NAME, "msg1-noticia")
+                    titulo_release = (titulo_el.text or titulo_el.get_attribute("innerText") or "").strip()
+                except Exception:
+                    try:
+                        titulo_release = self.driver.find_element(By.CSS_SELECTOR, ".modal-title").text.strip()
+                    except Exception:
+                        titulo_release = f"Release_{idx + 1}"
+
+                texto_release = self._texto_modal_release()
                 if not texto_release.strip():
-                    btn_fechar = self.driver.find_element(By.CSS_SELECTOR, "div.modal-header button.close")
-                    btn_fechar.click()
+                    print(f"⚠️ Release sem texto extraível: {titulo_release[:60]}… (value/innerHTML vazio)")
+                    self._fechar_modal_release()
                     time.sleep(1)
                     continue
 
@@ -129,18 +227,23 @@ class MotorExtracao:
                     total_vinculados += qtd_vinculados
                     total_ciclos += qtd_ciclos
                     chamados = re.findall(r"\((\d{4,6})\)", texto_release)
-                    print(f"✅ Versão: {titulo_release} | Chamados: {chamados} | Ciclos criados: {qtd_ciclos}")
+                    print(f"✅ {titulo_release[:50]} | itens/chamados: {qtd_vinculados} | ciclos: {qtd_ciclos} | nums: {chamados[:8]}")
                 except Exception as ex:
-                    print(f"⚠️ Erro ao persistir release {titulo_release}: {ex}")
+                    print(f"⚠️ Erro ao persistir release «{titulo_release[:40]}»: {ex}")
 
-                btn_fechar = self.driver.find_element(By.CSS_SELECTOR, "div.modal-header button.close")
-                btn_fechar.click()
+                self._fechar_modal_release()
                 time.sleep(1)
 
-            if total_vinculados > 0 or total_ciclos > 0:
-                print(f"📊 Total: {total_vinculados} chamados vinculados, {total_ciclos} ciclos criados.")
+            print(f"📊 Total releases processados: {total_vinculados} itens/chamados, {total_ciclos} ciclos novos.")
+            if total_vinculados == 0 and total_ciclos == 0 and links_releases:
+                print(
+                    "💡 Dica: se os modais abrem mas o banco fica vazio, verifique migrações SQL "
+                    "(releases, ciclos_homologacao, release_itens) e erros acima."
+                )
         except Exception as e:
             print(f"❌ Erro ao ler os Releases: {e}")
+            import traceback
+            traceback.print_exc()
 
     def extrair_todos_os_tickets(self):
         print("\n📥 Acessando Fila de Tickets (Iniciando Sincronização Delta)...")
@@ -219,8 +322,22 @@ class MotorExtracao:
     def raspar_releases(self):
         definir_etapa("Releases: acessando Home")
         print("\n📥 Acessando Home (Releases)...")
-        self.driver.get("https://postogestor.com.br/helpdesk/home")
-        self._pausa_servidor()
+        for url in (URL_HOME, URL_HOME_ALT):
+            self.driver.get(url)
+            self._pausa_servidor()
+            time.sleep(2)
+            try:
+                if self.driver.find_elements(By.CLASS_NAME, "loadNoticia") or self.driver.find_elements(
+                    By.CSS_SELECTOR, "[class*='loadNoticia']"
+                ):
+                    print(f"   Home carregada: {url}")
+                    break
+            except Exception:
+                pass
+        else:
+            print(f"   Aviso: usando {URL_HOME} (sem confirmação de links)")
+            self.driver.get(URL_HOME)
+            time.sleep(2)
         definir_etapa("Releases: extraindo dados")
         self.extrair_releases()
 
