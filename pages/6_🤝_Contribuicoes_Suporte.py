@@ -75,6 +75,29 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)  # Em produção, considere usar armazena
 
 engine = get_connection()
 
+_busca_sem_ok = False
+registrar_busca_com_topico = None  # type: ignore
+listar_buscas_mesmo_assunto = None  # type: ignore
+ranking_topicos_agregado = None  # type: ignore
+historico_por_topico_recente = None  # type: ignore
+try:
+    from services.busca_semantica_historico import (
+        historico_por_topico_recente as _hpt,
+        listar_buscas_mesmo_assunto as _lbm,
+        ranking_topicos_agregado as _rta,
+        registrar_busca_com_topico as _rbc,
+    )
+
+    with engine.connect() as _probe:
+        _probe.execute(text("SELECT 1 FROM busca_topicos LIMIT 1"))
+    registrar_busca_com_topico = _rbc
+    listar_buscas_mesmo_assunto = _lbm
+    ranking_topicos_agregado = _rta
+    historico_por_topico_recente = _hpt
+    _busca_sem_ok = True
+except Exception:
+    pass
+
 
 def _notificar_email_obsoleto(email_autor: str, nome_autor: str, titulo: str, quem: str, motivo: str) -> None:
     """Aviso por e-mail ao autor quando a contribuição for marcada obsoleta (secrets opcional)."""
@@ -243,6 +266,28 @@ with aba_gemini:
         else:
             with st.spinner("Analisando base e comparando com o histórico recente..."):
                 tem_no_cache = False
+
+                # --- Aviso semântico: mesmo assunto já buscado (embedding) ---
+                if _busca_sem_ok and listar_buscas_mesmo_assunto:
+                    try:
+                        colegas = listar_buscas_mesmo_assunto(
+                            engine, pergunta.strip(), usuario_logado_id, "ASSISTENTE", limite=12
+                        )
+                    except Exception:
+                        colegas = []
+                    if len(colegas) >= 1:
+                        outros = [c for c in colegas if c.get("nome") and True]
+                        st.warning(
+                            "**Este tema já foi pesquisado antes** (busca semântica — variações como "
+                            "\"CertificadoDigital\", \"instalar certificado\", etc. contam como o mesmo assunto)."
+                        )
+                        st.info(
+                            "Na aba **📖 Histórico de Buscas** você vê **quem** buscou e **dia/hora**. "
+                            "Abaixo, últimas buscas neste mesmo assunto:"
+                        )
+                        for c in colegas[:8]:
+                            quem = c.get("nome") or "Colega"
+                            st.caption(f"**{quem}** — {c.get('quando', '')} — _{str(c.get('pergunta', ''))[:100]}…_")
                 
                 def normalizar_texto_completo(texto):
                     t = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
@@ -283,8 +328,24 @@ with aba_gemini:
                         st.caption("⚡ **Motor Elétrico:** Resposta resgatada do cache.")
                     tem_no_cache = True
                     try:
-                        with engine.begin() as conn_log: conn_log.execute(text("INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) VALUES (:u, :p, :r, 0, 0, 0)"), {"u": usuario_logado_id, "p": hist_pergunta_original, "r": resposta_cache})
-                    except Exception as e: st.error(f"Erro ranking: {e}")
+                        if _busca_sem_ok and registrar_busca_com_topico:
+                            registrar_busca_com_topico(
+                                engine,
+                                usuario_logado_id,
+                                hist_pergunta_original,
+                                resposta_cache or "",
+                                "ASSISTENTE",
+                            )
+                        else:
+                            with engine.begin() as conn_log:
+                                conn_log.execute(
+                                    text(
+                                        "INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) VALUES (:u, :p, :r, 0, 0, 0)"
+                                    ),
+                                    {"u": usuario_logado_id, "p": hist_pergunta_original, "r": resposta_cache},
+                                )
+                    except Exception as e:
+                        st.error(f"Erro ranking: {e}")
                 
                 if not tem_no_cache:
                     contextos_db = []
@@ -341,22 +402,34 @@ with aba_gemini:
                             if t_total is not None:
                                 st.caption(f"🔋 Tokens: {t_total}")
                             try:
-                                with engine.begin() as conn_log:
-                                    conn_log.execute(
-                                        text(
-                                            "INSERT INTO historico_buscas_psy "
-                                            "(usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) "
-                                            "VALUES (:u, :p, :r, :tp, :tr, :tt)"
-                                        ),
-                                        {
-                                            "u": usuario_logado_id,
-                                            "p": pergunta.strip(),
-                                            "r": resposta_ia.text,
-                                            "tp": t_prompt or 0,
-                                            "tr": t_resp or 0,
-                                            "tt": t_total or 0,
-                                        },
+                                if _busca_sem_ok and registrar_busca_com_topico:
+                                    registrar_busca_com_topico(
+                                        engine,
+                                        usuario_logado_id,
+                                        pergunta.strip(),
+                                        resposta_ia.text or "",
+                                        "ASSISTENTE",
+                                        t_prompt or 0,
+                                        t_resp or 0,
+                                        t_total or 0,
                                     )
+                                else:
+                                    with engine.begin() as conn_log:
+                                        conn_log.execute(
+                                            text(
+                                                "INSERT INTO historico_buscas_psy "
+                                                "(usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) "
+                                                "VALUES (:u, :p, :r, :tp, :tr, :tt)"
+                                            ),
+                                            {
+                                                "u": usuario_logado_id,
+                                                "p": pergunta.strip(),
+                                                "r": resposta_ia.text,
+                                                "tp": t_prompt or 0,
+                                                "tr": t_resp or 0,
+                                                "tt": t_total or 0,
+                                            },
+                                        )
                             except Exception as db_e:
                                 st.error(f"Erro BD: {db_e}")
                         except Exception as e:
@@ -385,19 +458,27 @@ with aba_acervo:
         df_wikis, erro_bd = carregar_wikis()
 
         # UX: Ranking escondido em expander para libertar espaço vertical (Clean Design)
-        with st.expander("🏆 Ver os assuntos mais pesquisados nas Wikis"):
-            with engine.connect() as conn:
-                query_rank_wiki = text("""
-                    SELECT REPLACE(INITCAP(lower(pergunta)), '[wiki] ', '') as "Assunto", COUNT(id) as "Volume"
-                    FROM historico_buscas_psy
-                    WHERE lower(pergunta) LIKE '[wiki] %'
-                    GROUP BY lower(pergunta)
-                    ORDER BY "Volume" DESC LIMIT 5
-                """)
-                df_rank_wiki = pd.read_sql(query_rank_wiki, conn)
-            
+        with st.expander("🏆 Ver os assuntos mais pesquisados nas Wikis (agrupado por tema)"):
+            if _busca_sem_ok and ranking_topicos_agregado:
+                try:
+                    rw = ranking_topicos_agregado(engine, "WIKI", 8)
+                    df_rank_wiki = pd.DataFrame(rw, columns=["Assunto (tema)", "Buscas"]) if rw else pd.DataFrame()
+                except Exception:
+                    df_rank_wiki = pd.DataFrame()
+            else:
+                df_rank_wiki = pd.DataFrame()
+            if df_rank_wiki.empty:
+                with engine.connect() as conn:
+                    query_rank_wiki = text("""
+                        SELECT REPLACE(INITCAP(lower(pergunta)), '[wiki] ', '') as "Assunto", COUNT(id) as "Volume"
+                        FROM historico_buscas_psy
+                        WHERE lower(pergunta) LIKE '[wiki] %'
+                        GROUP BY lower(pergunta)
+                        ORDER BY "Volume" DESC LIMIT 5
+                    """)
+                    df_rank_wiki = pd.read_sql(query_rank_wiki, conn)
             if not df_rank_wiki.empty:
-                st.dataframe(df_rank_wiki, width='stretch', hide_index=True)
+                st.dataframe(df_rank_wiki, width="stretch", hide_index=True)
             else:
                 st.caption("Ainda não há dados suficientes para o ranking de Wikis.")
 
@@ -422,11 +503,23 @@ with aba_acervo:
             # Lógica Intacta
             if btn_buscar_wiki and termo_busca_wiki.strip():
                 try:
-                    with engine.begin() as conn_log:
-                        conn_log.execute(text("""
-                            INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens)
-                            VALUES (:u, :p, 'Busca Inteligente Wiki', 0, 0, 0)
-                        """), {"u": usuario_logado_id, "p": f"[WIKI] {termo_busca_wiki.strip()}"})
+                    if _busca_sem_ok and registrar_busca_com_topico:
+                        registrar_busca_com_topico(
+                            engine,
+                            usuario_logado_id,
+                            f"[WIKI] {termo_busca_wiki.strip()}",
+                            "Busca Inteligente Wiki",
+                            "WIKI",
+                        )
+                    else:
+                        with engine.begin() as conn_log:
+                            conn_log.execute(
+                                text("""
+                                INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens)
+                                VALUES (:u, :p, 'Busca Inteligente Wiki', 0, 0, 0)
+                            """),
+                                {"u": usuario_logado_id, "p": f"[WIKI] {termo_busca_wiki.strip()}"},
+                            )
                 except Exception as e:
                     st.error(f"Erro ao registrar métrica de busca: {e}")
 
@@ -485,19 +578,27 @@ with aba_acervo:
         df_manuais, erro_bd = carregar_manuais()
 
         # UX: Ranking em Expander
-        with st.expander("🏆 Ver os assuntos mais pesquisados nos Manuais"):
-            with engine.connect() as conn:
-                query_rank_man = text("""
-                    SELECT REPLACE(INITCAP(lower(pergunta)), '[manual] ', '') as "Assunto", COUNT(id) as "Volume"
-                    FROM historico_buscas_psy
-                    WHERE lower(pergunta) LIKE '[manual] %'
-                    GROUP BY lower(pergunta)
-                    ORDER BY "Volume" DESC LIMIT 5
-                """)
-                df_rank_man = pd.read_sql(query_rank_man, conn)
-            
+        with st.expander("🏆 Assuntos mais buscados nos Manuais (tema único)"):
+            if _busca_sem_ok and ranking_topicos_agregado:
+                try:
+                    rm = ranking_topicos_agregado(engine, "MANUAL", 8)
+                    df_rank_man = pd.DataFrame(rm, columns=["Assunto (tema)", "Buscas"]) if rm else pd.DataFrame()
+                except Exception:
+                    df_rank_man = pd.DataFrame()
+            else:
+                df_rank_man = pd.DataFrame()
+            if df_rank_man.empty:
+                with engine.connect() as conn:
+                    query_rank_man = text("""
+                        SELECT REPLACE(INITCAP(lower(pergunta)), '[manual] ', '') as "Assunto", COUNT(id) as "Volume"
+                        FROM historico_buscas_psy
+                        WHERE lower(pergunta) LIKE '[manual] %'
+                        GROUP BY lower(pergunta)
+                        ORDER BY "Volume" DESC LIMIT 5
+                    """)
+                    df_rank_man = pd.read_sql(query_rank_man, conn)
             if not df_rank_man.empty:
-                st.dataframe(df_rank_man, width='stretch', hide_index=True)
+                st.dataframe(df_rank_man, width="stretch", hide_index=True)
             else:
                 st.caption("Ainda não há dados suficientes para o ranking de Manuais.")
 
@@ -522,11 +623,23 @@ with aba_acervo:
             # Lógica Intacta
             if btn_buscar_manual and termo_busca_manual.strip():
                 try:
-                    with engine.begin() as conn_log:
-                        conn_log.execute(text("""
-                            INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens)
-                            VALUES (:u, :p, 'Busca Inteligente Manual', 0, 0, 0)
-                        """), {"u": usuario_logado_id, "p": f"[MANUAL] {termo_busca_manual.strip()}"})
+                    if _busca_sem_ok and registrar_busca_com_topico:
+                        registrar_busca_com_topico(
+                            engine,
+                            usuario_logado_id,
+                            f"[MANUAL] {termo_busca_manual.strip()}",
+                            "Busca Inteligente Manual",
+                            "MANUAL",
+                        )
+                    else:
+                        with engine.begin() as conn_log:
+                            conn_log.execute(
+                                text("""
+                                INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens)
+                                VALUES (:u, :p, 'Busca Inteligente Manual', 0, 0, 0)
+                            """),
+                                {"u": usuario_logado_id, "p": f"[MANUAL] {termo_busca_manual.strip()}"},
+                            )
                 except Exception as e:
                     st.error(f"Erro ao registrar métrica de busca: {e}")
 
@@ -598,25 +711,76 @@ with aba_acervo:
 # ==========================================
 with aba_arquivo:
     st.subheader("📖 Histórico e Ranking da Equipe")
+    st.caption(
+        "Histórico agrupa por **tema semântico** (mesma dúvida em palavras diferentes = um bloco). "
+        "Ranking mostra **o que mais gera dúvida** na equipe, sem repetir variações do mesmo assunto."
+    )
     col_hist, col_rank = st.columns([2, 1])
-    
+
     with col_hist:
-        st.markdown("#### 🔍 Últimas Perguntas buscadas")
-        with engine.connect() as conn:
-            query_recentes = text("SELECT pergunta, resposta_ia, nome, data_busca FROM (SELECT DISTINCT ON (lower(h.pergunta)) h.pergunta, h.resposta_ia, u.nome, to_char(h.criado_em, 'DD/MM/YYYY HH24:MI') as data_busca, h.criado_em FROM historico_buscas_psy h LEFT JOIN usuarios u ON h.usuario_id = u.id ORDER BY lower(h.pergunta), h.criado_em DESC) sub ORDER BY criado_em DESC LIMIT 15")
-            df_recentes = pd.read_sql(query_recentes, conn)
+        st.markdown("#### 🔍 Últimas buscas por tema (quem / quando)")
+        df_recentes = pd.DataFrame()
+        if _busca_sem_ok and historico_por_topico_recente:
+            try:
+                recentes = historico_por_topico_recente(engine, 25)
+                df_recentes = pd.DataFrame(recentes) if recentes else pd.DataFrame()
+            except Exception:
+                df_recentes = pd.DataFrame()
+        if df_recentes.empty:
+            with engine.connect() as conn:
+                query_recentes = text(
+                    """
+                    SELECT pergunta, resposta_ia, nome, data_busca FROM (
+                        SELECT DISTINCT ON (lower(h.pergunta))
+                            h.pergunta, h.resposta_ia, u.nome,
+                            to_char(h.criado_em, 'DD/MM/YYYY HH24:MI') as data_busca, h.criado_em
+                        FROM historico_buscas_psy h
+                        LEFT JOIN usuarios u ON h.usuario_id = u.id
+                        ORDER BY lower(h.pergunta), h.criado_em DESC
+                    ) sub ORDER BY criado_em DESC LIMIT 15
+                    """
+                )
+                df_recentes = pd.read_sql(query_recentes, conn)
         if not df_recentes.empty:
             for idx, row in df_recentes.iterrows():
-                nome_autor = row['nome'] if row['nome'] else 'Membro da Equipe'
-                with st.expander(f"👤 {nome_autor} buscou: {row['pergunta']} ({row['data_busca']})"): st.markdown(row['resposta_ia'])
-        else: st.info("Ainda não há registros de buscas ao Psy.")
-            
+                nome_autor = row.get("nome") or row.get("Nome") or "Membro da Equipe"
+                pergunta = row.get("pergunta") or row.get("Pergunta") or ""
+                quando = row.get("quando") or row.get("data_busca") or ""
+                assunto = row.get("assunto") or pergunta[:80]
+                resposta = row.get("resposta_ia") or row.get("Resposta") or ""
+                titulo = f"👤 {nome_autor} — {quando} — **{str(assunto)[:70]}…**"
+                with st.expander(titulo):
+                    st.caption(f"Pergunta registrada: {pergunta}")
+                    st.markdown(resposta)
+        else:
+            st.info("Ainda não há registros de buscas ao Psy.")
+
     with col_rank:
-        st.markdown("#### 🏆 Top 10 Assuntos")
-        with engine.connect() as conn:
-            query_ranking_buscas = text("SELECT INITCAP(lower(pergunta)) as \"Assunto\", COUNT(id) as \"Volume\" FROM historico_buscas_psy GROUP BY lower(pergunta) ORDER BY \"Volume\" DESC LIMIT 10")
-            df_ranking_buscas = pd.read_sql(query_ranking_buscas, conn)
-        if not df_ranking_buscas.empty: st.dataframe(df_ranking_buscas, width='stretch', hide_index=True)
+        st.markdown("#### 🏆 Top assuntos (semântico)")
+        df_ranking_buscas = pd.DataFrame()
+        if _busca_sem_ok and ranking_topicos_agregado:
+            try:
+                # Assistente + Wiki + Manual no mesmo ranking global (soma por tópico já está em busca_topicos por origem)
+                # Unimos os três origens num único "volume" por label seria duplicado; melhor: top ASSISTENTE + mesclar
+                ra = ranking_topicos_agregado(engine, "ASSISTENTE", 6)
+                rw = ranking_topicos_agregado(engine, "WIKI", 4)
+                rm = ranking_topicos_agregado(engine, "MANUAL", 4)
+                merged = {}
+                for label, n in ra + rw + rm:
+                    merged[label] = merged.get(label, 0) + n
+                top = sorted(merged.items(), key=lambda x: -x[1])[:12]
+                df_ranking_buscas = pd.DataFrame(top, columns=["Assunto (tema)", "Total buscas"])
+            except Exception:
+                df_ranking_buscas = pd.DataFrame()
+        if df_ranking_buscas.empty:
+            with engine.connect() as conn:
+                query_ranking_buscas = text(
+                    'SELECT INITCAP(lower(pergunta)) as "Assunto", COUNT(id) as "Volume" '
+                    "FROM historico_buscas_psy GROUP BY lower(pergunta) ORDER BY \"Volume\" DESC LIMIT 10"
+                )
+                df_ranking_buscas = pd.read_sql(query_ranking_buscas, conn)
+        if not df_ranking_buscas.empty:
+            st.dataframe(df_ranking_buscas, width="stretch", hide_index=True)
 
 
 # # ==========================================
