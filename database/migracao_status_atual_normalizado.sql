@@ -1,0 +1,3 @@
+-- Opcional: gravar status_atual sempre em minúsculas no banco (alinhado ao Helpdesk).
+-- O Dashboard já normaliza na leitura; execute só se quiser persistir um único casing.
+-- UPDATE chamados_tecnuv SET status_atual = LOWER(TRIM(status_atual)) WHERE status_atual IS NOT NULL;

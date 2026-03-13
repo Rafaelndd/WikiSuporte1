@@ -5,6 +5,7 @@ import plotly.express as px
 import re
 import os
 import logging
+import unicodedata
 from dotenv import load_dotenv
 from sqlalchemy import text
 from typing import Tuple, Optional
@@ -80,7 +81,8 @@ except ImportError:
 # ==========================================
 # 2. MOTORES DE BUSCA E PROCESSAMENTO
 # ==========================================
-@st.cache_data(ttl=300)
+# TTL curto: o bot grava no Postgres em tempo real; cache longo faz parecer que "não salvou"
+@st.cache_data(ttl=45)
 def carregar_dados_tecnuv():
     engine = get_connection()
     try:
@@ -120,12 +122,15 @@ def carregar_dados_tecnuv():
             # categoria_ia (classificação semântica) se existir
             if 'categoria_ia' not in df.columns:
                 df['categoria_ia'] = None
+            st_col = df.get("status_atual", pd.Series("", index=df.index)).astype(str)
+            df["status_norm"] = st_col.map(_normalize_status_key)
+            df["status_canonico"] = st_col.map(status_para_canonico)
         return df
     except Exception as e:
         st.error(f"Erro ao carregar chamados: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=45)
 def carregar_interacoes():
     engine = get_connection()
     try:
@@ -141,7 +146,7 @@ def carregar_interacoes():
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=45)
 def carregar_releases_chamados():
     """
     Quantas vezes o chamado apareceu em releases (release_itens ou ciclos_homologacao).
@@ -171,6 +176,81 @@ def carregar_releases_chamados():
             )
         except Exception:
             return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
+
+# --- Status Tecnuv (amostragem alinhada ao Helpdesk; match case-insensitive / sem acento) ---
+STATUS_DASHBOARD_LABELS = [
+    "Em aberto",
+    "Encerrado",
+    "Cancelado",
+    "Em analise",
+    "Pendente representante",
+    "Pendente tecnuv",
+    "Em Desenvolvimento",
+    "Em Fila de Desenvolvimento",
+    "Em Andamento",
+    "Aguardando Liberacao de Versao",
+    "Aguardando Avaliacao",
+    "Enviado Para Qualidade",
+    "Retorno Qualidade",
+    "Outros",
+]
+STATUS_COLOR_MAP = {
+    "Em aberto": "#3498db",
+    "Encerrado": "#27ae60",
+    "Cancelado": "#7f8c8d",
+    "Em analise": "#f39c12",
+    "Pendente representante": "#e74c3c",
+    "Pendente tecnuv": "#e67e22",
+    "Em Desenvolvimento": "#8e44ad",
+    "Em Fila de Desenvolvimento": "#6c3483",
+    "Em Andamento": "#1abc9c",
+    "Aguardando Liberacao de Versao": "#2980b9",
+    "Aguardando Avaliacao": "#d35400",
+    "Enviado Para Qualidade": "#16a085",
+    "Retorno Qualidade": "#c0392b",
+    "Outros": "#95a5a6",
+}
+# Ordem de match: frases mais específicas primeiro (substring no texto normalizado)
+_STATUS_MATCH_RULES = [
+    ("pendente representante", "Pendente representante"),
+    ("pendente tecnuv", "Pendente tecnuv"),
+    ("pendente tecnv", "Pendente tecnuv"),
+    ("fila de desenvolvimento", "Em Fila de Desenvolvimento"),
+    ("em desenvolvimento", "Em Desenvolvimento"),
+    ("aguardando liberacao", "Aguardando Liberacao de Versao"),
+    ("aguardando liberação", "Aguardando Liberacao de Versao"),
+    ("aguardando avaliacao", "Aguardando Avaliacao"),
+    ("aguardando avaliação", "Aguardando Avaliacao"),
+    ("enviado para qualidade", "Enviado Para Qualidade"),
+    ("retorno qualidade", "Retorno Qualidade"),
+    ("em analise", "Em analise"),
+    ("em análise", "Em analise"),
+    ("em andamento", "Em Andamento"),
+    ("encerrado", "Encerrado"),
+    ("cancelado", "Cancelado"),
+    ("em aberto", "Em aberto"),
+    ("aberto", "Em aberto"),
+]
+
+
+def _normalize_status_key(s) -> str:
+    if s is None or (isinstance(s, float) and pd.isna(s)):
+        return ""
+    t = unicodedata.normalize("NFD", str(s).strip().lower())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def status_para_canonico(status_atual) -> str:
+    """Uma etiqueta estável para gráficos/filtro, a partir de qualquer grafia do banco."""
+    n = _normalize_status_key(status_atual)
+    if not n:
+        return "Outros"
+    for needle, label in _STATUS_MATCH_RULES:
+        if needle in n:
+            return label
+    return "Outros"
+
 
 def limpar_html(html_text):
     """Compatível com código antigo; preferir modules.html_texto.html_para_exibicao."""
@@ -346,9 +426,10 @@ st.title("🖥️ Dashboard Chamados")
 st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, reincidências e desempenho da desenvolvedora.")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
-        "Use **Filtros** para período, analista e status (abertos x encerrados). "
-        "Cada **aba** mostra um recorte: fila, aging, versões (com **Categoria IA** e filtro), performance e homologação. "
-        "Clique em **Atualizar** nos filtros para recarregar dados do banco."
+        "**Período padrão:** 12 meses. **Status padrão:** Pendente representante (multiselect). "
+        "Status são unificados por texto (maiúsc/minúsc/acento). Cada **aba** traz fila, aging, versões, etc.\n\n"
+        "**Após o bot sincronizar:** os dados vêm do Postgres, mas esta página usa **cache ~45s**. "
+        "Se não vir mudança na hora, clique **🔄 Atualizar** nos filtros (limpa cache)."
     )
 
 df_raw = carregar_dados_tecnuv()
@@ -366,40 +447,42 @@ with st.expander("⚙️ Filtros: ", expanded=True):
     col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
     
     with col_f1:
-        # Período padrão: últimos 90 dias (para evitar carregar todo o histórico de uma vez)
-        if not df_raw['data_abertura'].isna().all():
-            data_max = df_raw['data_abertura'].max().date()
-            data_min = df_raw['data_abertura'].min().date()
+        # Período padrão: últimos 12 meses
+        if not df_raw["data_abertura"].isna().all():
+            data_max = df_raw["data_abertura"].max().date()
+            data_min = df_raw["data_abertura"].min().date()
         else:
             data_max = datetime.now().date()
-            data_min = (datetime.now() - timedelta(days=90)).date()
+            data_min = (datetime.now() - timedelta(days=365)).date()
 
-        default_inicio = max(data_min, data_max - timedelta(days=90))
+        default_inicio = max(data_min, data_max - timedelta(days=365))
 
         datas_selecionadas = st.date_input(
             "📅 Período (Abertura):",
             value=(default_inicio, data_max),
             max_value=datetime.now().date() + timedelta(days=1),
+            help="Padrão: 12 meses até a data mais recente no banco.",
         )
-        
+
     with col_f2:
-        lista_analistas = ["Todos"] + sorted([a for a in df_raw['usuario_epsy'].unique() if a and str(a).strip() != "Não Informado"])
+        lista_analistas = ["Todos"] + sorted(
+            [a for a in df_raw["usuario_epsy"].unique() if a and str(a).strip() != "Não Informado"]
+        )
         analista_filtro = st.selectbox("👤 Analista EPSY:", options=lista_analistas, help="Lista com todos analistas")
-        
+
     with col_f3:
-        # Removido "Todos" para garantir que encerrados/cancelados só apareçam quando filtrados explicitamente
-        lista_status = [
-            "Chamados Ativos (Abertos)",
-            "Encerrados",
-            "Cancelados",
-            "Encerrados ou Cancelados",
-        ]
-        status_filtro = st.selectbox("📌 Status do Chamado:", options=lista_status, index=0)
+        opcoes_status = [s for s in STATUS_DASHBOARD_LABELS if s != "Outros"]
+        status_multiselect = st.multiselect(
+            "📌 Status (canônico)",
+            options=opcoes_status,
+            default=["Pendente representante"],
+            help="Só estes status entram na amostragem. Vazio = todos. Padrão: Pendente representante.",
+        )
         
     with col_f4:
         st.write("")
         st.write("")
-        if st.button("🔄 Atualizar", width='stretch'):
+        if st.button("🔄 Atualizar", width='stretch', help="Limpa cache e relê o banco (use após o bot sincronizar)"):
             st.cache_data.clear()
             st.rerun()
 
@@ -412,17 +495,10 @@ if len(datas_selecionadas) == 2:
     df = df[(df['data_abertura'] >= pd.to_datetime(d_inicio)) & (df['data_abertura'] < d_fim)]
 
 if analista_filtro != "Todos":
-    df = df[df['usuario_epsy'] == analista_filtro]
+    df = df[df["usuario_epsy"] == analista_filtro]
 
-# Lógica de status: por padrão, apenas chamados ativos (abertos)
-if status_filtro == "Chamados Ativos (Abertos)":
-    df = df[~df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)]
-elif status_filtro == "Encerrados":
-    df = df[df['status_atual'].str.contains("Encerrado", case=False, na=False)]
-elif status_filtro == "Cancelados":
-    df = df[df['status_atual'].str.contains("Cancelado", case=False, na=False)]
-elif status_filtro == "Encerrados ou Cancelados":
-    df = df[df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)]
+if "status_canonico" in df.columns and status_multiselect:
+    df = df[df["status_canonico"].isin(status_multiselect)]
 
 if df.empty:
     st.info("Nenhum chamado encontrado com os filtros aplicados. Revise o período ou ajuste os critérios para refinar a busca.")
@@ -435,7 +511,10 @@ agora = pd.to_datetime(datetime.now())
 
 # 1. Envelhecimento (Aging)
 df['dias_aberto'] = (agora - df['data_abertura']).dt.days
-df['is_aberto'] = ~df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)
+if "status_canonico" in df.columns:
+    df["is_aberto"] = ~df["status_canonico"].isin(["Encerrado", "Cancelado"])
+else:
+    df["is_aberto"] = ~df["status_atual"].str.contains("Encerrado|Cancelado", case=False, na=False)
 # Pendente representante (situação no Helpdesk) — contagem de dias para cobrança/notificações
 _sit = df.get("situacao", pd.Series("", index=df.index)).astype(str).str.lower()
 df["pendente_representante"] = _sit.str.contains("pendente", na=False) & _sit.str.contains("representante", na=False)
@@ -534,10 +613,21 @@ with aba1:
     
     g1, g2 = st.columns(2)
     with g1:
-        st.subheader("Fila Atual por Status")
-        fila = df['status_atual'].value_counts().reset_index()
-        fila.columns = ['Status', 'Volume']
-        st.plotly_chart(px.bar(fila, x='Volume', y='Status', orientation='h', color='Status'), width='stretch')
+        st.subheader("Fila por status (canônico)")
+        col_fila = "status_canonico" if "status_canonico" in df.columns else "status_atual"
+        fila = df[col_fila].value_counts().reset_index()
+        fila.columns = ["Status", "Volume"]
+        cores = {k: STATUS_COLOR_MAP.get(k, "#95a5a6") for k in fila["Status"].unique()}
+        fig_fila = px.bar(
+            fila,
+            x="Volume",
+            y="Status",
+            orientation="h",
+            color="Status",
+            color_discrete_map=cores,
+        )
+        fig_fila.update_layout(showlegend=False, height=min(420, 80 + len(fila) * 28))
+        st.plotly_chart(fig_fila, width="stretch")
         
     with g2:
         st.subheader("Classificação de Reincidência Pós-Liberação")

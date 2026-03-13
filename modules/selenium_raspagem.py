@@ -6,6 +6,14 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(_stream, "reconfigure"):
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -44,11 +52,14 @@ def _status_encerrado_cancelado(status_txt: str) -> bool:
     return s in ("encerrado", "cancelado") or "encerrado" in s or "cancelado" in s
 
 
-# Configuração de Logs
+# Logs: arquivo UTF-8; consola Windows (cp1252) sem emoji para evitar UnicodeEncodeError
+_log_file = logging.FileHandler("oraculo_engine.log", encoding="utf-8")
+_log_console = logging.StreamHandler()
+_log_console.setLevel(logging.INFO)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.FileHandler("oraculo_engine.log"), logging.StreamHandler()]
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[_log_file, _log_console],
 )
 
 load_dotenv()
@@ -428,8 +439,11 @@ class OraculoBot:
                     setor=meta["setor"], situacao=meta["situacao"],
                     prioridade=meta["prioridade"], data_abertura=dt_abertura
                 )
+                if meta.get("data_alt_web"):
+                    novo.ultima_alteracao_tecnuv = meta["data_alt_web"]
                 session.add(novo)
                 session.commit()
+                logging.info(f"[DB] Chamado {nr} inserido na fila (commit).")
 
                 # Tenta deep scrape — se não tiver permissão, pula
                 self.driver.get(meta["link"])
@@ -480,8 +494,20 @@ class OraculoBot:
                     motivo = "nova alteração detectada"
 
                 if precisa_raspar:
+                    # Persistir já o que veio da lista (status, datas, setor…) antes do deep scrape
+                    if meta.get("data_alt_web"):
+                        chamado_db.ultima_alteracao_tecnuv = meta["data_alt_web"]
+                    for attr, key in (
+                        ("setor", "setor"),
+                        ("situacao", "situacao"),
+                        ("prioridade", "prioridade"),
+                        ("ticket_vinculado", "ticket_vinculado"),
+                    ):
+                        if meta.get(key):
+                            setattr(chamado_db, attr, meta[key])
                     logging.info(f"[DIFERENÇA] Chamado {nr} - Motivo: {motivo}. Buscando detalhes...")
                     session.commit()
+                    logging.info(f"[DB] Chamado {nr} lista/status gravados (commit). Deep scrape a seguir.")
                     self.driver.get(meta["link"])
                     self.fechar_modal_se_existir()
 
@@ -524,14 +550,14 @@ class OraculoBot:
 
             # --- Relatório Final ---
             logging.info("====== RELATÓRIO DE SINCRONIZAÇÃO ======")
-            logging.info(f"✅ Chamados processados com sucesso: {sucesso_count}")
-            logging.info(f"🆕 Novos inseridos: {len(novos_no_helpdesk)}")
-            logging.info(f"🔍 Investigados (sumiram): {len(sumiram_do_helpdesk)}")
+            logging.info(f"[OK] Chamados processados com sucesso: {sucesso_count}")
+            logging.info(f"[NOVO] Inseridos neste ciclo: {len(novos_no_helpdesk)}")
+            logging.info(f"[BUSCA] Investigados (sumiram da fila): {len(sumiram_do_helpdesk)}")
             if falhas_lista:
-                logging.warning(f"❌ Chamados com falha de leitura: {falhas_lista}")
+                logging.warning(f"[FALHA] Chamados com falha de leitura: {falhas_lista}")
             if self.chamados_sem_permissao:
                 logging.warning(
-                    f"🔒 Chamados SEM PERMISSÃO ({len(self.chamados_sem_permissao)}): "
+                    f"[SEM_PERMISSAO] Chamados ({len(self.chamados_sem_permissao)}): "
                     f"{self.chamados_sem_permissao}"
                 )
             logging.info("========================================")
@@ -680,10 +706,7 @@ class OraculoBot:
 
             chamado = session.query(ChamadoTecnuv).filter_by(nr_chamado=nr_chamado).first()
             if chamado:
-                if hasattr(chamado, "nome_cliente"):
-                    chamado.nome_cliente = get_val("Cliente:")
-                elif hasattr(chamado, "cliente_nome"):
-                    chamado.cliente_nome = get_val("Cliente:")
+                chamado.nome_cliente = get_val("Cliente:")
                 chamado.atendente_tecnuv = get_val("Atendente:")
                 chamado.usuario_epsy = get_val("Usuário:")
                 chamado.versao_sistema = versao
@@ -750,7 +773,7 @@ class OraculoBot:
             self._processar_liberacoes(session, interacoes, chamado)
 
             session.commit()
-            logging.info(f"[OK] Chamado {nr_chamado} sincronizado com sucesso.")
+            logging.info(f"[OK] Chamado {nr_chamado} sincronizado com sucesso (commit no banco).")
             # Classificação semântica (Erro / Melhoria / Adequação Fiscal) via pgvector
             try:
                 from services.classificacao_chamados import classificar_chamado
@@ -899,8 +922,8 @@ class OraculoBot:
         try:
             chamados_falhos = session.query(ChamadoTecnuv).filter(
                 (
-                    (ChamadoTecnuv.cliente_nome == None) |
-                    (ChamadoTecnuv.cliente_nome == "") |
+                    (ChamadoTecnuv.nome_cliente == None) |
+                    (ChamadoTecnuv.nome_cliente == "") |
                     (ChamadoTecnuv.versao_sistema == None)
                 ),
                 ChamadoTecnuv.status_atual.notin_(["Encerrado", "Cancelado"])
@@ -945,12 +968,12 @@ class OraculoBot:
                             falhas_lista.append(chamado.nr_chamado)
 
             logging.info("====== RELATÓRIO DE AUTO-CURA (FASE 3) ======")
-            logging.info(f"✅ Chamados recuperados: {sucesso_count}")
+            logging.info(f"[OK] Chamados recuperados (auto-cura): {sucesso_count}")
             if falhas_lista:
-                logging.warning(f"❌ Chamados com falha: {falhas_lista}")
+                logging.warning(f"[FALHA] Chamados com falha: {falhas_lista}")
             if self.chamados_sem_permissao:
                 logging.warning(
-                    f"🔒 Total sem permissão acumulado: {len(self.chamados_sem_permissao)} - "
+                    f"[SEM_PERMISSAO] Total acumulado: {len(self.chamados_sem_permissao)} - "
                     f"IDs: {self.chamados_sem_permissao}"
                 )
             logging.info("=============================================")
@@ -961,8 +984,8 @@ class OraculoBot:
         """Encerra o driver e exibe relatório final de permissões."""
         if self.chamados_sem_permissao:
             logging.info(
-                f"📋 RELATÓRIO FINAL - Chamados sem permissão neste ciclo "
-                f"({len(self.chamados_sem_permissao)}): {self.chamados_sem_permissao}"
+                f"[REL] Sem permissao neste ciclo ({len(self.chamados_sem_permissao)}): "
+                f"{self.chamados_sem_permissao}"
             )
         self.driver.quit()
         logging.info("Robô finalizado e recursos liberados.")
@@ -1006,7 +1029,7 @@ def iniciar_psy_assistente_wikisuporte_bot():
     Mantém o robô ativo em segundo plano.
     Reage a tarefa_solicitada == 'chamados' e ao ciclo automático.
     """
-    logging.info("🤖 PSY Assistente WikiSuporte Iniciado. Aguardando comandos...")
+    logging.info("[BOT] PSY Assistente WikiSuporte iniciado. Aguardando comandos...")
 
     while True:
         try:

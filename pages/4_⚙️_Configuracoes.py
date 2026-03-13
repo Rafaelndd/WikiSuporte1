@@ -148,6 +148,11 @@ with aba_robo:
     # Botões individuais de raspagem
     st.markdown("#### Raspagens Individuais")
     st.caption("Clique para solicitar. O motor (motor_extracao.py) precisa estar rodando em outro terminal.")
+    st.info(
+        "**Dashboard Chamados** usa cache (~45s) ao ler `chamados_tecnuv`. O bot **grava no Postgres** ao sincronizar; "
+        "se a tela não mudou na hora, abra o Dashboard e clique **🔄 Atualizar** (limpa cache). "
+        "Nos logs: `[DB] … gravados (commit)` confirma escrita antes do deep scrape."
+    )
 
     raspagens_ui = RASPAGENS if BOT_CONTROL_DISPONIVEL else {
         "chamados": {"label": "Chamados Tecnuv", "icon": "📋"},

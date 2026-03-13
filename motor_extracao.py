@@ -1,7 +1,17 @@
 import time
 import os
 import re
+import sys
 import logging
+
+# Windows: evita UnicodeEncodeError no console ao logar/imprimir emoji
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(_stream, "reconfigure"):
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 
 from bs4 import BeautifulSoup
