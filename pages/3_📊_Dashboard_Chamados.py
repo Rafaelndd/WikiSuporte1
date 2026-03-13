@@ -177,12 +177,13 @@ def carregar_releases_chamados():
         except Exception:
             return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
 
-# --- Status Tecnuv (amostragem alinhada ao Helpdesk; match case-insensitive / sem acento) ---
+# --- Status Tecnuv: só estes no filtro; cores alinhadas ao Helpdesk; match 100% via texto normalizado (minúsculas, sem acento) ---
 STATUS_DASHBOARD_LABELS = [
     "Em aberto",
     "Encerrado",
     "Cancelado",
     "Em analise",
+    "Analisado/Arquivado",
     "Pendente representante",
     "Pendente tecnuv",
     "Em Desenvolvimento",
@@ -195,26 +196,31 @@ STATUS_DASHBOARD_LABELS = [
     "Outros",
 ]
 STATUS_COLOR_MAP = {
-    "Em aberto": "#3498db",
-    "Encerrado": "#27ae60",
-    "Cancelado": "#7f8c8d",
-    "Em analise": "#f39c12",
-    "Pendente representante": "#e74c3c",
-    "Pendente tecnuv": "#e67e22",
-    "Em Desenvolvimento": "#8e44ad",
-    "Em Fila de Desenvolvimento": "#6c3483",
-    "Em Andamento": "#1abc9c",
-    "Aguardando Liberacao de Versao": "#2980b9",
-    "Aguardando Avaliacao": "#d35400",
-    "Enviado Para Qualidade": "#16a085",
+    "Em aberto": "#0000FF",  # blue
+    "Encerrado": "#008000",  # green
+    "Cancelado": "#808080",  # gray
+    "Em analise": "#000000",  # black
+    "Analisado/Arquivado": "#5d6d7e",
+    "Pendente representante": "#FF0000",  # RED
+    "Pendente tecnuv": "#E65100",
+    "Em Desenvolvimento": "#6a1b9a",
+    "Em Fila de Desenvolvimento": "#800080",  # purple
+    "Em Andamento": "#1565c0",
+    "Aguardando Liberacao de Versao": "#1abab1",
+    "Aguardando Avaliacao": "#b8860b",
+    "Enviado Para Qualidade": "#0d7377",
     "Retorno Qualidade": "#c0392b",
     "Outros": "#95a5a6",
 }
-# Ordem de match: frases mais específicas primeiro (substring no texto normalizado)
+# Ordem: mais específico primeiro (status_atual do banco -> chave normalizada -> rótulo canônico)
 _STATUS_MATCH_RULES = [
     ("pendente representante", "Pendente representante"),
     ("pendente tecnuv", "Pendente tecnuv"),
     ("pendente tecnv", "Pendente tecnuv"),
+    ("analisado/arquivado", "Analisado/Arquivado"),
+    ("analisado arquivado", "Analisado/Arquivado"),
+    ("arquivado", "Analisado/Arquivado"),
+    ("analisado", "Analisado/Arquivado"),
     ("fila de desenvolvimento", "Em Fila de Desenvolvimento"),
     ("em desenvolvimento", "Em Desenvolvimento"),
     ("aguardando liberacao", "Aguardando Liberacao de Versao"),
@@ -250,6 +256,11 @@ def status_para_canonico(status_atual) -> str:
         if needle in n:
             return label
     return "Outros"
+
+
+def _styler_status_col(series):
+    """Cores por status canônico (pandas Styler)."""
+    return [f"color: {STATUS_COLOR_MAP.get(str(v), '#333333')}; font-weight: 600" for v in series]
 
 
 def limpar_html(html_text):
@@ -426,8 +437,8 @@ st.title("🖥️ Dashboard Chamados")
 st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, reincidências e desempenho da desenvolvedora.")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
-        "**Período padrão:** 12 meses. **Status padrão:** Pendente representante (multiselect). "
-        "Status são unificados por texto (maiúsc/minúsc/acento). Cada **aba** traz fila, aging, versões, etc.\n\n"
+        "**Período padrão:** 12 meses até hoje. **Status padrão:** Pendente representante. "
+        "`status_atual` do banco é normalizado (minúsculas, sem acento) para bater com a lista e cores.\n\n"
         "**Após o bot sincronizar:** os dados vêm do Postgres, mas esta página usa **cache ~45s**. "
         "Se não vir mudança na hora, clique **🔄 Atualizar** nos filtros (limpa cache)."
     )
@@ -443,25 +454,24 @@ if df_raw.empty:
 # ==========================================
 # 4. PAINEL DE CONTROLO E FILTROS (NA TELA PRINCIPAL)
 # ==========================================
+OPCOES_STATUS_FILTRO = [s for s in STATUS_DASHBOARD_LABELS if s != "Outros"]
+
 with st.expander("⚙️ Filtros: ", expanded=True):
     col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
     
     with col_f1:
-        # Período padrão: últimos 12 meses
-        if not df_raw["data_abertura"].isna().all():
-            data_max = df_raw["data_abertura"].max().date()
-            data_min = df_raw["data_abertura"].min().date()
-        else:
-            data_max = datetime.now().date()
-            data_min = (datetime.now() - timedelta(days=365)).date()
-
-        default_inicio = max(data_min, data_max - timedelta(days=365))
+        # Padrão: sempre 12 meses para trás a partir de HOJE (independente do max no banco)
+        hoje = datetime.now().date()
+        default_fim = hoje
+        default_inicio = hoje - timedelta(days=365)
+        min_global = df_raw["data_abertura"].min().date() if not df_raw["data_abertura"].isna().all() else default_inicio
 
         datas_selecionadas = st.date_input(
             "📅 Período (Abertura):",
-            value=(default_inicio, data_max),
-            max_value=datetime.now().date() + timedelta(days=1),
-            help="Padrão: 12 meses até a data mais recente no banco.",
+            value=(default_inicio, default_fim),
+            min_value=min_global,
+            max_value=hoje + timedelta(days=1),
+            help="Padrão: últimos 12 meses. Ajuste livre depois.",
         )
 
     with col_f2:
@@ -471,12 +481,11 @@ with st.expander("⚙️ Filtros: ", expanded=True):
         analista_filtro = st.selectbox("👤 Analista EPSY:", options=lista_analistas, help="Lista com todos analistas")
 
     with col_f3:
-        opcoes_status = [s for s in STATUS_DASHBOARD_LABELS if s != "Outros"]
         status_multiselect = st.multiselect(
-            "📌 Status (canônico)",
-            options=opcoes_status,
+            "📌 Status (só lista oficial Tecnuv)",
+            options=OPCOES_STATUS_FILTRO,
             default=["Pendente representante"],
-            help="Só estes status entram na amostragem. Vazio = todos. Padrão: Pendente representante.",
+            help="Mapeamento ignora maiúsc/minúsc e acentos (igual ao banco). Padrão: Pendente representante. Vazio = todos os status da lista.",
         )
         
     with col_f4:
@@ -486,84 +495,90 @@ with st.expander("⚙️ Filtros: ", expanded=True):
             st.cache_data.clear()
             st.rerun()
 
-# --- APLICAÇÃO DOS FILTROS ---
-df = df_raw.copy()
-
+# --- Base do período + analista (Visão Geral e métricas de qualidade usam TODOS os status no período) ---
+df_visao = df_raw.copy()
+d_inicio_visao, d_fim_visao, d_fim_visao_excl = None, None, None
 if len(datas_selecionadas) == 2:
-    d_inicio, d_fim = datas_selecionadas
-    d_fim = pd.to_datetime(d_fim) + timedelta(days=1)
-    df = df[(df['data_abertura'] >= pd.to_datetime(d_inicio)) & (df['data_abertura'] < d_fim)]
+    d_inicio_visao, d_fim_visao = datas_selecionadas
+    d_fim_visao_excl = pd.to_datetime(d_fim_visao) + timedelta(days=1)
+    df_visao = df_visao[
+        (df_visao["data_abertura"] >= pd.to_datetime(d_inicio_visao))
+        & (df_visao["data_abertura"] < d_fim_visao_excl)
+    ]
 
 if analista_filtro != "Todos":
-    df = df[df["usuario_epsy"] == analista_filtro]
+    df_visao = df_visao[df_visao["usuario_epsy"] == analista_filtro]
 
-if "status_canonico" in df.columns and status_multiselect:
-    df = df[df["status_canonico"].isin(status_multiselect)]
-
-if df.empty:
-    st.info("Nenhum chamado encontrado com os filtros aplicados. Revise o período ou ajuste os critérios para refinar a busca.")
+if df_visao.empty:
+    st.info("Nenhum chamado no período (e analista) selecionados. Ajuste os filtros.")
     st.stop()
 
-# ==========================================
-# 5. PROCESSAMENTO ESTRATÉGICO (MÉTRICAS)
-# ==========================================
 agora = pd.to_datetime(datetime.now())
-
-# 1. Envelhecimento (Aging)
-df['dias_aberto'] = (agora - df['data_abertura']).dt.days
-if "status_canonico" in df.columns:
-    df["is_aberto"] = ~df["status_canonico"].isin(["Encerrado", "Cancelado"])
+df_visao["dias_aberto"] = (agora - df_visao["data_abertura"]).dt.days
+if "status_canonico" in df_visao.columns:
+    df_visao["is_aberto"] = ~df_visao["status_canonico"].isin(["Encerrado", "Cancelado"])
 else:
-    df["is_aberto"] = ~df["status_atual"].str.contains("Encerrado|Cancelado", case=False, na=False)
-# Pendente representante (situação no Helpdesk) — contagem de dias para cobrança/notificações
-_sit = df.get("situacao", pd.Series("", index=df.index)).astype(str).str.lower()
-df["pendente_representante"] = _sit.str.contains("pendente", na=False) & _sit.str.contains("representante", na=False)
-df["dias_pendente_repr"] = np.where(
-    df["pendente_representante"] & df["is_aberto"], df["dias_aberto"], np.nan
+    df_visao["is_aberto"] = ~df_visao["status_atual"].str.contains(
+        "Encerrado|Cancelado", case=False, na=False
+    )
+_sit_v = df_visao.get("situacao", pd.Series("", index=df_visao.index)).astype(str).str.lower()
+df_visao["pendente_representante"] = _sit_v.str.contains("pendente", na=False) & _sit_v.str.contains(
+    "representante", na=False
+)
+df_visao["dias_pendente_repr"] = np.where(
+    df_visao["pendente_representante"] & df_visao["is_aberto"], df_visao["dias_aberto"], np.nan
 )
 
-# 2. Reincidência e Tempo até Liberação (baseado em releases)
-resultados_reincidencia = []
-tempos_liberacao = []
-
-# Mapa: nr_chamado -> quantidade de releases em que apareceu
 map_releases = {}
 if not df_releases.empty:
     map_releases = df_releases.set_index("nr_chamado")["qtd_releases"].to_dict()
 
-for _, row in df.iterrows():
-    nr = row['nr_chamado']
-    status = row['status_atual']
-    dt_abertura = row['data_abertura']
-    
-    interacoes_chamado = df_int[df_int['nr_chamado'] == nr] if not df_int.empty else pd.DataFrame()
-    # Usa as interações apenas para medir tempo até a primeira liberação
-    _, dt_primeira_lib = classificar_reincidencia_e_tempo(interacoes_chamado, dt_abertura, status)
-
-    qtd_rel = int(map_releases.get(nr, 0) or 0)
-    status_lower = str(status).lower()
-    encerrado_ou_cancelado = "encerrado" in status_lower or "cancelado" in status_lower
-
-    if qtd_rel == 0:
-        classificacao = "Sem Liberação"
-    else:
-        if not encerrado_ou_cancelado:
-            classificacao = "Aguardando Validação EPSY"
+def _enriquecer_reincidencia(frame: pd.DataFrame) -> pd.DataFrame:
+    out_class, out_tempo = [], []
+    for _, row in frame.iterrows():
+        nr = row["nr_chamado"]
+        status = row["status_atual"]
+        dt_abertura = row["data_abertura"]
+        inter = df_int[df_int["nr_chamado"] == nr] if not df_int.empty else pd.DataFrame()
+        _, dt_primeira_lib = classificar_reincidencia_e_tempo(inter, dt_abertura, status)
+        qtd_rel = int(map_releases.get(nr, 0) or 0)
+        status_lower = str(status).lower()
+        enc_can = "encerrado" in status_lower or "cancelado" in status_lower
+        if qtd_rel == 0:
+            c = "Sem Liberação"
+        elif not enc_can:
+            c = "Aguardando Validação EPSY"
+        elif qtd_rel == 1:
+            c = "Resolvido Pós-Liberação"
         else:
-            if qtd_rel == 1:
-                classificacao = "Resolvido Pós-Liberação"
-            else:
-                classificacao = "Reincidência"
+            c = "Reincidência"
+        out_class.append(c)
+        if pd.notna(dt_primeira_lib) and pd.notna(dt_abertura):
+            out_tempo.append((dt_primeira_lib - dt_abertura).total_seconds() / 86400)
+        else:
+            out_tempo.append(np.nan)
+    frame = frame.copy()
+    frame["classificacao_reincidencia"] = out_class
+    frame["tempo_ate_liberacao_dias"] = out_tempo
+    return frame
 
-    resultados_reincidencia.append(classificacao)
-    
-    if pd.notna(dt_primeira_lib) and pd.notna(dt_abertura):
-        tempos_liberacao.append((dt_primeira_lib - dt_abertura).total_seconds() / 86400) # Em dias
+
+df_visao = _enriquecer_reincidencia(df_visao)
+
+# Demais abas: mesmo período/analista + filtro de status (linhas ⊆ df_visao → mantém reincidência)
+df = df_visao.copy()
+if "status_canonico" in df.columns:
+    if status_multiselect:
+        df = df[df["status_canonico"].isin(status_multiselect)]
     else:
-        tempos_liberacao.append(np.nan)
+        df = df[df["status_canonico"].isin(OPCOES_STATUS_FILTRO)]
 
-df['classificacao_reincidencia'] = resultados_reincidencia
-df['tempo_ate_liberacao_dias'] = tempos_liberacao
+if df.empty:
+    st.warning(
+        "Nenhum chamado com o **status** selecionado neste período. "
+        "As outras abas usam **todos** os chamados do período até você ajustar o status."
+    )
+    df = df_visao.copy()
 
 # ==========================================
 # 6. CONSTRUÇÃO DO DASHBOARD (INTERFACE)
@@ -579,103 +594,171 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
 ])
 
 # ------------------------------------------
-# ABA 1: VISÃO EXECUTIVA
+# ABA 1: VISÃO GERAL (período + analista; todos os status no período)
 # ------------------------------------------
 with aba1:
-    total_chamados = len(df)
-    abertos = len(df[df['is_aberto']])
-    encerrados = total_chamados - abertos
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Volume de Chamados (Período)", total_chamados)
-    col2.metric("Chamados Ativos (Em Fila)", abertos, delta="Na Fila", delta_color="inverse")
-    col3.metric("Chamados Resolvidos", encerrados, delta="Encerrados")
-    
-    # Índice de Reincidência
-    chamados_com_liberacao = len(df[df['classificacao_reincidencia'] != "Sem Liberação"])
-    reincidentes = len(df[df['classificacao_reincidencia'] == "Reincidência"])
-    taxa_reincidencia = (reincidentes / chamados_com_liberacao * 100) if chamados_com_liberacao > 0 else 0
-    col4.metric("Índice de Reincidência", f"{taxa_reincidencia:.1f}%", delta="Chamados com Reincidência", delta_color="inverse")
+    X = len(df_visao)
+    _p0 = d_inicio_visao if d_inicio_visao is not None else "—"
+    _p1 = d_fim_visao if d_inicio_visao is not None else "—"
+    st.caption(
+        f"**Período:** {_p0} a {_p1} · **Analista:** {analista_filtro} · "
+        f"**Totais da Visão Geral** = todos os chamados com **abertura** neste intervalo (independente do filtro de status das outras abas)."
+    )
 
-    n_repr = int(df["pendente_representante"].sum())
+    enc_mask = (
+        df_visao["status_canonico"].eq("Encerrado")
+        if "status_canonico" in df_visao.columns
+        else df_visao["status_atual"].astype(str).str.contains("encerrado", case=False, na=False)
+    )
+    can_mask = (
+        df_visao["status_canonico"].eq("Cancelado")
+        if "status_canonico" in df_visao.columns
+        else df_visao["status_atual"].astype(str).str.contains("cancelado", case=False, na=False)
+    )
+    Y = int(enc_mask.sum())
+    n_cancel = int(can_mask.sum())
+    Z = int((df_visao["classificacao_reincidencia"] == "Reincidência").sum())
+    W = int(df_visao["is_aberto"].sum())
+
+    st.markdown("### Resumo do período")
+    st.markdown(
+        f"- **Foram abertos {X} chamados** no período escolhido.\n"
+        f"- **{Y}** foram **encerrados** (corrigidos / finalizados).\n"
+        f"- **{Z}** constam em **mais de um release** com encerramento — **liberados pela desenvolvedora mas reincidentes** (entrega não sustentada).\n"
+        f"- **{W}** ainda **em aberto** (qualquer status que não seja Encerrado/Cancelado).\n"
+        + (
+            f"- **{n_cancel}** **cancelados**.\n"
+            if n_cancel > 0
+            else ""
+        )
+    )
+
+    pct_x = 100.0 / X if X else 0
+    pct_resolv = Y * pct_x
+    pct_reinc = Z * pct_x
+    pct_fila = W * pct_x
+    st.markdown("### Percentual sobre os chamados abertos no período")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Encerrados (resolvidos / fechados)", f"{pct_resolv:.1f}%", help=f"{Y} de {X}")
+    c2.metric("Reincidentes (liberados e voltaram)", f"{pct_reinc:.1f}%", help=f"{Z} de {X}", delta_color="inverse")
+    c3.metric("Ainda em aberto / na fila", f"{pct_fila:.1f}%", help=f"{W} de {X}", delta_color="off")
+    if n_cancel > 0:
+        st.metric("Cancelados", f"{n_cancel * pct_x:.1f}%", help=f"{n_cancel} de {X}")
+
+    # Barras horizontais (sem pizza): volume e % do período
+    resumo_df = pd.DataFrame(
+        {
+            "Indicador": [
+                "Encerrados",
+                "Em aberto",
+                "Reincidentes (qualidade entrega)",
+            ],
+            "Quantidade": [Y, W, Z],
+        }
+    )
+    resumo_df["Percentual"] = (resumo_df["Quantidade"] / X * 100).round(1) if X else 0
+    fig_resumo = px.bar(
+        resumo_df,
+        x="Quantidade",
+        y="Indicador",
+        orientation="h",
+        text=resumo_df.apply(lambda r: f"{int(r['Quantidade'])} ({r['Percentual']}%)", axis=1),
+        color="Indicador",
+        color_discrete_map={
+            "Encerrados": "#008000",
+            "Em aberto": "#3498db",
+            "Reincidentes (qualidade entrega)": "#e74c3c",
+        },
+    )
+    fig_resumo.update_traces(textposition="outside")
+    fig_resumo.update_layout(showlegend=False, height=220, margin=dict(l=10, r=80, t=10, b=10))
+    st.plotly_chart(fig_resumo, width="stretch")
+
+    # Visões compactas das outras dimensões
+    st.subheader("Status no período (volume)")
+    col_fila = "status_canonico" if "status_canonico" in df_visao.columns else "status_atual"
+    fila_v = df_visao[col_fila].value_counts().reset_index()
+    fila_v.columns = ["Status", "Volume"]
+    cores_v = {k: STATUS_COLOR_MAP.get(k, "#95a5a6") for k in fila_v["Status"].unique()}
+    fig_status = px.bar(
+        fila_v, x="Volume", y="Status", orientation="h", color="Status", color_discrete_map=cores_v
+    )
+    fig_status.update_layout(showlegend=False, height=min(380, 60 + len(fila_v) * 24))
+    st.plotly_chart(fig_status, width="stretch")
+
+    st.subheader("Versões mais frequentes (abertura no período)")
+    ver = (
+        df_visao["versao_sistema"]
+        .astype(str)
+        .replace("", np.nan)
+        .dropna()
+    )
+    ver = ver[~ver.str.lower().isin(["não informada", "nan", "none"])]
+    if len(ver):
+        top_v = ver.value_counts().head(12).reset_index()
+        top_v.columns = ["Versão", "Chamados"]
+        fig_v = px.bar(top_v, x="Chamados", y="Versão", orientation="h", color="Chamados", color_continuous_scale="Blues")
+        fig_v.update_layout(showlegend=False, height=min(320, 40 + len(top_v) * 22))
+        st.plotly_chart(fig_v, width="stretch")
+    else:
+        st.info("Sem versão preenchida nos chamados do período.")
+
+    st.subheader("Releases: chamados citados em notas (no período)")
+    n_com_release = df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) > 0).sum()
+    st.metric("Chamados do período que aparecem em pelo menos 1 release", int(n_com_release))
+    qual = df_visao["classificacao_reincidencia"].value_counts().reset_index()
+    qual.columns = ["Situação", "Chamados"]
+    fig_q = px.bar(
+        qual,
+        x="Chamados",
+        y="Situação",
+        orientation="h",
+        color="Situação",
+        color_discrete_map={
+            "Resolvido Pós-Liberação": "#27ae60",
+            "Reincidência": "#c0392b",
+            "Aguardando Validação EPSY": "#f39c12",
+            "Sem Liberação": "#7f8c8d",
+        },
+    )
+    fig_q.update_layout(showlegend=False, height=min(280, 50 + len(qual) * 26))
+    st.plotly_chart(fig_q, width="stretch")
+
+    n_repr = int(df_visao["pendente_representante"].sum())
     if n_repr > 0:
         st.warning(
-            f"**{n_repr}** chamado(s) com situação **pendente representante** (média {df.loc[df['pendente_representante'], 'dias_aberto'].mean():.0f} dias abertos). "
-            "Responsável e coordenador recebem aviso na **Home** ao citar em release e a cada **7 dias**."
+            f"**{n_repr}** com **pendente representante** (média {df_visao.loc[df_visao['pendente_representante'], 'dias_aberto'].mean():.0f} dias)."
         )
-        with st.expander("Lista — pendente representante (dias)"):
-            show = df[df["pendente_representante"]][
-                ["nr_chamado", "usuario_epsy", "dias_aberto", "situacao", "status_atual"]
+        with st.expander("Lista — pendente representante"):
+            show = df_visao[df_visao["pendente_representante"]][
+                ["nr_chamado", "usuario_epsy", "dias_aberto", "situacao", "status_canonico"]
             ].sort_values("dias_aberto", ascending=False)
-            st.dataframe(show, use_container_width=True, hide_index=True)
+            show = show.rename(columns={"status_canonico": "Status"})
+            st.dataframe(
+                show.style.apply(_styler_status_col, subset=["Status"]),
+                use_container_width=True,
+                hide_index=True,
+            )
 
-    st.divider()
-    
-    g1, g2 = st.columns(2)
-    with g1:
-        st.subheader("Fila por status (canônico)")
-        col_fila = "status_canonico" if "status_canonico" in df.columns else "status_atual"
-        fila = df[col_fila].value_counts().reset_index()
-        fila.columns = ["Status", "Volume"]
-        cores = {k: STATUS_COLOR_MAP.get(k, "#95a5a6") for k in fila["Status"].unique()}
-        fig_fila = px.bar(
-            fila,
-            x="Volume",
-            y="Status",
-            orientation="h",
-            color="Status",
-            color_discrete_map=cores,
+    if Z > 0:
+        st.markdown("#### Reincidências — detalhe")
+        df_reincidentes = df_visao[df_visao["classificacao_reincidencia"] == "Reincidência"].copy()
+        df_reincidentes["Resumo do Erro"] = df_reincidentes["erro_relatado"].astype(str).str[:100] + "..."
+        cols_reinc = [
+            "nr_chamado",
+            "cliente_nome",
+            "usuario_epsy",
+            "versao_sistema",
+            "status_canonico",
+            "Resumo do Erro",
+        ]
+        st.dataframe(
+            df_reincidentes[cols_reinc]
+            .rename(columns={"status_canonico": "Status"})
+            .style.apply(_styler_status_col, subset=["Status"]),
+            hide_index=True,
+            width="stretch",
         )
-        fig_fila.update_layout(showlegend=False, height=min(420, 80 + len(fila) * 28))
-        st.plotly_chart(fig_fila, width="stretch")
-        
-    with g2:
-        st.subheader("Classificação de Reincidência Pós-Liberação")
-        reinc_data = df['classificacao_reincidencia'].value_counts().reset_index()
-        reinc_data.columns = ['Classificação', 'Volume']
-        # Calcular percentual para exibir nos textos das barras
-        reinc_data["Percentual"] = (reinc_data["Volume"] / reinc_data["Volume"].sum() * 100).round(1)
-
-        fig_reinc = px.bar(
-            reinc_data,
-            y="Classificação",
-            x="Volume",
-            orientation="h",
-            color="Classificação",
-            color_discrete_map={
-                "Resolvido Pós-Liberação": "#25D366",
-                "Reincidência": "#FF4B4B",
-                "Aguardando Validação EPSY": "#FFA500",
-                "Sem Liberação": "#808080"
-            },
-            text="Percentual"
-        )
-        fig_reinc.update_traces(
-            texttemplate="%{text:.1f}%",
-            textposition="outside",
-            marker=dict(line=dict(color="rgba(0,0,0,0.08)", width=1), opacity=0.92),
-            cliponaxis=False,
-        )
-        fig_reinc.update_layout(
-            margin=dict(t=30, b=15, l=0, r=10),
-            height=320,
-            xaxis_title="Volume",
-            yaxis_title=None,
-            showlegend=False,
-        )
-        st.plotly_chart(fig_reinc, use_container_width='stretch')
-
-    # NOVO: Tabela detalhada de reincidências
-    if reincidentes > 0:
-        st.markdown("### 🚨 Detalhamento dos Chamados com Reincidência")
-        st.markdown("Lista de chamados que foram liberados, mas apresentaram reincidência, indicando que o problema não foi resolvido mesmo após a liberação da desenvolvedora.")
-        df_reincidentes = df[df['classificacao_reincidencia'] == "Reincidência"].copy()
-        
-        # Cria uma visualização limpa do motivo
-        df_reincidentes['Resumo do Erro'] = df_reincidentes['erro_relatado'].str[:100] + "..."
-        
-        cols_reinc = ['nr_chamado', 'cliente_nome', 'usuario_epsy', 'versao_sistema', 'status_atual', 'Resumo do Erro']
-        st.dataframe(df_reincidentes[cols_reinc], hide_index=True, width='stretch')
 
 # ------------------------------------------
 # ABA 2: AGING E GARGALOS (FILA COMPLETA)
@@ -706,26 +789,29 @@ with aba2:
         # Tabela Integral da Fila
         st.markdown("#### 📋 Tabela de Chamados Ativos")
         
-        df_abertos_view = df_abertos[['nr_chamado', 'cliente_nome', 'usuario_epsy', 'atendente_tecnuv', 'status_atual', 'dias_aberto', 'erro_relatado']].copy()
-        df_abertos_view.rename(columns={
-            'nr_chamado': 'Chamado',
-            'cliente_nome': 'Cliente',
-            'usuario_epsy': 'EPSY (Abertura)',
-            'atendente_tecnuv': 'Tecnuv',
-            'status_atual': 'Status',
-            'dias_aberto': 'Dias em Aberto',
-            'erro_relatado': 'Motivo / Erro Relatado'
-        }, inplace=True)
-        
-        # Ordena do mais velho para o mais novo
-        df_abertos_view = df_abertos_view.sort_values(by='Dias em Aberto', ascending=False)
-        
-        st.dataframe(
-            df_abertos_view.style.format({"Dias em Aberto": "{:.0f}"}).background_gradient(cmap='Reds', subset=['Dias em Aberto']), 
-            hide_index=True, 
-            width='stretch',
-            height=600
+        col_st = "status_canonico" if "status_canonico" in df_abertos.columns else "status_atual"
+        df_abertos_view = df_abertos[
+            ["nr_chamado", "cliente_nome", "usuario_epsy", "atendente_tecnuv", col_st, "dias_aberto", "erro_relatado"]
+        ].copy()
+        df_abertos_view.rename(
+            columns={
+                "nr_chamado": "Chamado",
+                "cliente_nome": "Cliente",
+                "usuario_epsy": "EPSY (Abertura)",
+                "atendente_tecnuv": "Tecnuv",
+                col_st: "Status",
+                "dias_aberto": "Dias em Aberto",
+                "erro_relatado": "Motivo / Erro Relatado",
+            },
+            inplace=True,
         )
+        df_abertos_view = df_abertos_view.sort_values(by="Dias em Aberto", ascending=False)
+        styled = (
+            df_abertos_view.style.format({"Dias em Aberto": "{:.0f}"})
+            .background_gradient(cmap="Reds", subset=["Dias em Aberto"])
+            .apply(_styler_status_col, subset=["Status"])
+        )
+        st.dataframe(styled, hide_index=True, width="stretch", height=600)
 
 # ------------------------------------------
 # ABA 3: VERSÕES — ABERTOS POR VERSÃO, CATEGORIAS, CONSULTA DE SEGURANÇA (sem gráfico pizza)
@@ -1166,46 +1252,83 @@ with aba4:
 # ABA 5: QUALIDADE DE HOMOLOGAÇÃO (ciclos_homologacao)
 # ------------------------------------------
 with aba5:
-    st.subheader("📋 Métricas de Qualidade de Homologação")
-    st.markdown("Indicadores baseados na tabela `ciclos_homologacao` (registo manual na Page 11 - Releases).")
+    st.subheader("Homologação de releases (testes no suporte)")
+    st.markdown(
+        "Esta aba **não** usa a fila de chamados do Helpdesk. Usa só o fluxo **manual** de homologação: "
+        "cada linha em **`ciclos_homologacao`** = “este chamado foi citado neste release e o suporte deve testar e marcar Aprovado/Reprovado”."
+    )
+    with st.expander("O que é cada número e de onde vem o dado?", expanded=True):
+        st.markdown(
+            """
+**Origem comum:** tabelas **`ciclos_homologacao`**, **`chamados`** (homologação), **`releases`**.  
+Quem alimenta: em geral **Page 11 (Releases)** ao vincular chamado a release e abrir ciclos de teste.
+
+| O que você vê | Significado | Lógica / SQL |
+|----------------|------------|--------------|
+| **Taxa de retrabalho (%)** | Entre os ciclos **já testados** (Aprovado ou Reprovado), que fração foi **Reprovado**. | `reprovados / (aprovados + reprovados) × 100` em **todos** os ciclos (sem filtro de período na função atual). Se não há ninguém com status “testado”, dá **0%**. |
+| **Pendentes de teste (número grande)** | Quantidade de linhas em **`ciclos_homologacao`** com **`status_teste = 'Aguardando'`**. É um **contador** (ex.: 2023 = **2023 pendências**), **não é ano**. Cada pendência = um par (chamado × release) ainda sem decisão de homologação. | `COUNT(*) WHERE status_teste = 'Aguardando'` |
+| **Chamados no ranking** | Quantos chamados aparecem na tabela ao lado (no máximo **20**). Só entram chamados com **mais de um ciclo** no histórico (voltaram em outro release). | Subquery agrupada por `id_chamado` com `HAVING COUNT(*) > 1`, depois `LIMIT 20`. |
+| **Módulos com reprovação** | Quantos **módulos distintos** têm pelo menos uma reprovação registrada. | Agrupa por `modulo_sistema` do chamado e conta só onde há Reprovado. |
+| **Tabela “Ranking”** | Chamados que **passaram por mais de um ciclo** (reincidência no processo de homologação): colunas = ID do chamado, total de ciclos, quantas vezes **Reprovado**. | Não é a mesma coisa que “reincidência no release_itens” da aba 6. |
+| **Tabela “Por módulo”** | Soma de **reprovações** por módulo do chamado (campo **módulo_sistema** na tabela **chamados** de homologação). | Só módulos com pelo menos 1 Reprovado. |
+
+**Por que “Gargalo” pode ser um número alto?**  
+Cada vez que um chamado é ligado a um release e gera um ciclo **Aguardando**, soma 1. Se anos de releases foram importados e **ninguém marcou Aprovado/Reprovado** na Page 11, o pendente acumula — por isso pode aparecer milhares (ex. 2023).
+            """
+        )
 
     try:
         m = get_metricas_homologacao()
+        n_pend = int(m["gargalo_homologacao"])
+        n_rank = len(m["ranking_reincidencia"])
+        n_mod = len(m["vulnerabilidade_modulo"])
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric(
-            "Taxa de Retrabalho Global",
+            "Retrabalho na homologação",
             f"{m['taxa_retrabalho_global']:.1f}%",
-            help="Percentual de ciclos marcados como Reprovado em relação ao total testado.",
+            help="Dos ciclos já decididos (Aprovado/Reprovado), quantos foram Reprovado.",
         )
         col2.metric(
-            "Gargalo de Homologação",
-            m["gargalo_homologacao"],
-            help="Quantidade de ciclos aguardando teste pelo suporte.",
+            "Pendentes de teste (Aguardando)",
+            f"{n_pend:,}".replace(",", "."),
+            help="Total de linhas ciclos_homologacao ainda sem Aprovado/Reprovado. NÃO é ano — é quantidade.",
         )
-        col3.metric("Top Ofensores (chamados)", len(m["ranking_reincidencia"]))
-        col4.metric("Módulos com Reprovações", len(m["vulnerabilidade_modulo"]))
+        col3.metric(
+            "Chamados no ranking (≥2 ciclos)",
+            n_rank,
+            help="Até 20 chamados com mais de um ciclo de homologação.",
+        )
+        col4.metric(
+            "Módulos com ao menos 1 reprovação",
+            n_mod,
+            help="Módulos distintos que têm ciclos Reprovado.",
+        )
 
         st.divider()
 
         r1, r2 = st.columns(2)
         with r1:
-            st.markdown("#### 🔴 Ranking de Reincidência (Top Ofensores)")
+            st.markdown("#### Chamados com vários ciclos (homologação)")
+            st.caption("Quem mais vezes entrou no fluxo e quantas reprovações teve.")
             df_rank = m["ranking_reincidencia"]
             if df_rank.empty:
-                st.info("Nenhum chamado com múltiplos ciclos ainda.")
+                st.info("Nenhum chamado com mais de um ciclo em ciclos_homologacao.")
             else:
-                df_rank.columns = ["Chamado", "Qtd. Ciclos", "Reprovações"]
-                st.dataframe(df_rank, hide_index=True, use_container_width='')
+                df_rank = df_rank.copy()
+                df_rank.columns = ["ID chamado (homolog.)", "Total de ciclos", "Vezes reprovado"]
+                st.dataframe(df_rank, hide_index=True, use_container_width=True)
 
         with r2:
-            st.markdown("#### 📊 Vulnerabilidade por Módulo")
+            st.markdown("#### Reprovações por módulo (chamado.homologação)")
+            st.caption("Só aparece módulo que tenha pelo menos uma reprovação.")
             df_mod = m["vulnerabilidade_modulo"]
             if df_mod.empty:
-                st.info("Nenhuma reprovação registrada por módulo.")
+                st.info("Nenhuma reprovação em ciclos_homologacao — ou módulo não preenchido nos chamados.")
             else:
-                df_mod.columns = ["Módulo", "Reprovações"]
-                st.dataframe(df_mod, hide_index=True, use_container_width='stretch')
+                df_mod = df_mod.copy()
+                df_mod.columns = ["Módulo", "Total reprovações"]
+                st.dataframe(df_mod, hide_index=True, use_container_width=True)
 
     except Exception as e:
         st.warning(
