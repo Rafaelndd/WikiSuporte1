@@ -10,5 +10,6 @@
   "min_intervalo": 30,
   "max_raspagens_hora": 3,
   "horario_inicio": null,
-  "horario_fim": null
+  "horario_fim": null,
+  "parar_solicitada": true
 }

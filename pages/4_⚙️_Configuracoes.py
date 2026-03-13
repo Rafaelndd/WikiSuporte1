@@ -36,6 +36,8 @@ try:
         salvar_estado,
         solicitar_raspagem,
         solicitar_parada_bots,
+        forcar_estado_parado,
+        sincronizar_estado_se_motor_morto,
         pode_executar_raspagem,
     )
     BOT_CONTROL_DISPONIVEL = True
@@ -78,6 +80,10 @@ with aba_robo:
             "Evite disparar muitas raspagens seguidas — respeite o limite por hora."
         )
     estado = ler_estado_robo() if not BOT_CONTROL_DISPONIVEL else ler_estado()
+    if BOT_CONTROL_DISPONIVEL:
+        if sincronizar_estado_se_motor_morto():
+            estado = ler_estado()
+            st.toast("Estado corrigido: motor não está rodando — status voltou para Parado.", icon="✅")
 
     em_andamento = estado.get("em_andamento", False)
     etapa = estado.get("etapa_atual") or "—"
@@ -120,19 +126,24 @@ with aba_robo:
         "**⚠️ Para os botões funcionarem:** o motor precisa estar rodando. "
         "Execute `scripts\\start_motor.bat` ou em um terminal: `python motor_extracao.py`"
     )
-    if BOT_CONTROL_DISPONIVEL and em_andamento:
-        st.error(
-            "**Parar bots:** solicita encerramento cooperativo do ciclo atual (entre chamados). "
-            "O navegador do motor fecha ao fim da etapa; se travar, feche o terminal do motor."
+    if BOT_CONTROL_DISPONIVEL:
+        st.markdown("#### Parar / resetar status na tela")
+        st.caption(
+            "O status **Executando** vem do arquivo `robo_state.json`. Se você **fechou o terminal** do motor, "
+            "esse flag pode ficar preso — use **Forçar Parado** para liberar os botões de raspagem de novo."
         )
-        if st.button("🛑 Encerrar processo dos bots (parada cooperativa)", type="primary", key="parar_bots"):
-            solicitar_parada_bots()
-            st.success("Parada registrada. O motor deve encerrar em até alguns minutos.")
-            st.rerun()
-    elif BOT_CONTROL_DISPONIVEL:
-        if st.button("🛑 Solicitar parada (quando o motor estiver executando)", key="parar_bots_idle"):
-            solicitar_parada_bots()
-            st.info("Flag de parada ligada. Na próxima raspagem o ciclo encerra mais cedo.")
+        cpar1, cpar2 = st.columns(2)
+        with cpar1:
+            if st.button("🛑 Forçar Parado (corrigir status preso)", type="primary", key="forcar_parado"):
+                solicitar_parada_bots()
+                forcar_estado_parado()
+                st.success("Estado gravado como **Parado**. Pode voltar a solicitar raspagens.")
+                st.rerun()
+        with cpar2:
+            if st.button("⏸️ Só avisar motor (parada cooperativa)", key="parar_coop"):
+                solicitar_parada_bots()
+                st.info("Se o motor estiver rodando, ele encerra no próximo passo. O status só muda quando o motor chama finalizar.")
+                st.rerun()
 
     # Botões individuais de raspagem
     st.markdown("#### Raspagens Individuais")

@@ -156,5 +156,56 @@ def solicitar_parada_bots() -> None:
     salvar_estado(estado)
 
 
+def forcar_estado_parado() -> None:
+    """
+    Grava no JSON que o motor está parado. Use quando:
+    - o terminal do motor foi fechado (em_andamento ficou preso em True);
+    - a UI precisa voltar a permitir raspagens.
+    Não mata processo em segundo plano — só corrige o arquivo de estado.
+    """
+    estado = ler_estado()
+    estado["em_andamento"] = False
+    estado["etapa_atual"] = None
+    estado["tarefa_solicitada"] = None
+    estado["parar_solicitada"] = False
+    estado["ultima_execucao"] = datetime.now().isoformat()
+    salvar_estado(estado)
+
+
+def processo_motor_provavelmente_ativo() -> bool:
+    """
+    True se existir processo Python com motor_extracao no comando.
+    Ajuda a detectar estado 'Executando' fantasma (JSON preso sem processo).
+    """
+    try:
+        import psutil
+    except ImportError:
+        return True  # sem psutil, não adivinhar — assume ativo se JSON disser
+    alvo = "motor_extracao"
+    for p in psutil.process_iter(attrs=["name", "cmdline"]):
+        try:
+            cmd = p.info.get("cmdline") or []
+            line = " ".join(str(c) for c in cmd).lower()
+            if alvo in line and "python" in line:
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
+
+def sincronizar_estado_se_motor_morto() -> bool:
+    """
+    Se JSON diz 'em_andamento' mas não há processo do motor, força parado.
+    Retorna True se corrigiu o estado.
+    """
+    estado = ler_estado()
+    if not estado.get("em_andamento"):
+        return False
+    if processo_motor_provavelmente_ativo():
+        return False
+    forcar_estado_parado()
+    return True
+
+
 def deve_parar() -> bool:
     return bool(ler_estado().get("parar_solicitada"))
