@@ -703,18 +703,64 @@ with aba3:
         por_versao["_ord"] = por_versao["versao_sistema"].apply(_semver_tuple)
         por_versao = por_versao.sort_values("_ord", ascending=True)
 
-        st.markdown("#### 📌 Versões (da mais antiga à mais recente) — chamados **ainda abertos** naquele contexto de versão")
+        st.markdown("#### 📌 Por versão — chamados **ainda abertos** (contexto da versão no cadastro)")
+        st.caption("Apenas volume **atual** por versão. O histórico total de chamados por versão está na seção abaixo, separado.")
         st.dataframe(
-            por_versao[["versao_sistema", "Chamados_abertos", "Total_chamados"]].rename(
-                columns={"versao_sistema": "Versão", "Chamados_abertos": "Abertos agora", "Total_chamados": "Total histórico"}
+            por_versao[["versao_sistema", "Chamados_abertos"]].rename(
+                columns={"versao_sistema": "Versão", "Chamados_abertos": "Abertos agora"}
             ),
             hide_index=True,
             use_container_width=True,
-            height=min(420, 40 + len(por_versao) * 35),
+            height=min(380, max(220, 40 + min(len(por_versao), 12) * 28)),
+        )
+        if len(por_versao) > 12:
+            st.caption(f"Tabela com rolagem — **{len(por_versao)}** versões. Gráfico: amostra das que têm mais abertos.")
+
+        st.markdown("#### 📜 Total histórico de chamados por versão")
+        st.caption(
+            "Quantidade **acumulada** de chamados já vinculados a cada versão no recorte (abertos + encerrados). "
+            "Independente da tabela de **abertos agora** acima."
+        )
+        st.dataframe(
+            por_versao.sort_values("_ord", ascending=True)[["versao_sistema", "Total_chamados"]].rename(
+                columns={"versao_sistema": "Versão", "Total_chamados": "Total histórico (recorte)"}
+            ),
+            hide_index=True,
+            use_container_width=True,
+            height=min(380, max(220, 40 + min(len(por_versao), 12) * 28)),
         )
 
+        nmax = len(por_versao)
+        n_graf = st.slider(
+            "Quantas versões exibir no gráfico (as com mais chamados abertos)",
+            min_value=1,
+            max_value=nmax,
+            value=min(18, nmax),
+            key="aba3_n_versao_grafico",
+            help="Reduz barras para caber numa tela; a tabela acima lista todas.",
+        )
+        por_ord_abertos = por_versao.sort_values("Chamados_abertos", ascending=False)
+        if len(por_ord_abertos) <= n_graf:
+            por_chart = por_ord_abertos.sort_values("Chamados_abertos", ascending=True)
+        else:
+            top = por_ord_abertos.head(n_graf).copy()
+            rest = por_ord_abertos.iloc[n_graf:]
+            outros = pd.DataFrame(
+                [
+                    {
+                        "versao_sistema": f"➕ Outras {len(rest)} versões (agregado)",
+                        "Chamados_abertos": int(rest["Chamados_abertos"].sum()),
+                        "Total_chamados": int(rest["Total_chamados"].sum()),
+                    }
+                ]
+            )
+            por_chart = pd.concat([top, outros], ignore_index=True).sort_values(
+                "Chamados_abertos", ascending=True
+            )
+
+        altura_barras = min(520, 120 + len(por_chart) * 26)
         fig_v = px.bar(
-            por_versao.sort_values("Chamados_abertos", ascending=True),
+            por_chart,
             x="Chamados_abertos",
             y="versao_sistema",
             orientation="h",
@@ -722,7 +768,7 @@ with aba3:
             color="Chamados_abertos",
             color_continuous_scale="Reds",
         )
-        fig_v.update_layout(showlegend=False, height=max(320, len(por_versao) * 22))
+        fig_v.update_layout(showlegend=False, height=altura_barras, margin=dict(l=8, r=8, t=8, b=8))
         st.plotly_chart(fig_v, use_container_width=True)
 
         # --- 2) Categorias (abertos) — mais aberturas com a desenvolvedora ---
@@ -850,8 +896,9 @@ with aba3:
             "usuario_epsy",
         ]
         show_cols = [c for c in show_cols if c in det.columns]
+        det_sorted = det.sort_values(["aberto", "nr_chamado"], ascending=[False, False])
         st.dataframe(
-            det[show_cols].sort_values(["aberto", "nr_chamado"], ascending=[False, False]),
+            det_sorted[show_cols],
             hide_index=True,
             use_container_width=True,
             height=420,
