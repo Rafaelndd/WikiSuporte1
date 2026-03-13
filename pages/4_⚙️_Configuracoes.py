@@ -136,7 +136,7 @@ with aba_robo:
     cols = st.columns(4)
     for i, (tipo, info) in enumerate(raspagens_ui.items()):
         with cols[i % 4]:
-            if st.button(f"{info['icon']} {info['label']}", key=f"btn_{tipo}", use_container_width=True, disabled=em_andamento):
+            if st.button(f"{info['icon']} {info['label']}", key=f"btn_{tipo}", use_container_width='strech', disabled=em_andamento):
                 if BOT_CONTROL_DISPONIVEL:
                     ok, msg = solicitar_raspagem(tipo)
                     st.toast(msg, icon="✅" if ok else "⚠️")
@@ -200,7 +200,7 @@ with aba_ramais:
     with col_r2:
         if ramais:
             df_r = pd.DataFrame(list(ramais.items()), columns=["Analista", "Ramal"]).sort_values("Analista")
-            st.dataframe(df_r, hide_index=True, use_container_width=True)
+            st.dataframe(df_r, hide_index=True, use_container_width='strech')
             remover = st.selectbox("Remover", [""] + list(ramais.keys()))
             if st.button("Remover") and remover:
                 del ramais[remover]
@@ -338,38 +338,38 @@ with aba_clientes:
             ORDER BY c.razao_social
         """, get_connection())
         if not df_cli.empty:
-            st.dataframe(df_cli, hide_index=True, use_container_width=True)
+            st.dataframe(df_cli, hide_index=True, use_container_width='strech')
     except Exception as e:
         st.caption(f"Listagem indisponível: {e}")
 
-# ==========================================
-# ABA 5: DIAGNÓSTICO
-# ==========================================
-with aba_diagnostico:
-    if perfil_usuario != "dev":
-        st.error("Acesso restrito ao desenvolvedor.")
-    else:
-        st.subheader("Diagnóstico do Servidor")
-        d1, d2, d3 = st.columns(3)
-        with d1:
-            if st.button("Testar DB"):
-                t0 = time.time()
-                try:
-                    with get_connection().connect() as c:
-                        c.execute(text("SELECT 1"))
-                    st.success(f"Conexão OK — {((time.time()-t0)*1000):.0f} ms")
-                except Exception as e:
-                    st.error(str(e))
-        with d2:
-            if st.button("Testar Internet"):
-                try:
-                    urllib.request.urlopen("http://8.8.8.8", timeout=3)
-                    st.success("Ping OK")
-                except Exception:
-                    st.error("Falha de rede")
-        with d3:
-            if st.button("Recursos") and HAS_PSUTIL:
-                st.metric("CPU", f"{psutil.cpu_percent()}%")
-                st.metric("RAM", f"{psutil.virtual_memory().percent}%")
+# # ==========================================
+# # ABA 5: DIAGNÓSTICO
+# # ==========================================
+# with aba_diagnostico:
+#     if perfil_usuario != "dev":
+#         st.error("Acesso restrito ao desenvolvedor.")
+#     else:
+#         st.subheader("Diagnóstico do Servidor")
+#         d1, d2, d3 = st.columns(3)
+#         with d1:
+#             if st.button("Testar DB"):
+#                 t0 = time.time()
+#                 try:
+#                     with get_connection().connect() as c:
+#                         c.execute(text("SELECT 1"))
+#                     st.success(f"Conexão OK — {((time.time()-t0)*1000):.0f} ms")
+#                 except Exception as e:
+#                     st.error(str(e))
+#         with d2:
+#             if st.button("Testar Internet"):
+#                 try:
+#                     urllib.request.urlopen("http://8.8.8.8", timeout=3)
+#                     st.success("Ping OK")
+#                 except Exception:
+#                     st.error("Falha de rede")
+#         with d3:
+#             if st.button("Recursos") and HAS_PSUTIL:
+#                 st.metric("CPU", f"{psutil.cpu_percent()}%")
+#                 st.metric("RAM", f"{psutil.virtual_memory().percent}%")
 
-registrar_log_auditoria(usuario_id, "VIEW_CONFIG", "Acessou configurações.")
+# registrar_log_auditoria(usuario_id, "VIEW_CONFIG", "Acessou configurações.")

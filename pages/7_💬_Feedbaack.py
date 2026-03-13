@@ -32,6 +32,12 @@ st.markdown(
     "**críticas**, **relatos de bug**, **sugestões de melhoria** ou **elogios**. "
     "Todas as mensagens são encaminhadas diretamente ao responsável técnico."
 )
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "Preencha **Assunto** e **Descrição** (obrigatórios). Escolha o **tipo** (sugestão, bug, etc.). "
+        "O e-mail de retorno é opcional mas ajuda a responder. O envio usa **SMTP** configurado em `secrets.toml` (email). "
+        "Após enviar, aguarde confirmação na tela."
+    )
 
 # --- 3. FORMULÁRIO PROFISSIONAL DE FEEDBACK ---
 with st.container(border=True):

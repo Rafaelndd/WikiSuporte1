@@ -175,7 +175,7 @@ try:
         edited = st.data_editor(
             df_edit,
             key="editor_ciclos",
-            use_container_width=True,
+            use_container_width='strech',
             column_config={
                 "ID Ciclo": st.column_config.NumberColumn(format="%d"),
                 "Chamado": st.column_config.TextColumn(disabled=True),
@@ -257,6 +257,6 @@ try:
             },
             inplace=True,
         )
-        st.dataframe(df_rel, hide_index=True, use_container_width=True)
+        st.dataframe(df_rel, hide_index=True, use_container_width='stretch')
 except Exception as e:
     st.error(f"Erro ao carregar releases: {e}")

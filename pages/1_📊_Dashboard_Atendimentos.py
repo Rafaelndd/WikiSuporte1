@@ -646,7 +646,7 @@ with sub_indiv:
 
                     st.dataframe(
                         casos_criticos.style.format({'Tempo Total (Horas)': '{:.1f}h'}),
-                        use_container_width=True,
+                        use_container_width='strech',
                         hide_index=True
                     )
 

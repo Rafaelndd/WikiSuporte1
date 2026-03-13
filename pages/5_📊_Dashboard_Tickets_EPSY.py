@@ -54,6 +54,12 @@ def carregar_tickets_cruzados():
 # ==========================================
 st.title("📊 Dashboard Analítico - Tickets EPSY")
 st.markdown("Visão executiva e operacional do atendimento. Acompanhe gargalos, volume por analista e o ciclo de vida dos tickets integrados ao fornecedor.")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "Os **KPIs** resumem volume, abertos e avaliações. **Gráficos** mostram distribuição por analista e status. "
+        "Dados vêm da tabela **tickets_epsy** (raspagem/bot). Use filtros nas tabelas quando existirem. "
+        "Chamados vinculados aparecem cruzados com a Tecnuv."
+    )
 
 df_raw = carregar_tickets_cruzados()
 

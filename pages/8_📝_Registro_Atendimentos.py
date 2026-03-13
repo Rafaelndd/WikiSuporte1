@@ -16,6 +16,12 @@ id_analista = st.session_state.get('usuario_id')
 
 st.title("📝 Registro de Atendimentos")
 st.markdown("Registre, consulte e gerencie os atendimentos diários do Helpdesk.")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "**Lançar** — preencha cliente, setor, categoria e classificação; envie o formulário. "
+        "**Meu histórico** — vê seus registros. **Coordenador/Dev** — aba extra com visão de gestão. "
+        "Os combos **Categoria** e **Classificação** mudam conforme o **Setor** escolhido."
+    )
 
 # ==========================================
 # 2. DICIONÁRIO DE DADOS DINÂMICO (Da Especificação)

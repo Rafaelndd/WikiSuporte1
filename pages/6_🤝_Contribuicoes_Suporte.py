@@ -102,6 +102,12 @@ def carregar_manuais():
 # ==========================================
 st.title("🧠 Central de Conhecimento")
 st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e conhecimento colaborativo centralizados em um só lugar!")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "**Ranking** — XP por contribuições (regra de prazo nos registros). **Assistente** — perguntas com IA sobre a base. "
+        "**Acervo** — manuais/wikis raspados. **Adicionar** — envie texto/arquivo para revisão. **Explorar** — busca na base. "
+        "Coordenadores têm **Fila de avaliação**; demais perfis veem menos abas."
+    )
 
 # ==========================================
 # 4. DEFINIÇÃO DAS ABAS (Nova Ordem de UX)
@@ -166,7 +172,7 @@ with aba_ranking:
             # 2. Exibição da Tabela Principal
             st.dataframe(
                 df_ranking, 
-                use_container_width=True, 
+                use_container_width='strech', 
                 hide_index=True,
                 column_config={
                     "Ícone": st.column_config.TextColumn("徽", width="small"),

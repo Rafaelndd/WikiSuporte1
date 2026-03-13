@@ -26,6 +26,11 @@ engine = get_connection()
 
 st.title("📅 Atendimentos Diários")
 st.markdown("Visualize os registros de atendimentos (ligações GoTo e chats Multi360) por data e analista.")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "Escolha a **data** e o **analista** (ou **Todos**). Abaixo aparecem tabelas separadas para **GoTo** (ligações) e **Multi360** (chats). "
+        "Os dados vêm das importações/API; se estiver vazio, confira **Importação** e se há registros naquele dia."
+    )
 
 # Filtros
 with st.container(border=True):
@@ -117,14 +122,14 @@ with tab_go:
     if df_goto.empty:
         st.info("Nenhum atendimento por ligação (GoTo) no período.")
     else:
-        st.dataframe(df_goto, use_container_width=True, hide_index=True)
+        st.dataframe(df_goto, use_container_width='strech', hide_index=True)
         st.caption(f"Total: {len(df_goto)} registro(s)")
 
 with tab_multi:
     if df_multi.empty:
         st.info("Nenhum atendimento por chat (Multi360) no período.")
     else:
-        st.dataframe(df_multi, use_container_width=True, hide_index=True)
+        st.dataframe(df_multi, use_container_width='strech', hide_index=True)
         st.caption(f"Total: {len(df_multi)} registro(s)")
 
 with tab_resumo:

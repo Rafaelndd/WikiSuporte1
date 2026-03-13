@@ -42,6 +42,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎯 Centro de Comando Omnichannel")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "Acesso **só coordenação e desenvolvimento**. **Visão 360º** — métricas em tempo real (GoTo/Multi360 precisam de credenciais em secrets). "
+        "**Plantões** — escala no banco (`plantoes_epsy`). **Picos** — análise de volume. "
+        "Use as abas para alternar entre relatórios e alertas estratégicos."
+    )
 
 # --- 3. CONSULTAS AO BANCO DE DADOS (POSTGRESQL) ---
 @st.cache_data(ttl=300)
