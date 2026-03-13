@@ -166,32 +166,49 @@ class OraculoLogistica:
             print("⚠️ db_homologacao não disponível. Pulando processamento de releases.")
             return
 
+        from services.db_homologacao import (
+            get_helpdesk_release_head,
+            set_helpdesk_release_head,
+            _extrair_versao_do_titulo,
+        )
+
         soup = BeautifulSoup(html_content, 'html.parser')
         textareas = soup.find_all('textarea')
         total_vinculados = 0
         total_ciclos = 0
+        if not textareas:
+            print("⚠️ Nenhum textarea de release no HTML.")
+            return
 
-        for i, ta in enumerate(textareas):
-            texto_release = (ta.text or "").strip()
-            if not texto_release:
-                continue
-            first_line = next(
-                (ln.strip() for ln in texto_release.splitlines() if ln.strip()),
-                f"Release {i + 1}",
+        ta = textareas[0]
+        texto_release = (ta.text or "").strip()
+        if not texto_release:
+            return
+        first_line = next(
+            (ln.strip() for ln in texto_release.splitlines() if ln.strip()),
+            "Release",
+        )
+        titulo_link = first_line[:2000]
+        ver_norm = _extrair_versao_do_titulo(first_line) or _extrair_versao_do_titulo(texto_release[:800])
+        db_titulo, db_ver = get_helpdesk_release_head()
+        if titulo_link and db_titulo == titulo_link:
+            print(f"⏭️ [Releases HTML] Igual ao último sync ({db_ver}). Pulando.")
+            return
+        versao = first_line[:50].strip()
+        try:
+            qtd_v, qtd_c = processar_release_completo(
+                versao=versao,
+                texto_completo=texto_release,
+                autor="Processamento Automático (OraculoLogistica)",
+                nome_arquivo=titulo_link[:255],
             )
-            versao = first_line[:50].strip()
-            try:
-                qtd_v, qtd_c = processar_release_completo(
-                    versao=versao,
-                    texto_completo=texto_release,
-                    autor="Processamento Automático (OraculoLogistica)",
-                )
-                total_vinculados += qtd_v
-                total_ciclos += qtd_c
-            except Exception as ex:
-                print(f"⚠️ Erro ao processar release '{versao}': {ex}")
+            total_vinculados += qtd_v
+            total_ciclos += qtd_c
+            set_helpdesk_release_head(titulo_link=titulo_link, versao_norm=ver_norm or db_ver)
+        except Exception as ex:
+            print(f"⚠️ Erro ao processar release '{versao}': {ex}")
 
-        print(f"✅ [PSY - Assistente] Releases: {total_vinculados} chamados vinculados, {total_ciclos} ciclos criados.")
+        print(f"✅ [PSY - Assistente] Releases (1º bloco): {total_vinculados} vinculados, {total_ciclos} ciclos.")
 
 
     def processar_html_tickets(self, html_content):

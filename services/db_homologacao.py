@@ -96,6 +96,40 @@ def _extrair_versao_do_titulo(texto: str) -> str:
     return m.group(1) if m else ""
 
 
+def get_helpdesk_release_head() -> tuple[str, str]:
+    """(titulo_link_primeiro_release, versao_norm). Tabela helpdesk_release_head id=1."""
+    try:
+        engine = get_connection()
+        with engine.connect() as c:
+            row = c.execute(
+                text("SELECT titulo_link, versao_norm FROM helpdesk_release_head WHERE id = 1")
+            ).fetchone()
+        if row:
+            return (str(row[0] or "").strip(), str(row[1] or "").strip())
+    except Exception:
+        pass
+    return ("", "")
+
+
+def set_helpdesk_release_head(titulo_link: str, versao_norm: str) -> None:
+    """Atualiza o 1º release já sincronizado (versão atual para dashboard)."""
+    engine = get_connection()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO helpdesk_release_head (id, titulo_link, versao_norm, atualizado_em)
+                VALUES (1, :tit, :ver, CURRENT_TIMESTAMP)
+                ON CONFLICT (id) DO UPDATE SET
+                    titulo_link = EXCLUDED.titulo_link,
+                    versao_norm = EXCLUDED.versao_norm,
+                    atualizado_em = CURRENT_TIMESTAMP
+                """
+            ),
+            {"tit": (titulo_link or "")[:2000], "ver": (versao_norm or "")[:32]},
+        )
+
+
 def processar_release_completo(
     versao: str,
     texto_completo: str,

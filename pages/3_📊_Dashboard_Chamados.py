@@ -656,6 +656,8 @@ _RE_VERSAO_SISTEMA_PADRAO = re.compile(
 )
 # Referência: 24/11/2017 — V 1.06.27
 _MIN_VERSAO_SISTEMA_TUPLE = (1, 6, 27, 0)
+# Fallback até o bot gravar helpdesk_release_head (1º release da Home). .env opcional.
+_DEFAULT_TETO_VERSAO_ATUAL = (2, 9, 257, 0)
 
 
 def _tuple_versao_sistema_quatro(s: str) -> Optional[tuple]:
@@ -703,40 +705,33 @@ def _versao_sistema_listagem_ok(
     return True
 
 
-def _teto_versao_atual_sistema() -> Optional[tuple]:
+def _teto_versao_atual_sistema() -> tuple:
     """
-    Teto = versão atual do produto (nada acima disso na listagem).
-    1) .env VERSAO_ATUAL_SISTEMA=2.9.256
-    2) Maior versão_release em releases cujo arquivo não seja PDV Móvel
+    Teto = versão atual do produto (último 1º release sincronizado pelo bot → helpdesk_release_head).
+    1) Coluna versao_norm em helpdesk_release_head (após raspagem)
+    2) .env VERSAO_ATUAL_SISTEMA (só comparação / até primeira sync)
+    3) _DEFAULT_TETO_VERSAO_ATUAL
     """
+    try:
+        from modules.database import get_connection
+        from sqlalchemy import text as sql_text
+
+        with get_connection().connect() as c:
+            row = c.execute(
+                sql_text("SELECT versao_norm FROM helpdesk_release_head WHERE id = 1")
+            ).fetchone()
+        if row and (row[0] or "").strip():
+            t = _tuple_versao_sistema_quatro(str(row[0]).strip())
+            if t is not None and t >= _MIN_VERSAO_SISTEMA_TUPLE:
+                return t
+    except Exception:
+        pass
     raw = (os.getenv("VERSAO_ATUAL_SISTEMA") or "").strip()
     if raw:
         t = _tuple_versao_sistema_quatro(raw)
-        if t is not None:
+        if t is not None and t >= _MIN_VERSAO_SISTEMA_TUPLE:
             return t
-    try:
-        engine = get_connection()
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1 FROM releases LIMIT 1"))
-            rows = pd.read_sql(
-                text(
-                    "SELECT versao_release, COALESCE(nome_arquivo,'') AS nome_arquivo FROM releases"
-                ),
-                conn,
-            )
-        best: Optional[tuple] = None
-        for _, r in rows.iterrows():
-            nome = str(r.get("nome_arquivo") or "")
-            if _titulo_release_eh_pdv_movel(nome):
-                continue
-            t = _tuple_versao_sistema_quatro(str(r.get("versao_release") or "").strip())
-            if t is None or t < _MIN_VERSAO_SISTEMA_TUPLE:
-                continue
-            if best is None or t > best:
-                best = t
-        return best
-    except Exception:
-        return None
+    return _DEFAULT_TETO_VERSAO_ATUAL
 
 
 def _titulo_release_eh_pdv_movel(titulo: Optional[str]) -> bool:
@@ -771,11 +766,11 @@ with aba3:
     st.subheader("🐛 Versões do sistema — abertos, categorias e consulta de segurança")
     _teto_v = _teto_versao_atual_sistema()
     _ok_ver = lambda v: _versao_sistema_listagem_ok(v, teto=_teto_v)
+    _teto_str = ".".join(str(x) for x in _teto_v[:3]) + (f".{_teto_v[3]}" if _teto_v[3] else "")
     st.caption(
-        "Somente versões no **padrão** (ex.: 2.9.252), **sem vírgulas** nem começar por **.**; "
-        "não exibe versão **acima da atual**"
-        + (f" (**teto {'.'.join(str(x) for x in _teto_v)}**)" if _teto_v else " (defina **VERSAO_ATUAL_SISTEMA** no .env ou cadastre **releases**)")
-        + ". **Erro ativo** / **Corrigido** / **release_itens** como antes."
+        f"Somente versões no **padrão** (2.9.x), **sem vírgulas** nem **.** no início; "
+        f"**teto = {_teto_str}** (último **1º release** sincronizado do Helpdesk; senão .env). "
+        "**Erro ativo** / **Corrigido** / **release_itens** como antes."
     )
 
     dfv = df_raw.copy()

@@ -19,7 +19,12 @@ from webdriver_manager.chrome import ChromeDriverManager
 # Importações do nosso ecossistema
 from modules.OraculoLogistica import OraculoLogistica
 from modules.utils import ler_estado_robo, salvar_estado_robo
-from services.db_homologacao import processar_release_completo
+from services.db_homologacao import (
+    processar_release_completo,
+    get_helpdesk_release_head,
+    set_helpdesk_release_head,
+    _extrair_versao_do_titulo,
+)
 from services.bot_control import (
     consumir_tarefa,
     definir_etapa,
@@ -143,13 +148,15 @@ class MotorExtracao:
             pass
 
     def extrair_releases(self):
-        """Extrai releases da Home do helpdesk e persiste (releases, ciclos, release_itens)."""
-        print("📦 Lendo janelas de Releases...")
+        """
+        Só o 1º release da Home (o mais recente da Tecnuv). Compara com o banco:
+        igual ao último sincronizado → não baixa de novo; diferente → abre modal, persiste e atualiza versão atual.
+        """
+        print("📦 Releases: apenas o 1º da Home (último liberado) + comparação com banco…")
         total_vinculados = 0
         total_ciclos = 0
         try:
             time.sleep(2)
-            # Vários jeitos de achar cliques que abrem o modal de notícia/release
             links_releases = []
             for by, sel in [
                 (By.CLASS_NAME, "loadNoticia"),
@@ -165,7 +172,7 @@ class MotorExtracao:
                     if found:
                         links_releases = [e for e in found if e.is_displayed()]
                         if links_releases:
-                            print(f"   → {len(links_releases)} link(s) de release encontrados via {sel}")
+                            print(f"   → {len(links_releases)} link(s) na Home; uso só o 1º (mais recente).")
                             break
                 except Exception:
                     continue
@@ -173,75 +180,92 @@ class MotorExtracao:
             if not links_releases:
                 print(
                     "⚠️ Nenhum elemento .loadNoticia na página. "
-                    "Confirme URL da Home (deve listar notícias/releases). HTML pode ter mudado."
+                    "Confirme URL da Home (deve listar notícias/releases)."
                 )
-                snippet = (self.driver.page_source or "")[:2500]
-                if "loadNoticia" in snippet or "noticia" in snippet.lower():
-                    print("   (página contém 'noticia' — tente ampliar seletores no motor_extracao.py)")
                 return
 
-            for idx, link in enumerate(links_releases):
-                try:
-                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", link)
-                    time.sleep(0.3)
-                    link.click()
-                except Exception as ex:
-                    print(f"⚠️ Clique release #{idx + 1}: {ex}")
-                    continue
+            link = links_releases[0]
+            titulo_link = re.sub(r"\s+", " ", (link.text or "").strip())[:2000]
+            ver_do_link = _extrair_versao_do_titulo(titulo_link)
+            low = titulo_link.lower()
+            if "pdv móvel" in low or "pdv movel" in low:
+                ver_do_link = _extrair_versao_do_titulo(
+                    titulo_link.split("PDV")[0] if "PDV" in titulo_link else titulo_link
+                ) or ver_do_link
 
-                try:
-                    WebDriverWait(self.driver, 12).until(
-                        EC.visibility_of_element_located(
-                            (By.CSS_SELECTOR, ".modal.in, .modal.show, .modal-dialog, .msg1-noticia")
-                        )
-                    )
-                except Exception:
-                    print(f"⚠️ Modal não abriu após clique #{idx + 1}")
-                    self._fechar_modal_release()
-                    time.sleep(1)
-                    continue
-
-                try:
-                    titulo_el = self.driver.find_element(By.CLASS_NAME, "msg1-noticia")
-                    titulo_release = (titulo_el.text or titulo_el.get_attribute("innerText") or "").strip()
-                except Exception:
-                    try:
-                        titulo_release = self.driver.find_element(By.CSS_SELECTOR, ".modal-title").text.strip()
-                    except Exception:
-                        titulo_release = f"Release_{idx + 1}"
-
-                texto_release = self._texto_modal_release()
-                if not texto_release.strip():
-                    print(f"⚠️ Release sem texto extraível: {titulo_release[:60]}… (value/innerHTML vazio)")
-                    self._fechar_modal_release()
-                    time.sleep(1)
-                    continue
-
-                try:
-                    qtd_vinculados, qtd_ciclos = processar_release_completo(
-                        versao=titulo_release[:50].strip(),
-                        texto_completo=texto_release,
-                        autor="Processamento Automático (bot)",
-                        origem="raspagem",
-                    )
-                    total_vinculados += qtd_vinculados
-                    total_ciclos += qtd_ciclos
-                    chamados = re.findall(r"\((\d{4,6})\)", texto_release)
-                    print(f"✅ {titulo_release[:50]} | itens/chamados: {qtd_vinculados} | ciclos: {qtd_ciclos} | nums: {chamados[:8]}")
-                except Exception as ex:
-                    print(f"⚠️ Erro ao persistir release «{titulo_release[:40]}»: {ex}")
-
-                self._fechar_modal_release()
-                time.sleep(1)
-
-            print(f"📊 Total releases processados: {total_vinculados} itens/chamados, {total_ciclos} ciclos novos.")
-            if total_vinculados == 0 and total_ciclos == 0 and links_releases:
+            db_titulo, db_ver = get_helpdesk_release_head()
+            if titulo_link and db_titulo == titulo_link:
                 print(
-                    "💡 Dica: se os modais abrem mas o banco fica vazio, verifique migrações SQL "
-                    "(releases, ciclos_homologacao, release_itens) e erros acima."
+                    f"⏭️ Versão atual já é a do último release sincronizado "
+                    f"({db_ver or '—'}). Nada a baixar."
                 )
+                return
+            if ver_do_link and db_ver == ver_do_link and not db_titulo:
+                print(f"⏭️ Mesma versão no banco ({db_ver}). Nada a baixar.")
+                return
+
+            print(f"🆕 Novo 1º release na Home (ou 1ª sync). Abrindo modal…")
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", link)
+                time.sleep(0.3)
+                link.click()
+            except Exception as ex:
+                print(f"⚠️ Clique no 1º release: {ex}")
+                return
+
+            try:
+                WebDriverWait(self.driver, 12).until(
+                    EC.visibility_of_element_located(
+                        (By.CSS_SELECTOR, ".modal.in, .modal.show, .modal-dialog, .msg1-noticia")
+                    )
+                )
+            except Exception:
+                print("⚠️ Modal não abriu.")
+                self._fechar_modal_release()
+                return
+
+            try:
+                titulo_el = self.driver.find_element(By.CLASS_NAME, "msg1-noticia")
+                titulo_release = (titulo_el.text or titulo_el.get_attribute("innerText") or "").strip()
+            except Exception:
+                try:
+                    titulo_release = self.driver.find_element(By.CSS_SELECTOR, ".modal-title").text.strip()
+                except Exception:
+                    titulo_release = titulo_link or "Release"
+
+            texto_release = self._texto_modal_release()
+            if not texto_release.strip():
+                print(f"⚠️ Release sem texto: {titulo_release[:60]}…")
+                self._fechar_modal_release()
+                return
+
+            ver_norm = _extrair_versao_do_titulo(titulo_release) or _extrair_versao_do_titulo(
+                texto_release[:800]
+            ) or ver_do_link
+            try:
+                qtd_vinculados, qtd_ciclos = processar_release_completo(
+                    versao=titulo_release[:50].strip(),
+                    texto_completo=texto_release,
+                    autor="Processamento Automático (bot)",
+                    nome_arquivo=titulo_link[:255] if titulo_link else None,
+                    origem="raspagem",
+                )
+                total_vinculados += qtd_vinculados
+                total_ciclos += qtd_ciclos
+                set_helpdesk_release_head(titulo_link=titulo_link or titulo_release[:500], versao_norm=ver_norm)
+                chamados = re.findall(r"\((\d{4,6})\)", texto_release)
+                print(
+                    f"✅ Versão atual atualizada → {ver_norm} | {titulo_release[:50]} | "
+                    f"itens: {qtd_vinculados} | ciclos: {qtd_ciclos} | {chamados[:6]}"
+                )
+            except Exception as ex:
+                print(f"⚠️ Erro ao persistir release: {ex}")
+
+            self._fechar_modal_release()
+            time.sleep(0.5)
+            print(f"📊 Sync 1º release: {total_vinculados} itens/chamados, {total_ciclos} ciclos.")
         except Exception as e:
-            print(f"❌ Erro ao ler os Releases: {e}")
+            print(f"❌ Erro ao ler Releases: {e}")
             import traceback
             traceback.print_exc()
 
