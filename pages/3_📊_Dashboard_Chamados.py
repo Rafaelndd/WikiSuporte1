@@ -649,6 +649,103 @@ def _semver_tuple(v: str) -> tuple:
     return (0, 0, 0)
 
 
+# --- Versões “sistema” para listagem / consulta (exclui PDV Móvel e fora do padrão) ---
+_RE_VERSAO_SISTEMA_PADRAO = re.compile(
+    r"^\s*(?:V\s*)?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?\s*$",
+    re.IGNORECASE,
+)
+# Referência: 24/11/2017 — V 1.06.27
+_MIN_VERSAO_SISTEMA_TUPLE = (1, 6, 27, 0)
+
+
+def _tuple_versao_sistema_quatro(s: str) -> Optional[tuple]:
+    """Extrai (major, minor, patch, build) se a string for só versão no padrão X.Y.Z ou X.Y.Z.N / V …"""
+    if not s or not str(s).strip():
+        return None
+    m = _RE_VERSAO_SISTEMA_PADRAO.match(str(s).strip())
+    if not m:
+        return None
+    return (
+        int(m.group(1)),
+        int(m.group(2)),
+        int(m.group(3)),
+        int(m.group(4) or 0),
+    )
+
+
+def _versao_sistema_listagem_ok(
+    texto_ou_versao: str,
+    teto: Optional[tuple] = None,
+) -> bool:
+    """
+    Válido para listagem / aba Versões:
+    - Só padrão estrito: string inteira X.Y.Z ou X.Y.Z.N (V opcional), sem vírgulas, sem começar por "."
+    - >= V 1.06.27; se teto informado, versão <= teto (nada acima da atual)
+    - Rejeita PDV Móvel no texto
+    """
+    if not texto_ou_versao or not str(texto_ou_versao).strip():
+        return False
+    s = str(texto_ou_versao).strip()
+    if "," in s or ";" in s:
+        return False
+    if s.startswith("."):
+        return False
+    low = s.lower()
+    if "pdv móvel" in low or "pdv movel" in low:
+        return False
+    t = _tuple_versao_sistema_quatro(s)
+    if t is None:
+        return False
+    if t < _MIN_VERSAO_SISTEMA_TUPLE:
+        return False
+    if teto is not None and t > teto:
+        return False
+    return True
+
+
+def _teto_versao_atual_sistema() -> Optional[tuple]:
+    """
+    Teto = versão atual do produto (nada acima disso na listagem).
+    1) .env VERSAO_ATUAL_SISTEMA=2.9.256
+    2) Maior versão_release em releases cujo arquivo não seja PDV Móvel
+    """
+    raw = (os.getenv("VERSAO_ATUAL_SISTEMA") or "").strip()
+    if raw:
+        t = _tuple_versao_sistema_quatro(raw)
+        if t is not None:
+            return t
+    try:
+        engine = get_connection()
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1 FROM releases LIMIT 1"))
+            rows = pd.read_sql(
+                text(
+                    "SELECT versao_release, COALESCE(nome_arquivo,'') AS nome_arquivo FROM releases"
+                ),
+                conn,
+            )
+        best: Optional[tuple] = None
+        for _, r in rows.iterrows():
+            nome = str(r.get("nome_arquivo") or "")
+            if _titulo_release_eh_pdv_movel(nome):
+                continue
+            t = _tuple_versao_sistema_quatro(str(r.get("versao_release") or "").strip())
+            if t is None or t < _MIN_VERSAO_SISTEMA_TUPLE:
+                continue
+            if best is None or t > best:
+                best = t
+        return best
+    except Exception:
+        return None
+
+
+def _titulo_release_eh_pdv_movel(titulo: Optional[str]) -> bool:
+    if not titulo:
+        return False
+    low = str(titulo).lower()
+    return "pdv móvel" in low or "pdv movel" in low
+
+
 def _status_aberto(st) -> bool:
     if pd.isna(st):
         return True
@@ -672,15 +769,21 @@ def _eh_fiscal(cat) -> bool:
 
 with aba3:
     st.subheader("🐛 Versões do sistema — abertos, categorias e consulta de segurança")
+    _teto_v = _teto_versao_atual_sistema()
+    _ok_ver = lambda v: _versao_sistema_listagem_ok(v, teto=_teto_v)
     st.caption(
-        "Todas as versões registradas nos chamados (cliente na abertura). "
-        "**Erro ainda ativo** = chamado classificado como erro e ainda aberto. **Corrigido** = encerrado; quando houver **release_itens**, indica-se em qual versão o chamado foi citado."
+        "Somente versões no **padrão** (ex.: 2.9.252), **sem vírgulas** nem começar por **.**; "
+        "não exibe versão **acima da atual**"
+        + (f" (**teto {'.'.join(str(x) for x in _teto_v)}**)" if _teto_v else " (defina **VERSAO_ATUAL_SISTEMA** no .env ou cadastre **releases**)")
+        + ". **Erro ativo** / **Corrigido** / **release_itens** como antes."
     )
 
     dfv = df_raw.copy()
     bad_ver = {"não informada", "não informado", "", "nan", "none"}
     dfv["versao_sistema"] = dfv.get("versao_sistema", pd.Series(dtype=str)).astype(str).str.strip()
     dfv = dfv[~dfv["versao_sistema"].str.lower().isin(bad_ver)]
+    # Normalização: só padrão estrito + até versão atual (teto)
+    dfv = dfv[dfv["versao_sistema"].map(_ok_ver)]
     dfv["aberto"] = dfv["status_atual"].apply(_status_aberto)
     dfv["categoria_ia"] = dfv.get("categoria_ia", pd.Series(index=dfv.index, dtype=object)).fillna("Não classificada").astype(str)
     dfv["eh_erro"] = dfv["categoria_ia"].apply(_eh_erro)
@@ -689,7 +792,10 @@ with aba3:
     dfv["Cliente"] = cn.astype(str).replace("", "Necessário cadastro")
 
     if dfv.empty:
-        st.info("Nenhuma versão de sistema preenchida nos chamados.")
+        st.info(
+            "Nenhum chamado com **versão_sistema** válida neste recorte (padrão X.Y.Z, sem vírgula, até a versão atual), "
+            "ou nenhuma versão preenchida."
+        )
     else:
         # --- 1) Todas as versões: total de ABERTOS por versão (ordenado semver) ---
         agg_abertos = (
@@ -737,26 +843,10 @@ with aba3:
             max_value=nmax,
             value=min(18, nmax),
             key="aba3_n_versao_grafico",
-            help="Reduz barras para caber numa tela; a tabela acima lista todas.",
+            help="Só as N versões com mais abertos; sem barra agregada.",
         )
         por_ord_abertos = por_versao.sort_values("Chamados_abertos", ascending=False)
-        if len(por_ord_abertos) <= n_graf:
-            por_chart = por_ord_abertos.sort_values("Chamados_abertos", ascending=True)
-        else:
-            top = por_ord_abertos.head(n_graf).copy()
-            rest = por_ord_abertos.iloc[n_graf:]
-            outros = pd.DataFrame(
-                [
-                    {
-                        "versao_sistema": f"➕ Outras {len(rest)} versões (agregado)",
-                        "Chamados_abertos": int(rest["Chamados_abertos"].sum()),
-                        "Total_chamados": int(rest["Total_chamados"].sum()),
-                    }
-                ]
-            )
-            por_chart = pd.concat([top, outros], ignore_index=True).sort_values(
-                "Chamados_abertos", ascending=True
-            )
+        por_chart = por_ord_abertos.head(n_graf).sort_values("Chamados_abertos", ascending=True)
 
         altura_barras = min(520, 120 + len(por_chart) * 26)
         fig_v = px.bar(
@@ -772,7 +862,7 @@ with aba3:
         st.plotly_chart(fig_v, use_container_width=True)
 
         # --- 2) Categorias (abertos) — mais aberturas com a desenvolvedora ---
-        st.markdown("#### 📊 Categorias (IA) — volume entre chamados **ainda abertos** (sem pizza)")
+        st.markdown("#### 📊 Categorias (IA) — volume entre chamados **ainda abertos**")
         ab = dfv[dfv["aberto"]]
         if ab.empty:
             st.info("Nenhum chamado aberto no recorte.")
@@ -796,19 +886,35 @@ with aba3:
             engine = get_connection()
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
-                ri = pd.read_sql(
-                    text(
-                        """
-                        SELECT nr_chamado, versao FROM release_itens
-                        WHERE versao IS NOT NULL AND TRIM(versao) <> ''
-                        """
-                    ),
-                    conn,
-                )
+                try:
+                    ri = pd.read_sql(
+                        text(
+                            """
+                            SELECT nr_chamado, versao, titulo_release FROM release_itens
+                            WHERE versao IS NOT NULL AND TRIM(versao) <> ''
+                            """
+                        ),
+                        conn,
+                    )
+                except Exception:
+                    ri = pd.read_sql(
+                        text(
+                            """
+                            SELECT nr_chamado, versao FROM release_itens
+                            WHERE versao IS NOT NULL AND TRIM(versao) <> ''
+                            """
+                        ),
+                        conn,
+                    )
+                    ri["titulo_release"] = ""
             if not ri.empty:
                 for _, r in ri.iterrows():
-                    nr = int(r["nr_chamado"])
+                    if _titulo_release_eh_pdv_movel(r.get("titulo_release")):
+                        continue
                     v = str(r["versao"]).strip()
+                    if not _versao_sistema_listagem_ok(v, teto=_teto_v):
+                        continue
+                    nr = int(r["nr_chamado"])
                     map_nr_releases.setdefault(nr, set()).add(v)
         except Exception:
             pass
@@ -817,33 +923,50 @@ with aba3:
             s = map_nr_releases.get(int(nr), set())
             if not s:
                 return "—"
-            return ", ".join(sorted(s, key=_semver_tuple))
+            return ", ".join(sorted(s, key=lambda x: _tuple_versao_sistema_quatro(x) or (0, 0, 0, 0)))
 
         # --- 4) Consulta: versão segura? + lista filtrável ---
         st.divider()
         st.markdown("#### 🛡️ Consulta por versão (ex.: atualizar rede para 2.9.252?)")
-        lista_ver = por_versao["versao_sistema"].tolist()
-        v_consulta = st.selectbox("Versão a analisar", options=lista_ver[::-1] or lista_ver, index=0)
-        sub = dfv[dfv["versao_sistema"] == v_consulta]
+        st.caption(
+            "Padrão **X.Y.Z** / **X.Y.Z.N** (opcional **V**), sem **,** nem **.** no início; "
+            "≥ **V 1.06.27**; ≤ **versão atual**. **PDV Móvel** excluído."
+        )
+        lista_ver = [
+            v
+            for v in por_versao.sort_values("_ord", ascending=True)["versao_sistema"].tolist()
+            if _ok_ver(v)
+        ]
+        lista_ver_ui = lista_ver[::-1]  # mais recentes primeiro no select
+        if not lista_ver_ui:
+            st.warning(
+                "Nenhuma versão no recorte passou na validação (formato + mínimo V 1.06.27; textos com PDV Móvel excluídos). "
+                "Ajuste o cadastro **versão_sistema** nos chamados ou o filtro de dados."
+            )
+            v_consulta = None
+        else:
+            v_consulta = st.selectbox("Versão a analisar", options=lista_ver_ui, index=0)
+        sub = dfv[dfv["versao_sistema"] == v_consulta] if v_consulta is not None else dfv.iloc[0:0]
         erros_sub = sub[sub["eh_erro"]]
         abertos_erro = erros_sub[erros_sub["aberto"]]
         fechados_erro = erros_sub[~erros_sub["aberto"]]
         n_aberto_erro = len(abertos_erro)
         n_fech_erro = len(fechados_erro)
 
-        if n_aberto_erro > 0:
-            st.error(
-                f"**Atenção:** na versão **{v_consulta}** existem **{n_aberto_erro}** chamado(s) classificados como **erro** ainda **ativos** — risco para rollout até normalizar ou subir versão com correções."
-            )
-        else:
-            st.success(
-                f"Nenhum chamado de **erro** ainda **aberto** vinculado à versão **{v_consulta}** no histórico analisado. "
-                "Ainda assim confira melhorias/fiscais abaixo."
-            )
-        st.metric("Erros já encerrados (histórico nesta versão)", n_fech_erro)
-        if n_fech_erro and map_nr_releases:
-            com_release = sum(1 for _, r in fechados_erro.iterrows() if int(r["nr_chamado"]) in map_nr_releases)
-            st.caption(f"Desses, **{com_release}** aparecem em pelo menos um **release** (citados em nota de versão).")
+        if v_consulta is not None:
+            if n_aberto_erro > 0:
+                st.error(
+                    f"**Atenção:** na versão **{v_consulta}** existem **{n_aberto_erro}** chamado(s) classificados como **erro** ainda **ativos** — risco para rollout até normalizar ou subir versão com correções."
+                )
+            else:
+                st.success(
+                    f"Nenhum chamado de **erro** ainda **aberto** vinculado à versão **{v_consulta}** no histórico analisado. "
+                    "Ainda assim confira melhorias/fiscais abaixo."
+                )
+            st.metric("Erros já encerrados (histórico nesta versão)", n_fech_erro)
+            if n_fech_erro and map_nr_releases:
+                com_release = sum(1 for _, r in fechados_erro.iterrows() if int(r["nr_chamado"]) in map_nr_releases)
+                st.caption(f"Desses, **{com_release}** aparecem em pelo menos um **release** (citados em nota de versão).")
 
         st.markdown("##### Filtros da lista detalhada")
         c1, c2, c3 = st.columns(3)
