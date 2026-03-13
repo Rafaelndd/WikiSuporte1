@@ -37,7 +37,7 @@ logging.basicConfig(
     level=logging.INFO          
 )
 
-logging.info("--- Aplicação iniciada e logs configurados  ---")
+logging.info("--- Sistema WikiSuporte - iniciado e logs configurados  ---")
 
 #======================================================================================================================#
 # Tenta importar a função de auditoria (Ajuste o caminho se necessário)
@@ -49,7 +49,7 @@ except ImportError:
 
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
 st.set_page_config(
-    page_title="Wiki-Suporte", 
+    page_title="WikiSuporte", 
     page_icon="💡", 
     layout="wide", 
     initial_sidebar_state="collapsed"
@@ -75,7 +75,7 @@ else:
     perfil_logado = perfil_logado_raw
 
 if perfil_logado not in ["dev", "coordenador"]:
-    st.error("⛔ Acesso Negado: Esta página é restrita a perfis de Coordenação e Desenvolvimento.")
+    st.error("⛔ Acesso Negado.")
     st.stop()
 
 
@@ -119,7 +119,7 @@ st.markdown("Análise detalhada dos atendimentos via GoTo e Multi360.")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
         "Ajuste **Filtros** (período, analista, cliente). As **abas** separam GoTo, Multi360 e visões combinadas. "
-        "Tabelas com cores usam **matplotlib** (instale se faltar). Dados vêm da **Importação** e da API GoTo."
+        "Indicadores e gráficos mostram volume, tempo médio, satisfação e mais. Use os insights para gestão e melhorias. "
     )
 
 df_goto_raw = carregar_dados_goto()
@@ -390,7 +390,7 @@ with aba_geral:
         )
         st.plotly_chart(fig_omni, use_container_width='stretch')
         st.caption(
-            "Distribuição dos atendimentos por canal. As barras facilitam comparar volumes e funcionam melhor em telas menores."
+            "A visualização mostra a distribuição dos atendimentos entre os canais."
         )
             
         with g2:
@@ -769,7 +769,7 @@ with sub_qual:
             )
             
             st.plotly_chart(fig_hist_tma, use_container_width= 'stretch')
-            st.caption("💡 **Análise:** Se a curva tiver uma 'cauda' longa à direita, você tem muitos casos complexos que travam a fila.")
+            st.caption("💡 **Análise:** Se a curva se estende à direita, indica casos complexos que demoram mais para serem resolvidos e atrasam a fila.")
 
         # --- MÉTRICA DE CONCLUSÃO RÁPIDA (UX: O "Pulo do Gato" para o Gestor) ---
         atendimentos_rapidos = (df_wpp["TMA_HORAS"] <= 1).mean() * 100
@@ -999,6 +999,7 @@ with aba_telefonia:
                 st.info("O sistema não conseguiu identificar o nome dos agentes no arquivo do GoTo.")
 
 try:
+    usuario_id = st.session_state.get("usuario_id", None)
     registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD", "Acessou o dashboard de atendimentos Multi360 e Goto")
 except:
     pass

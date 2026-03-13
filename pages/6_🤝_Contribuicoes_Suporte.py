@@ -1,3 +1,8 @@
+"""
+Essa page foi renomeada para 6_🤝_Contribuicoes_Suporte.py para refletir melhor o conteúdo e evitar confusão com a page de dashboard de tickets. O código da antiga page 5_📊_Dashboard_Tickets_EPSY.py foi mantido aqui para referência, mas a nova page 6 terá foco total em contribuições, avaliações e fila de revisão, enquanto a antiga page 5 continuará sendo o dashboard analítico dos tickets EPSY.
+
+"""
+
 import streamlit as st
 import pandas as pd
 from sqlalchemy import text
@@ -18,8 +23,6 @@ import re
 from menus import *
 from modules.utils import inicializar_usuario, calcular_patente
 
-
-
 load_dotenv()
 
 
@@ -27,26 +30,8 @@ try:
     from modules.auditoria import registrar_log_auditoria
 except ImportError:
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
+#==================================================================================================================
 
-
-
-# # ==========================================
-# # 1. CONFIGURAÇÕES DA PÁGINA E SEGURANÇA
-# # ==========================================
-# st.set_page_config(page_title="WikiSuporte", page_icon="🏆", layout="wide")
-
-# if not st.session_state.get('autenticado'): 
-#     st.switch_page("app.py")
-
-# usuario_logado_id = st.session_state.get('usuario_id')
-# perfil_logado = str(st.session_state.get('perfil', 'analista')).lower()
-
-# UPLOAD_DIR = "uploads_wiki"
-# os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# ==========================================
-# 1. CONFIGURAÇÕES DA PÁGINA E SEGURANÇA
-# =========================================
 
 # Configuração da página (deve ser a primeira chamada Streamlit)
 st.set_page_config(page_title="WikiSuporte", page_icon="🏆", layout="wide")
@@ -130,9 +115,9 @@ def _notificar_email_obsoleto(email_autor: str, nome_autor: str, titulo: str, qu
         pass  # e-mail opcional
 
 
-# ==========================================
+# ===============================================================================================================================================================
 # 2. FUNÇÕES DE CACHE (Trazidas das Pages 6 e 8)
-# ==========================================
+# ===============================================================================================================================================================
 @st.cache_data(ttl=3600)
 def carregar_wikis():
     try: 
@@ -162,8 +147,8 @@ st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e con
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
         "**Ranking** — XP por contribuições (regra de prazo nos registros). **Assistente** — perguntas com IA sobre a base. "
-        "**Acervo** — manuais/wikis raspados. **Adicionar** — envie texto/arquivo para revisão. **Explorar** — busca na base. "
-        "Coordenadores têm **Fila de avaliação**; demais perfis veem menos abas."
+        "**Acervo** — Manuais/ Wikis. **Adicionar** — envie texto/arquivo para revisão. **Explorar** — busca na base. "
+        "Coordenador têm **Fila de avaliação**; demais perfis não tem acesso a essa aba."
     )
 
 # ==========================================
@@ -783,128 +768,6 @@ with aba_arquivo:
             st.dataframe(df_ranking_buscas, width="stretch", hide_index=True)
 
 
-# # ==========================================
-# # ABA 6: NOVA CONTRIBUIÇÃO (INSERÇÃO MANUAL)
-# # ==========================================
-# with aba_nova:
-#     st.markdown("### 📝 Adicionar Nova Contribuição")
-    
-#     # Usamos clear_on_submit=True para limpar automaticamente os campos após salvar
-#     with st.form("form_contribuicao", clear_on_submit=True):
-#         titulo = st.text_input(
-#             "📌 Título", 
-#             placeholder="Título claro e objetivo"
-#         )
-        
-#         col1, col2 = st.columns(2)
-#         with col1:
-#             categoria = st.text_input(
-#                 "📂 Categoria", 
-#                 placeholder="Ex: Hardware, Software, Rede..."
-#             )
-#         with col2:
-#             subcategoria = st.text_input(
-#                 "📁 Subcategoria", 
-#                 placeholder="Ex: Impressoras, Windows, VPN..."
-#             )
-        
-#         conteudo = st.text_area(
-#             "📝 Conteúdo", 
-#             height=250,
-#             placeholder="Descrição detalhada do conhecimento..."
-#         )
-        
-#         st.markdown("---")
-#         st.markdown("📎 **Anexar Evidências ou Documentos**")
-        
-#         # Aceitando todos os formatos solicitados
-#         arquivo_anexo = st.file_uploader(
-#             "Formatos aceitos: PDF, TXT, CSV, XLSX, XML, SQL, Imagens, Áudio, Vídeo, Sistemas", 
-#             type=["pdf", "txt", "csv", "xlsx", "xls", "xml", "sql", "png", "jpg", "jpeg", "pgz", "fr3", "mp3", "mp4"]
-#         )
-        
-#         btn_salvar = st.form_submit_button("💾 Salvar Contribuição", type="primary")
-        
-#         if btn_salvar:
-#             if not titulo or not categoria or not conteudo:
-#                 st.warning("⚠️ Preencha pelo menos o Título, Categoria e Conteúdo.")
-#             else:
-#                 # Processa anexo se houver
-#                 texto_extraido = ""
-#                 caminho_anexo_db = None
-                
-#                 if arquivo_anexo:
-#                     with st.spinner("A processar anexo..."):
-#                         # Salva o arquivo fisicamente no diretório
-#                         nome_seguro = f"{int(time.time())}_{arquivo_anexo.name.replace(' ', '_')}"
-#                         caminho_fisico = os.path.join(UPLOAD_DIR, nome_seguro)
-                        
-#                         with open(caminho_fisico, "wb") as f:
-#                             f.write(arquivo_anexo.getbuffer())
-#                         caminho_anexo_db = caminho_fisico
-                        
-#                         # Extrai texto de documentos suportados (ignora ficheiros multimédia/sistemas)
-#                         ext = arquivo_anexo.name.split('.')[-1].lower()
-#                         try:
-#                             if ext in ['txt', 'sql', 'xml', 'csv']:
-#                                 texto_extraido = arquivo_anexo.getvalue().decode('utf-8', errors='ignore')
-#                             elif ext == 'pdf':
-#                                 import PyPDF2
-#                                 pdf_reader = PyPDF2.PdfReader(arquivo_anexo)
-#                                 texto_extraido = " ".join([
-#                                     p.extract_text() for p in pdf_reader.pages if p.extract_text()
-#                                 ])
-#                             elif ext in ['xlsx', 'xls']:
-#                                 import pandas as pd
-#                                 texto_extraido = pd.read_excel(arquivo_anexo).to_string()
-#                         except Exception as e:
-#                             st.warning(f"Anexo guardado com sucesso, mas o texto não pôde ser extraído: {e}")
-                
-#                 # Prepara o conteúdo final agregando o texto extraído (se existir)
-#                 conteudo_final = conteudo.strip()
-#                 if texto_extraido:
-#                     conteudo_final += f"\n\n--- CONTEÚDO DO ANEXO ---\n{texto_extraido}"
-                
-#                 # Salva no banco de dados
-#                 try:
-#                     with engine.begin() as conn:
-#                         status_inicial = "APROVADO" if perfil_logado in ['coordenação', 'superadmin', 'administrador', 'desenvolvedor'] else "PENDENTE"
-                        
-#                         conn.execute(
-#                             text("""
-#                                 INSERT INTO base_conhecimento 
-#                                 (origem, titulo, categoria, subcategoria, conteudo, id_analista_autor, status, caminho_anexo, qtd_tentativas) 
-#                                 VALUES ('CONHECIMENTO_SUPORTE', :t, :c, :s, :co, :a, :st, :ax, 1)
-#                             """),
-#                             {
-#                                 "t": titulo.strip(),
-#                                 "c": categoria.strip().upper(),
-#                                 "s": subcategoria.strip().upper() if subcategoria else "GERAL",
-#                                 "co": conteudo_final,
-#                                 "a": usuario_logado_id,
-#                                 "st": status_inicial,
-#                                 "ax": caminho_anexo_db
-#                             }
-#                         )
-                    
-#                     st.success("✅ Contribuição salva com sucesso!")
-                    
-#                     # Regista na auditoria (se a função existir no seu código base)
-#                     try:
-#                         registrar_log_auditoria(usuario_logado_id, "NOVA_CONTRIBUICAO", f"Submeteu: {titulo[:30]}")
-#                     except NameError:
-#                         pass # Ignora caso o módulo de auditoria não esteja ativo
-                        
-#                     time.sleep(2)
-#                     st.rerun()
-                    
-#                 except Exception as e:
-#                     st.error(f"❌ Erro ao salvar na base de dados: {str(e)}")
-#                     try:
-#                         logger.error(f"Erro BD: {e}")
-#                     except NameError:
-#                         pass
-
 # ==========================================
 # ABA 6: NOVA CONTRIBUIÇÃO (INSERÇÃO MANUAL)
 # ==========================================
@@ -1410,60 +1273,6 @@ with aba_explorar:
     except Exception as e:
         st.error(f"❌ Erro ao carregar dados: {e}")
 
-# with aba_explorar:
-#     st.title("🔎 Explorar Base de Conhecimento")
-#     st.markdown("Consulte as contribuições aprovadas pela equipa, visualize evidências e descarregue os anexos necessários.")
-    
-#     # --- 1. ÁREA DE FILTROS (Layout Responsivo) ---
-#     with st.container(border=True):
-#         st.markdown("#### 🎯 Filtros de Pesquisa")
-#         col_busca, col_cat = st.columns([2, 1])
-        
-#         with col_busca:
-#             termo_pesquisa = st.text_input("Pesquisar por Título ou Conteúdo:", placeholder="Ex: Erro impressora fiscal...")
-        
-#         with col_cat:
-#             # Busca categorias dinamicamente para o selectbox
-#             try:
-#                 with engine.connect() as conn:
-#                     cat_query = text("SELECT DISTINCT categoria FROM base_conhecimento WHERE status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE' ORDER BY categoria")
-#                     categorias_disponiveis = [row[0] for row in conn.execute(cat_query).fetchall() if row[0]]
-#             except Exception:
-#                 categorias_disponiveis = []
-                
-#             categorias_disponiveis.insert(0, "Todas as Categorias")
-#             categoria_selecionada = st.selectbox("Filtrar por Categoria:", categorias_disponiveis)
-
-#     st.markdown("<br>", unsafe_allow_html=True)
-
-#     # --- 2. CONSULTA AO BANCO DE DADOS ---
-#     try:
-#         with engine.connect() as conn:
-#             # Montagem dinâmica da query baseada nos filtros
-#             query_base = """
-#                 SELECT b.id, b.titulo, b.categoria, b.subcategoria, b.conteudo, b.caminho_anexo, 
-#                        to_char(b.criado_em, 'DD/MM/YYYY') as data_pub, u.nome AS autor 
-#                 FROM base_conhecimento b 
-#                 LEFT JOIN usuarios u ON b.id_analista_autor = u.id 
-#                 WHERE b.origem = 'CONHECIMENTO_SUPORTE' AND b.status = 'APROVADO'
-#             """
-            
-#             params = {}
-#             if termo_pesquisa.strip():
-#                 query_base += " AND (b.titulo ILIKE :termo OR b.conteudo ILIKE :termo)"
-#                 params["termo"] = f"%{termo_pesquisa.strip()}%"
-                
-#             if categoria_selecionada != "Todas as Categorias":
-#                 query_base += " AND b.categoria = :cat"
-#                 params["cat"] = categoria_selecionada
-                
-#             query_base += " ORDER BY b.criado_em DESC LIMIT 50" # Limite de paginação para performance
-            
-#             df_conhecimento = pd.read_sql(text(query_base), conn, params=params)
-            
-#     except Exception as e:
-#         st.error(f"❌ Erro ao carregar a base de conhecimento: {e}")
-#         df_conhecimento = pd.DataFrame()
 
     # --- 3. EXIBIÇÃO DOS RESULTADOS (UI/UX) ---
     if df_conhecimento.empty:

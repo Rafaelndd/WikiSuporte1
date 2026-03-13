@@ -8,7 +8,7 @@ from services.auth_guard import require_login
 # ==========================================
 # 1. CONFIGURAÇÕES DA PÁGINA E SEGURANÇA
 # ==========================================
-st.set_page_config(page_title="Wiki Suporte", page_icon="📊", layout="wide")
+st.set_page_config(page_title="WikiSuporte", page_icon="📊", layout="wide")
 
 # Exige login (todos os perfis autenticados podem ver este dashboard)
 perfil_logado = require_login()

@@ -10,13 +10,9 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from typing import Tuple, Optional
 from modules.database import get_connection
-from services.db_homologacao import get_metricas_homologacao
 from retry_requests import retry
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
-
-
-
 
 # ==========================================
 # 1. SEGURANÇA E SESSÃO
@@ -30,7 +26,7 @@ if "notificacoes_lidas" not in st.session_state:
 
 
 st.set_page_config(
-    page_title="Wiki-Suporte",
+    page_title="WikiSuporte",
     page_icon="💡",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -73,10 +69,6 @@ try:
 except ImportError:
     # Fallback caso o ficheiro não exista ainda
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
-
-
-
-
 
 # ==========================================
 # 2. MOTORES DE BUSCA E PROCESSAMENTO
@@ -323,6 +315,15 @@ def classificar_reincidencia_e_tempo(df_interacoes_chamado, data_abertura, statu
     return classificacao, data_primeira_liberacao
 
 
+def detectar_liberacao(texto: str) -> bool:
+    """
+    Retorna True se o texto indicar que o chamado foi liberado em uma versão.
+    Exemplo: 'Este chamado foi liberado em vers 3.1.4'
+    """
+    if not texto:
+        return False
+    return re.search(r"liberado em vers", texto, re.IGNORECASE) is not None
+
 def sincronizar_chamados(
     ids_helpdesk_abertos: list,
     ids_banco_abertos: list,
@@ -386,49 +387,6 @@ def sincronizar_chamados(
                 )
 
     return resultados
-# def detectar_liberacao(texto):
-#     return re.search(r"Este chamado foi liberado em vers", texto, re.IGNORECASE) is not None
-
-# def classificar_reincidencia_e_tempo(df_interacoes_chamado, data_abertura, status_atual):
-#     if df_interacoes_chamado.empty:
-#         return "Sem Liberação", pd.NaT
-
-#     df_ord = df_interacoes_chamado.sort_values("data_interacao").reset_index(drop=True)
-    
-#     liberacao_idx = None
-#     data_primeira_liberacao = pd.NaT
-    
-#     for idx, row in df_ord.iterrows():
-#         texto = limpar_html(row.get("descricao_html", ""))
-#         if detectar_liberacao(texto):
-#             liberacao_idx = idx
-#             if pd.isna(data_primeira_liberacao):
-#                 data_primeira_liberacao = row['data_interacao']
-    
-#     if liberacao_idx is None:
-#         return "Sem Liberação", pd.NaT
-
-#     posteriores = df_ord.iloc[liberacao_idx + 1:]
-    
-#     if posteriores.empty:
-#         if "Encerrado" in str(status_atual):
-#             classificacao = "Resolvido Pós-Liberação"
-#         else:
-#             classificacao = "Aguardando Validação EPSY"
-#     else:
-#         resolveu = False
-#         for _, row in posteriores.iterrows():
-#             texto = limpar_html(row.get("descricao_html", ""))
-#             if "finaliza" in texto.lower() or "encerr" in texto.lower():
-#                 resolveu = True
-#                 break
-                
-#         if resolveu or "Encerrado" in str(status_atual):
-#             classificacao = "Resolvido Pós-Liberação"
-#         else:
-#             classificacao = "Reincidência"
-            
-#     return classificacao, data_primeira_liberacao
 
 # ==========================================
 # 3. INTERFACE E CARREGAMENTO
@@ -437,7 +395,7 @@ st.title("🖥️ Dashboard Chamados")
 st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, reincidências e desempenho da desenvolvedora.")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
-        "**Período padrão:** 12 meses até hoje. **Status padrão:** Pendente representante. "
+        "**Período padrão:** 12 meses. **Status padrão:** Pendente representante. "
         "`status_atual` do banco é normalizado (minúsculas, sem acento) para bater com a lista e cores.\n\n"
         "**Após o bot sincronizar:** os dados vêm do Postgres, mas esta página usa **cache ~45s**. "
         "Se não vir mudança na hora, clique **🔄 Atualizar** nos filtros (limpa cache)."
@@ -448,7 +406,7 @@ df_int = carregar_interacoes()
 df_releases = carregar_releases_chamados()
 
 if df_raw.empty:
-    st.warning("WikiSuporte ainda não se conectou ao banco de dados. Entre em contato com o desenvolvedor para resolver o problema.")
+    st.warning("WikiSuporte ainda não se conectou ao banco de dados.")
     st.stop()
 
 # ==========================================
@@ -485,7 +443,7 @@ with st.expander("⚙️ Filtros: ", expanded=True):
             "📌 Status (só lista oficial Tecnuv)",
             options=OPCOES_STATUS_FILTRO,
             default=["Pendente representante"],
-            help="Mapeamento ignora maiúsc/minúsc e acentos (igual ao banco). Padrão: Pendente representante. Vazio = todos os status da lista.",
+            help="Filtra chamados que tenham estes status (normalizados) no período. As outras abas usam TODOS os chamados do período até você ajustar o status.",
         )
         
     with col_f4:
@@ -587,9 +545,9 @@ if df.empty:
 aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "🎯 Visão Geral",
     "⏳ Tempo de espera e gargalos nos chamados com a desenvolvedora.",
-    "🐛 Detalhamento de Versões",
+    "📈 Detalhamento de Versões",
     "👥 Chamados por Analistas EPSY & Clientes",
-    "📋 Qualidade de Homologação",
+    "📈 Entrega Tecnuv (suporte)",
     "📂 Fila aberta & releases",
 ])
 
@@ -939,7 +897,7 @@ def _eh_fiscal(cat) -> bool:
 
 
 with aba3:
-    st.subheader("🐛 Versões do sistema — abertos, categorias e consulta de segurança")
+    st.subheader(" Versões do sistema — análise de chamados por versão")
     _teto_v = _teto_versao_atual_sistema()
     _ok_ver = lambda v: _versao_sistema_listagem_ok(v, teto=_teto_v)
     _teto_str = ".".join(str(x) for x in _teto_v[:3]) + (f".{_teto_v[3]}" if _teto_v[3] else "")
@@ -1127,7 +1085,7 @@ with aba3:
         if v_consulta is not None:
             if n_aberto_erro > 0:
                 st.error(
-                    f"**Atenção:** na versão **{v_consulta}** existem **{n_aberto_erro}** chamado(s) classificados como **erro** ainda **ativos** — risco para rollout até normalizar ou subir versão com correções."
+                    f"**Atenção:** na versão **{v_consulta}** existem **{n_aberto_erro}** chamado(s) classificados como **erro** ainda **ativos** — Risco de atualizar algum cliente para esta versão. Confira detalhes e releases citados na tabela abaixo. "
                 )
             else:
                 st.success(
@@ -1249,93 +1207,92 @@ with aba4:
                 st.caption("💡 Vincule clientes em **Configurações** para identificar por razão social.")
 
 # ------------------------------------------
-# ABA 5: QUALIDADE DE HOMOLOGAÇÃO (ciclos_homologacao)
+# ABA 5: ENTREGA TECNUV — indicadores úteis (chamados_tecnuv + release_itens + interações)
 # ------------------------------------------
 with aba5:
-    st.subheader("Homologação de releases (testes no suporte)")
+    st.subheader("Entrega da desenvolvedora — indicadores para o suporte")
     st.markdown(
-        "Esta aba **não** usa a fila de chamados do Helpdesk. Usa só o fluxo **manual** de homologação: "
-        "cada linha em **`ciclos_homologacao`** = “este chamado foi citado neste release e o suporte deve testar e marcar Aprovado/Reprovado”."
+        "Dados do **mesmo período e analista** da Visão Geral: **`chamados_tecnuv`**, **`release_itens`** (notas de release) e **histórico de interações**. "
+        "Nada depende de `ciclos_homologacao`."
     )
-    with st.expander("O que é cada número e de onde vem o dado?", expanded=True):
-        st.markdown(
-            """
-**Origem comum:** tabelas **`ciclos_homologacao`**, **`chamados`** (homologação), **`releases`**.  
-Quem alimenta: em geral **Page 11 (Releases)** ao vincular chamado a release e abrir ciclos de teste.
 
-| O que você vê | Significado | Lógica / SQL |
-|----------------|------------|--------------|
-| **Taxa de retrabalho (%)** | Entre os ciclos **já testados** (Aprovado ou Reprovado), que fração foi **Reprovado**. | `reprovados / (aprovados + reprovados) × 100` em **todos** os ciclos (sem filtro de período na função atual). Se não há ninguém com status “testado”, dá **0%**. |
-| **Pendentes de teste (número grande)** | Quantidade de linhas em **`ciclos_homologacao`** com **`status_teste = 'Aguardando'`**. É um **contador** (ex.: 2023 = **2023 pendências**), **não é ano**. Cada pendência = um par (chamado × release) ainda sem decisão de homologação. | `COUNT(*) WHERE status_teste = 'Aguardando'` |
-| **Chamados no ranking** | Quantos chamados aparecem na tabela ao lado (no máximo **20**). Só entram chamados com **mais de um ciclo** no histórico (voltaram em outro release). | Subquery agrupada por `id_chamado` com `HAVING COUNT(*) > 1`, depois `LIMIT 20`. |
-| **Módulos com reprovação** | Quantos **módulos distintos** têm pelo menos uma reprovação registrada. | Agrupa por `modulo_sistema` do chamado e conta só onde há Reprovado. |
-| **Tabela “Ranking”** | Chamados que **passaram por mais de um ciclo** (reincidência no processo de homologação): colunas = ID do chamado, total de ciclos, quantas vezes **Reprovado**. | Não é a mesma coisa que “reincidência no release_itens” da aba 6. |
-| **Tabela “Por módulo”** | Soma de **reprovações** por módulo do chamado (campo **módulo_sistema** na tabela **chamados** de homologação). | Só módulos com pelo menos 1 Reprovado. |
+    Xv = len(df_visao)
+    if Xv == 0:
+        st.info("Sem chamados no período.")
+    else:
+        enc_v = df_visao["status_canonico"].eq("Encerrado") if "status_canonico" in df_visao.columns else df_visao[
+            "status_atual"
+        ].astype(str).str.contains("encerrado", case=False, na=False)
+        n_enc = int(enc_v.sum())
+        n_reinc = int((df_visao["classificacao_reincidencia"] == "Reincidência").sum())
+        n_aberto = int(df_visao["is_aberto"].sum())
+        n_repr = int(df_visao["pendente_representante"].sum())
+        com_rel = df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) > 0)
+        n_com_rel = int(com_rel.sum())
+        n_multi_rel = int(df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) > 1).sum())
+        t_lib = df_visao["tempo_ate_liberacao_dias"].dropna()
+        med_lib = float(t_lib.median()) if len(t_lib) else None
+        mean_lib = float(t_lib.mean()) if len(t_lib) else None
 
-**Por que “Gargalo” pode ser um número alto?**  
-Cada vez que um chamado é ligado a um release e gera um ciclo **Aguardando**, soma 1. Se anos de releases foram importados e **ninguém marcou Aprovado/Reprovado** na Page 11, o pendente acumula — por isso pode aparecer milhares (ex. 2023).
-            """
-        )
+        pct = lambda a: (100.0 * a / Xv) if Xv else 0
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Encerrados no período", f"{n_enc} ({pct(n_enc):.0f}%)", help="Status Encerrado entre os abertos no intervalo")
+        m2.metric("Reincidentes (releases)", f"{n_reinc} ({pct(n_reinc):.0f}%)", help="Citados em >1 release e encerrados — correção não sustentou", delta_color="inverse")
+        m3.metric("Ainda em aberto", f"{n_aberto} ({pct(n_aberto):.0f}%)", help="Não encerrado/cancelado")
+        m4.metric("Citados em release", f"{n_com_rel} ({pct(n_com_rel):.0f}%)", help="Aparecem em pelo menos uma nota de versão")
 
-    try:
-        m = get_metricas_homologacao()
-        n_pend = int(m["gargalo_homologacao"])
-        n_rank = len(m["ranking_reincidencia"])
-        n_mod = len(m["vulnerabilidade_modulo"])
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric(
-            "Retrabalho na homologação",
-            f"{m['taxa_retrabalho_global']:.1f}%",
-            help="Dos ciclos já decididos (Aprovado/Reprovado), quantos foram Reprovado.",
-        )
-        col2.metric(
-            "Pendentes de teste (Aguardando)",
-            f"{n_pend:,}".replace(",", "."),
-            help="Total de linhas ciclos_homologacao ainda sem Aprovado/Reprovado. NÃO é ano — é quantidade.",
-        )
-        col3.metric(
-            "Chamados no ranking (≥2 ciclos)",
-            n_rank,
-            help="Até 20 chamados com mais de um ciclo de homologação.",
-        )
-        col4.metric(
-            "Módulos com ao menos 1 reprovação",
-            n_mod,
-            help="Módulos distintos que têm ciclos Reprovado.",
-        )
+        m5, m6, m7, m8 = st.columns(4)
+        m5.metric("Pendente representante", str(n_repr), help="Situação no Helpdesk")
+        m6.metric("Em >1 release (volume)", str(n_multi_rel), help="Chamados citados em várias versões")
+        m7.metric("Mediana dias até 1ª liberação", f"{med_lib:.0f} d" if med_lib is not None else "—", help="Entre quem tem interação TecNuv com liberação")
+        m8.metric("Média dias até liberação", f"{mean_lib:.0f} d" if mean_lib is not None else "—")
 
         st.divider()
+        g1, g2 = st.columns(2)
+        with g1:
+            st.markdown("#### Situação pós-liberação (qualidade da correção)")
+            qdf = df_visao["classificacao_reincidencia"].value_counts().reset_index()
+            qdf.columns = ["Situação", "Chamados"]
+            fig_q = px.bar(
+                qdf,
+                x="Chamados",
+                y="Situação",
+                orientation="h",
+                color="Situação",
+                color_discrete_map={
+                    "Resolvido Pós-Liberação": "#27ae60",
+                    "Reincidência": "#c0392b",
+                    "Aguardando Validação EPSY": "#f39c12",
+                    "Sem Liberação": "#7f8c8d",
+                },
+            )
+            fig_q.update_layout(showlegend=False, height=min(260, 40 + len(qdf) * 28))
+            st.plotly_chart(fig_q, width="stretch")
+            st.caption("**Reincidência** = mais de uma menção em release com encerramento. **Sem liberação** = nunca citado em release.")
 
-        r1, r2 = st.columns(2)
-        with r1:
-            st.markdown("#### Chamados com vários ciclos (homologação)")
-            st.caption("Quem mais vezes entrou no fluxo e quantas reprovações teve.")
-            df_rank = m["ranking_reincidencia"]
-            if df_rank.empty:
-                st.info("Nenhum chamado com mais de um ciclo em ciclos_homologacao.")
+        with g2:
+            st.markdown("#### Classificação IA (volume no período)")
+            if "categoria_ia" in df_visao.columns and df_visao["categoria_ia"].notna().any():
+                cat = df_visao["categoria_ia"].astype(str).replace("None", "Não classificada").value_counts().head(15).reset_index()
+                cat.columns = ["Categoria", "Chamados"]
+                fig_c = px.bar(cat, x="Chamados", y="Categoria", orientation="h", color="Chamados", color_continuous_scale="Teal")
+                fig_c.update_layout(showlegend=False, height=min(360, 40 + len(cat) * 22))
+                st.plotly_chart(fig_c, width="stretch")
             else:
-                df_rank = df_rank.copy()
-                df_rank.columns = ["ID chamado (homolog.)", "Total de ciclos", "Vezes reprovado"]
-                st.dataframe(df_rank, hide_index=True, use_container_width=True)
+                st.info("Coluna **categoria_ia** vazia ou inexistente — rode a classificação nos chamados.")
 
-        with r2:
-            st.markdown("#### Reprovações por módulo (chamado.homologação)")
-            st.caption("Só aparece módulo que tenha pelo menos uma reprovação.")
-            df_mod = m["vulnerabilidade_modulo"]
-            if df_mod.empty:
-                st.info("Nenhuma reprovação em ciclos_homologacao — ou módulo não preenchido nos chamados.")
-            else:
-                df_mod = df_mod.copy()
-                df_mod.columns = ["Módulo", "Total reprovações"]
-                st.dataframe(df_mod, hide_index=True, use_container_width=True)
-
-    except Exception as e:
-        st.warning(
-            "As tabelas de homologação (`chamados`, `releases`, `ciclos_homologacao`) "
-            "podem não existir ainda. Execute o script `database/migracao_ciclos_homologacao.sql`."
-        )
-        st.error(str(e))
+        st.markdown("#### Chamados com mais de um release (atenção à entrega)")
+        mask_m = df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) > 1)
+        base_m = df_visao.loc[mask_m, ["nr_chamado", "cliente_nome", "usuario_epsy"]].copy()
+        base_m["Status"] = df_visao.loc[mask_m, "status_canonico" if "status_canonico" in df_visao.columns else "status_atual"].values
+        multi = base_m
+        multi["releases_distintos"] = multi["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0))
+        if multi.empty:
+            st.success("Nenhum chamado do período citado em mais de um release.")
+        else:
+            multi = multi.sort_values("releases_distintos", ascending=False).head(50)
+            st.dataframe(multi, hide_index=True, use_container_width=True)
+            st.caption("Origem: **release_itens** — quantas notas de versão distintas citam o chamado.")
 
 # ------------------------------------------
 # ABA 6: FILA ABERTA + RELEASES / REINCIDÊNCIA

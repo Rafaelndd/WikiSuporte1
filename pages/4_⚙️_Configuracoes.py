@@ -1,6 +1,7 @@
 """
 WikiSuporte - Página de Configurações.
-Controle de bots, gestão de usuários/ramais, clientes e telefones.
+Permite controle dos bots de varredura, gestão de usuários/ramais e cadastro de clientes com telefones.
+Acesso restrito a perfis "dev" e "coordenador". O status dos bots é lido do arquivo `robo_state.json` e pode ser controlado por este painel, mas o motor precisa estar rodando (via `motor_extracao.py`) para processar as solicitações. As configurações de intervalo e limites de segurança ajudam a evitar sobrecarga do servidor. A gestão de usuários permite alterar perfis e senhas (exceto para dev). O cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs de auditoria registram ações importantes. A aba de diagnóstico (comentada) pode ser ativada para testes de conexão e recursos do servidor, mas é restrita ao perfil dev. O código é organizado em seções claras para cada funcionalidade, com uso de formulários e feedback visual para melhor experiência do usuário.    
 """
 import json
 import os
@@ -54,36 +55,37 @@ perfil_raw = str(st.session_state.get("perfil", "")).strip().lower()
 perfil_usuario = "dev" if perfil_raw in ("dev", "desenvolvedor") else "coordenador" if perfil_raw in ("coordenador", "coordenação") else perfil_raw
 
 if perfil_usuario not in ["dev", "coordenador"]:
-    st.error("⛔ Acesso Negado: Esta página é restrita a Coordenação e Desenvolvimento.")
+    st.error("⛔ Acesso Negado.")
     st.stop()
 
 st.title("⚙️ WikiSuporte - Configurações")
-st.markdown("Controle dos bots de varredura, gestão de usuários/ramais e cadastro de clientes com telefones.")
+st.markdown("Controle dos bots de varredura, gestão de usuários/ramais e cadastro de clientes com telefones. Acesso restrito a perfis 'dev' e 'coordenador'.")
 
 aba_robo, aba_ramais, aba_usuarios, aba_clientes, aba_diagnostico = st.tabs([
-    "🤖 Bots de Varredura",
+    "🤖 Bots",
     "📞 Ramais e Analistas",
     "👥 Usuários",
     "🏢 Clientes e Telefones",
-    "🛠️ Diagnóstico",
+    "🛠️ Funcionalidade inativa",
 ])
 
 # ==========================================
 # ABA 1: BOTS DE VARREDURA
 # ==========================================
 with aba_robo:
-    st.subheader("Controle dos Bots de Varredura")
+    st.subheader("Controle dos Bots de buscas")
     with st.expander("🤔 Como usar esta área?"):
         st.markdown(
-            "**Métricas** mostram se o motor está rodando. **Salvar** grava intervalo e limites de segurança. "
-            "**Raspagens individuais** só funcionam com `python motor_extracao.py` (ou `start_motor.bat`) aberto em outro terminal. "
-            "Evite disparar muitas raspagens seguidas — respeite o limite por hora."
+            "**Status dos Bots**: O status de execução dos bots é lido do arquivo `robo_state.json`, que o motor de extração atualiza. Se o motor não estiver rodando, o status pode ficar preso — use o botão **Forçar Parado** para corrigir. "
+            "**Configurações**: Ative/desative varreduras automáticas, ajuste o intervalo entre varreduras e defina limites de segurança para evitar sobrecarga do servidor. "
+            "**Raspagens Individuais**: Solicite varreduras específicas (chamados, tickets, releases, etc.) a qualquer momento. O motor precisa estar rodando para processar essas solicitações. O status e a etapa atual serão atualizados conforme o motor executa as tarefas. "
+            "**Aviso Importante**: Respeite os intervalos mínimos e máximos para evitar bloqueios ou sobrecarga do servidor da TECNUV. O motor de extração é responsável por seguir essas regras, mas o controle manual também está disponível para casos excepcionais."
         )
     estado = ler_estado_robo() if not BOT_CONTROL_DISPONIVEL else ler_estado()
     if BOT_CONTROL_DISPONIVEL:
         if sincronizar_estado_se_motor_morto():
             estado = ler_estado()
-            st.toast("Estado corrigido: motor não está rodando — status voltou para Parado.", icon="✅")
+            st.toast("As buscas estão sendo sincronizadas...", icon="✅")
 
     em_andamento = estado.get("em_andamento", False)
     etapa = estado.get("etapa_atual") or "—"
@@ -105,10 +107,10 @@ with aba_robo:
     # Configurações e segurança
     with st.expander("⚙️ Configurações e Segurança", expanded=True):
         with st.form("form_bot_config"):
-            auto_ativo = st.toggle("Ativar varreduras automáticas", value=estado.get("auto_ativo", False))
-            intervalo = st.slider("Intervalo entre varreduras (min)", min_value=MIN_INTERVALO_MINUTOS if BOT_CONTROL_DISPONIVEL else 15, max_value=240, value=estado.get("intervalo", 60), step=15)
-            min_intervalo = st.number_input("Mín. intervalo entre raspagens (min) - segurança", min_value=15, max_value=120, value=estado.get("min_intervalo", MIN_INTERVALO_MINUTOS), step=5) if BOT_CONTROL_DISPONIVEL else None
-            max_por_hora = st.number_input("Máx. raspagens por hora - proteção servidor", min_value=1, max_value=6, value=estado.get("max_raspagens_hora", MAX_RASPAGENS_POR_HORA)) if BOT_CONTROL_DISPONIVEL else None
+            auto_ativo = st.toggle("Ativar buscas automáticas", value=estado.get("auto_ativo", False))
+            intervalo = st.slider("Intervalo entre buscas (min)", min_value=MIN_INTERVALO_MINUTOS if BOT_CONTROL_DISPONIVEL else 15, max_value=240, value=estado.get("intervalo", 60), step=15)
+            min_intervalo = st.number_input("Mín. intervalo entre buscas (min) - segurança", min_value=15, max_value=120, value=estado.get("min_intervalo", MIN_INTERVALO_MINUTOS), step=5) if BOT_CONTROL_DISPONIVEL else None
+            max_por_hora = st.number_input("Máx. buscas por hora - proteção servidor", min_value=1, max_value=6, value=estado.get("max_raspagens_hora", MAX_RASPAGENS_POR_HORA)) if BOT_CONTROL_DISPONIVEL else None
 
             if st.form_submit_button("Salvar"):
                 estado["auto_ativo"] = auto_ativo
@@ -123,15 +125,11 @@ with aba_robo:
 
     # Aviso crítico: motor precisa estar rodando
     st.warning(
-        "**⚠️ Para os botões funcionarem:** o motor precisa estar rodando. "
-        "Execute `scripts\\start_motor.bat` ou em um terminal: `python motor_extracao.py`"
+        "**⚠️ Importante: A Extração de dados ** precisa estar ativa para processar as solicitações de buscas no HelpDesk. O status e as etapas são atualizados conforme a execução dos bots. "
+        "Se o status ficar preso ou não atualizar, use o botão **Forçar Parado** para corrigir. Respeite os intervalos mínimos e máximos para evitar bloqueios ou sobrecarga do servidor da TECNUV."
     )
     if BOT_CONTROL_DISPONIVEL:
-        st.markdown("#### Parar / resetar status na tela")
-        st.caption(
-            "O status **Executando** vem do arquivo `robo_state.json`. Se você **fechou o terminal** do motor, "
-            "esse flag pode ficar preso — use **Forçar Parado** para liberar os botões de raspagem de novo."
-        )
+        st.markdown("#### Forçar parada das buscas")
         cpar1, cpar2 = st.columns(2)
         with cpar1:
             if st.button("🛑 Forçar Parado (corrigir status preso)", type="primary", key="forcar_parado"):
@@ -147,11 +145,10 @@ with aba_robo:
 
     # Botões individuais de raspagem
     st.markdown("#### Raspagens Individuais")
-    st.caption("Clique para solicitar. O motor (motor_extracao.py) precisa estar rodando em outro terminal.")
+    st.caption("Clique em um dos botões abaixo para solicitar uma varredura específica.")
     st.info(
-        "**Dashboard Chamados** usa cache (~45s) ao ler `chamados_tecnuv`. O bot **grava no Postgres** ao sincronizar; "
-        "se a tela não mudou na hora, abra o Dashboard e clique **🔄 Atualizar** (limpa cache). "
-        "Nos logs: `[DB] … gravados (commit)` confirma escrita antes do deep scrape."
+        "**Dashboard Chamados**: Após solicitar uma busca, o status é atualizado no arquivo de estado. Se o status ficar preso ou não atualizar, use o botão **Forçar Parada** para corrigir. "
+      
     )
 
     raspagens_ui = RASPAGENS if BOT_CONTROL_DISPONIVEL else {
@@ -171,7 +168,7 @@ with aba_robo:
                     ok, msg = solicitar_raspagem(tipo)
                     st.toast(msg, icon="✅" if ok else "⚠️")
                     if ok:
-                        st.success("Tarefa enviada ao motor. Aguarde a execução (veja Etapa atual acima).")
+                        st.success("Tarefa enviada ao sistema. Aguarde a execução (veja Etapa atual acima).")
                     else:
                         st.warning(msg)
                 else:
@@ -372,34 +369,3 @@ with aba_clientes:
     except Exception as e:
         st.caption(f"Listagem indisponível: {e}")
 
-# # ==========================================
-# # ABA 5: DIAGNÓSTICO
-# # ==========================================
-# with aba_diagnostico:
-#     if perfil_usuario != "dev":
-#         st.error("Acesso restrito ao desenvolvedor.")
-#     else:
-#         st.subheader("Diagnóstico do Servidor")
-#         d1, d2, d3 = st.columns(3)
-#         with d1:
-#             if st.button("Testar DB"):
-#                 t0 = time.time()
-#                 try:
-#                     with get_connection().connect() as c:
-#                         c.execute(text("SELECT 1"))
-#                     st.success(f"Conexão OK — {((time.time()-t0)*1000):.0f} ms")
-#                 except Exception as e:
-#                     st.error(str(e))
-#         with d2:
-#             if st.button("Testar Internet"):
-#                 try:
-#                     urllib.request.urlopen("http://8.8.8.8", timeout=3)
-#                     st.success("Ping OK")
-#                 except Exception:
-#                     st.error("Falha de rede")
-#         with d3:
-#             if st.button("Recursos") and HAS_PSUTIL:
-#                 st.metric("CPU", f"{psutil.cpu_percent()}%")
-#                 st.metric("RAM", f"{psutil.virtual_memory().percent}%")
-
-# registrar_log_auditoria(usuario_id, "VIEW_CONFIG", "Acessou configurações.")

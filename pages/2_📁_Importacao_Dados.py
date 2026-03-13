@@ -33,7 +33,7 @@ except Exception:
 # ==========================================
 # 1. CADEADO DE SEGURANÇA E SESSÃO
 # ==========================================
-st.set_page_config(page_title="Wiki Suporte", page_icon="📊", layout="wide")
+st.set_page_config(page_title="WikiSuporte", page_icon="📊", layout="wide")
 
 # Exige login e restringe aos perfis dev / coordenador
 perfil_usuario = require_profile(
@@ -98,12 +98,12 @@ def is_plantao_normal(dt):
 # 3. INTERFACE DE USUÁRIO (UX) - ABAS
 # ==========================================
 st.title("📁 Importação e Exportação de Relatórios")
-st.markdown("Importe relatórios mensais e extraia análises de Plantão diário. Cadastro de clientes CRM em Configurações.")
+st.markdown("Importe seus relatórios de atendimento do GoTo Connect e Multi360 para alimentar os dashboards do WikiSuporte! Siga as instruções abaixo para garantir que seus dados sejam processados corretamente.")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
         "**API GoTo:** conecta direto na nuvem (precisa de credenciais no `.env`). "
         "**Importar mensal:** envie o CSV/XLSX exportado do GoTo ou Multi360. "
-        "**Plantões:** só para relatórios curtos (poucos dias). "
+        "**Plantões:** encaminhe o arquivo do plantão, e o sistema identifica automaticamente quais chamadas pertencem ao plantão com base na data/hora. "
         "Após importar, use **Salvar**; se aparecer cadastro de números sem cliente, preencha para melhorar os dashboards."
     )
 
@@ -119,8 +119,8 @@ aba1, aba2, aba3 = st.tabs([
 with aba1:
     st.markdown("### 🔌 Buscar Atendimentos Diretamente da API GoTo Connect")
     st.success(
-        "🚀 **Plano Principal:** Use esta aba para buscar os relatórios de chamadas "
-        "automaticamente, sem precisar exportar arquivos. "
+        "🚀 **Integração WikiSuporte e GoTo**\n"
+        
         "Caso a API esteja indisponível, utilize a aba **📥 Importar Mensal** como Plano B."
     )
 
@@ -136,8 +136,8 @@ with aba1:
     with st.container(border=True):
         st.markdown("#### 🔑 Credenciais da API GoTo")
         if credenciais_configuradas:
-            st.success("✅ Credenciais encontradas nas variáveis de ambiente (`.env`).")
-            usar_env = st.checkbox("Usar as credenciais do `.env` automaticamente", value=True, key="goto_usar_env")
+            st.success("✅ Credenciais validadas com sucesso.")
+            usar_env = st.checkbox("Usar as credenciais configuradas no sistema.", value=True, key="goto_usar_env")
         else:
             st.warning(
                 "⚠️ Variáveis `GOTO_CLIENT_ID` e `GOTO_CLIENT_SECRET` não encontradas no `.env`. "
@@ -199,7 +199,7 @@ with aba1:
         if not client_id_final or not client_secret_final:
             st.error("❌ Informe as credenciais GoTo antes de buscar.")
         else:
-            barra_progresso = st.progress(0, text="Iniciando busca na API GoTo...")
+            barra_progresso = st.progress(0, text="Iniciando busca na API do GoTo...")
             status_container = st.empty()
 
             def atualizar_progresso(pagina, total):
@@ -269,7 +269,7 @@ with aba1:
                 st.success(f"🎯 **{sucesso_crm_api} chamadas** vinculadas a clientes do CRM!")
                 st.session_state['df_goto_api'] = df_goto_api
             except Exception as e:
-                st.warning(f"⚠️ Cruzamento com CRM falhou: {e}")
+                st.warning(f"⚠️ Cruzamento com cadastro dos clientes falhou: {e}")
                 df_goto_api['cliente_nome'] = "Não Identificado"
 
         with st.container(border=True):
@@ -301,7 +301,7 @@ with aba1:
 # ------------------------------------------
 with aba2:
     st.warning(
-        "📋 **Plano B — Upload Manual:** Use esta aba quando a API do GoTo estiver indisponível. "
+        "📋 **Upload Manual:** Use esta aba quando a API do GoTo estiver indisponível. "
         "Exporte o arquivo CSV/XLSX diretamente pelo portal GoTo e importe aqui."
     )
     st.info("💡 **Dica:** O sistema cruza os telefones com o CRM automaticamente para identificar o nome do cliente no Dashboard!")
@@ -321,7 +321,7 @@ with aba2:
         elif is_multi360: 
             tipo_identificado = "MULTI360"
         elif is_goto_user_activity:
-            st.error("❌ O arquivo 'User Activity' do GoTo é utilizado para fatiar plantão. Por favor, utilize a Aba **'🌙 Extrator de Plantões Diário'** para esse arquivo.")
+            st.error("❌ O arquivo 'User Activity' do GoTo é utilizado para fatiar plantão. Por favor, utilize a Aba **Extrator de Plantões Diário'** para esse arquivo.")
             st.stop()
         else: 
             st.error("❌ Arquivo não reconhecido.")
@@ -353,13 +353,13 @@ with aba2:
                 if pd.isna(dias_arquivo): dias_arquivo = 0
                 
                 if dias_arquivo <= 5:
-                    st.warning(f"🤖 **Psy alerta:** Este arquivo cobre apenas **{int(dias_arquivo)} dia(s)**. Parece um Relatório de Plantão.")
+                    st.warning(f"**Aviso:** Este arquivo cobre apenas **{int(dias_arquivo)} dia(s)**. Parece um Relatório de Plantão.")
                     liberar = st.checkbox("Eu confirmo que este é um arquivo MENSAL válido. Desbloquear importação.")
                     if not liberar: bloqueio_plantao = True
 
             if not bloqueio_plantao:
                 if tipo_identificado == "GOTO":
-                    with st.spinner("🔄 Cruzando telefones com o banco de dados do CRM..."):
+                    with st.spinner("🔄 Cruzando telefones com os cadastros dos clientes..."):
                         try:
                             from services.clientes_service import obter_mapa_hash_cliente
                             mapa_hash = obter_mapa_hash_cliente()
@@ -384,7 +384,7 @@ with aba2:
                         except ImportError:
                             df_processado['cliente_nome'] = "Não Identificado"
                         except Exception as e:
-                            st.warning(f"⚠️ Cruzamento CRM: {e}")
+                            st.warning(f"⚠️ Erro ao identificar clientes: {e}")
                             df_processado['cliente_nome'] = "Não Identificado"
 
                 if tipo_identificado == "MULTI360":
@@ -462,8 +462,8 @@ with aba2:
 # ABA 3: ANÁLISE DE PLANTÕES (GOTO)
 # ------------------------------------------
 with aba3:
-    st.subheader("Extrator Inteligente de Plantões")
-    st.info("🤖 **Psy:** Olá! Faça o upload do arquivo do GoTo. Eu buscarei automaticamente no arquivo inteiro quais ligações pertencem ao plantão, separando cada plantonista caso haja imprevistos e substituições!")
+    st.subheader("📥 Extrator de Plantões Diário - GoTo")
+    st.info("**Faça o upload do arquivo do GoTo**.")
     
     if 'plantao_uploader_key' not in st.session_state:
         st.session_state['plantao_uploader_key'] = 0
@@ -479,10 +479,10 @@ with aba3:
         is_goto_user_activity = 'Queue Name' in df_preview_p.columns and 'Start Time (local)' in df_preview_p.columns
         
         if not (is_goto_conversations or is_goto_user_activity):
-            st.error("❌ Formato não suportado. Por favor, envie um relatório 'Call Reports' ou 'User Activity' do GoTo.")
+            st.error("❌ Arquivo com formato não suportado.")
         else:
             arquivo_plantao.seek(0)
-            with st.spinner("Limpando e formatando dados da Telefonia..."):
+            with st.spinner("Limpando o arquivo..."):
                 
                 # Trata Arquivo Clássico: Call Reports Conversations
                 if is_goto_conversations:
@@ -513,7 +513,7 @@ with aba3:
                 df_goto = df_goto_bruto[df_goto_bruto['duracao_ms'].fillna(0) > 0].copy()
                 
                 if df_goto.empty:
-                    st.warning("⚠️ **Psy informa:** Todas as chamadas deste arquivo eram perdidas ou abandonadas (Duração 0).")
+                    st.warning("⚠️ **Aviso:** Todas as chamadas deste arquivo eram perdidas ou abandonadas (Duração 0).")
                 else:
                     st.divider()
                     st.markdown("#### ⚙️ Configuração do Regime do Plantão")
@@ -596,9 +596,9 @@ with aba3:
                         df_limpo = df_temp[mascara_validas].copy()
                         
                         if df_limpo.empty:
-                            st.warning("⚠️ **Psy informa:** Analisei o período, mas todos os registros eram chamadas não atendidas por humanos (URA/Sistema).")
+                            st.warning("⚠️ Arquivo analisado, mas nenhum atendimento real encontrado. Verifique se o arquivo está correto ou se o regime selecionado é adequado.")
                         else:
-                            st.success(f"🎯 **Psy diz:** Temos **{len(df_limpo)} atendimentos reais**! Salvando no banco...")
+                            st.success(f"🎯 ** Foram identificados **{len(df_limpo)} atendimentos válidos**! Salvando no banco...")
                             df_limpo = df_limpo.sort_values(by=['Atendente', 'Data_Real'])
                             
                             # SALVAMENTO AUTOMÁTICO
@@ -680,4 +680,4 @@ with aba3:
                                 st.rerun()
                     
                     elif st.session_state.get('df_plantao_filtrado') is not None and st.session_state['df_plantao_filtrado'].empty:
-                        st.info("🤖 **Psy:** O arquivo é válido, mas não ocorreram atendimentos nesse horário de plantão específico.")
+                        st.info(" O arquivo é válido, mas não ocorreram atendimentos nesse horário de plantão específico.")
