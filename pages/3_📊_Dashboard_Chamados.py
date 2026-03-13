@@ -628,6 +628,15 @@ with aba3:
         # Categoria IA (classificação semântica): Erro / Melhoria / Adequação Fiscal
         df_ver["Categoria (IA)"] = df_ver.get("categoria_ia", pd.Series(dtype=object)).fillna("Não classificada").astype(str)
         df_ver["Resumo"] = df_ver["erro_relatado"].fillna("").astype(str).str[:120] + "..."
+        # Filtro por categoria IA
+        categorias_disp = sorted(df_ver["Categoria (IA)"].unique().tolist())
+        categoria_sel = st.selectbox(
+            "Filtrar por Categoria (IA):",
+            options=["Todas"] + categorias_disp,
+            index=0,
+        )
+        if categoria_sel != "Todas":
+            df_ver = df_ver[df_ver["Categoria (IA)"] == categoria_sel]
         agrupamento_bugs = df_ver[
             ["versao_sistema", "nr_chamado", "Cliente", "Categoria (IA)", "Resumo"]
         ].sort_values(by=["versao_sistema", "nr_chamado"], ascending=[False, False])
