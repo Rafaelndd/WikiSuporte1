@@ -387,12 +387,25 @@ class MotorExtracao:
 # O PSY Assistente WikiSuporte (MOTOR EM SEGUNDO PLANO)
 # ==========================================
 
+def _executar_ciclo_chamados():
+    """Delega a raspagem de Chamados ao OraculoBot (selenium_raspagem)."""
+    try:
+        from modules.selenium_raspagem import _executar_ciclo_chamados as _run_chamados
+        _run_chamados()
+    except ImportError as e:
+        print(f"⚠️ Módulo selenium_raspagem não disponível para Chamados: {e}")
+
+
 def _executar_motor(tarefa: str | None = None):
     """
     Cria o motor, faz login e executa a raspagem.
-    Se `tarefa` for um tipo específico (ex: 'releases'), executa só ele.
-    Se None, executa todas as fontes.
+    Se `tarefa` for 'chamados', usa OraculoBot. Caso contrário, MotorExtracao.
+    Se None, executa todas as fontes do MotorExtracao.
     """
+    if tarefa == "chamados":
+        _executar_ciclo_chamados()
+        return
+
     motor = MotorExtracao()
     try:
         definir_etapa("Iniciando navegador")

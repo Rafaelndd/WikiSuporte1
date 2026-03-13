@@ -108,9 +108,15 @@ with aba_robo:
                 st.success("Configurações salvas.")
                 st.rerun()
 
+    # Aviso crítico: motor precisa estar rodando
+    st.warning(
+        "**⚠️ Para os botões funcionarem:** o motor precisa estar rodando. "
+        "Execute `scripts\\start_motor.bat` ou em um terminal: `python motor_extracao.py`"
+    )
+
     # Botões individuais de raspagem
     st.markdown("#### Raspagens Individuais")
-    st.caption("Execute uma raspagem específica. O bot (motor_extracao ou selenium_raspagem) precisa estar rodando para processar.")
+    st.caption("Clique para solicitar. O motor (motor_extracao.py) precisa estar rodando em outro terminal.")
 
     raspagens_ui = RASPAGENS if BOT_CONTROL_DISPONIVEL else {
         "chamados": {"label": "Chamados Tecnuv", "icon": "📋"},

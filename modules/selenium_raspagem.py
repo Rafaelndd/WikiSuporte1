@@ -697,6 +697,14 @@ class OraculoBot:
 
             session.commit()
             logging.info(f"[OK] Chamado {nr_chamado} sincronizado com sucesso.")
+            # Classificação semântica (Erro / Melhoria / Adequação Fiscal) via pgvector
+            try:
+                from services.classificacao_chamados import classificar_chamado
+                ok, cat, _ = classificar_chamado(nr_chamado)
+                if ok:
+                    logging.info(f"[IA] Chamado {nr_chamado} classificado: {cat}")
+            except Exception as e_class:
+                logging.debug("Classificação IA do chamado %s não executada: %s", nr_chamado, e_class)
             return True
 
         except Exception as e:

@@ -88,11 +88,32 @@ def carregar_dados_tecnuv():
         if not df.empty:
             df['data_abertura'] = pd.to_datetime(df.get('data_abertura'), errors='coerce')
             df['data_encerramento'] = pd.to_datetime(df.get('data_encerramento'), errors='coerce')
-            df['usuario_epsy'] = df.get('usuario_epsy', pd.Series(dtype=str)).fillna("Não Informado")
+            # usuario_epsy: fallback para nome_analista_epsy se a coluna não existir
+            col_epsy = df.get("usuario_epsy") if "usuario_epsy" in df.columns else df.get("nome_analista_epsy", pd.Series(dtype=object))
+            df["usuario_epsy"] = col_epsy.fillna("Não Informado").astype(str)
             df['atendente_tecnuv'] = df.get('atendente_tecnuv', pd.Series(dtype=str)).fillna("Não Informado")
             df['versao_sistema'] = df.get('versao_sistema', pd.Series(dtype=str)).fillna("Não Informada")
-            df['cliente_nome'] = df.get('cliente_nome', pd.Series(dtype=str)).fillna("Não Informado")
+            # cliente_nome: enriquecer com clientes_vinculados_chamado quando vazio
+            try:
+                df_vinculos = pd.read_sql(
+                    "SELECT nr_chamado, nome_cliente FROM clientes_vinculados_chamado",
+                    engine,
+                )
+                if not df_vinculos.empty:
+                    mapa_cliente = df_vinculos.set_index('nr_chamado')['nome_cliente'].to_dict()
+                    def preencher_cliente(row):
+                        val = row.get('cliente_nome')
+                        if pd.isna(val) or not str(val).strip() or str(val).strip() in ("Não Informado", "Não Informada"):
+                            return mapa_cliente.get(row['nr_chamado'], val)
+                        return val
+                    df['cliente_nome'] = df.apply(preencher_cliente, axis=1)
+            except Exception:
+                pass
+            df['cliente_nome'] = df.get('cliente_nome', pd.Series(dtype=str)).fillna("Não Informado").astype(str)
             df['erro_relatado'] = df.get('motivo_abertura_html', pd.Series(dtype=str)).apply(limpar_html)
+            # categoria_ia (classificação semântica) se existir
+            if 'categoria_ia' not in df.columns:
+                df['categoria_ia'] = None
         return df
     except Exception as e:
         st.error(f"Erro ao carregar chamados: {e}")
@@ -594,13 +615,23 @@ with aba3:
             
         st.divider()
         st.markdown("#### 🔍 Detalhamento de Versões")
-        st.markdown("Visualize os chamados organizados por versão do sistema, com número, cliente e resumo do erro, facilitando a identificação rápida de padrões e problemas recorrentes em cada release.")
-        
-        # Cria a tabela exploratória Versão + Erro
-        df_ver['Erro Resumido'] = df_ver['erro_relatado'].str[:150] + "..."
-        agrupamento_bugs = df_ver[['versao_sistema', 'nr_chamado', 'cliente_nome', 'Erro Resumido']].sort_values(by=['versao_sistema', 'nr_chamado'], ascending=[False, False])
-        
-        st.dataframe(agrupamento_bugs, hide_index=True, width='stretch')
+        st.markdown("Visualize os chamados por versão: cliente, categoria semântica (IA) e resumo. Cliente em branco indica necessidade de cadastro em Configurações.")
+        # Nome do cliente: exibir "Necessário efetuar cadastro" quando vazio ou Não Informado
+        df_ver = df_ver.copy()
+        mask_sem_cliente = (
+            df_ver["cliente_nome"].isna()
+            | (df_ver["cliente_nome"].astype(str).str.strip() == "")
+            | df_ver["cliente_nome"].isin(["Não Informado", "Não Informada"])
+        )
+        df_ver["Cliente"] = df_ver["cliente_nome"].astype(str)
+        df_ver.loc[mask_sem_cliente, "Cliente"] = "Necessário efetuar cadastro"
+        # Categoria IA (classificação semântica): Erro / Melhoria / Adequação Fiscal
+        df_ver["Categoria (IA)"] = df_ver.get("categoria_ia", pd.Series(dtype=object)).fillna("Não classificada").astype(str)
+        df_ver["Resumo"] = df_ver["erro_relatado"].fillna("").astype(str).str[:120] + "..."
+        agrupamento_bugs = df_ver[
+            ["versao_sistema", "nr_chamado", "Cliente", "Categoria (IA)", "Resumo"]
+        ].sort_values(by=["versao_sistema", "nr_chamado"], ascending=[False, False])
+        st.dataframe(agrupamento_bugs, hide_index=True, use_container_width=True)
 
 # ------------------------------------------
 # ABA 4: PERFORMANCE EPSY & OFENSORES
@@ -623,19 +654,30 @@ with aba4:
             
     with e2:
         st.markdown("#### 🏢 Chamados Abertos por Cliente")
-        df_cli = df[~df['cliente_nome'].isin(["Não Informado", "Não Informada", ""])]
-        if df_cli.empty:
-            st.info("O WikiSuporte não conseguiu identificar os clientes nos chamados.")
+        df_cli = df.copy()
+        df_cli["cliente_exibicao"] = df_cli["cliente_nome"].replace(
+            ["", None], "Sem cliente vinculado"
+        ).fillna("Sem cliente vinculado")
+        mask_na = df_cli["cliente_exibicao"].isin(["Não Informado", "Não Informada", ""])
+        df_cli.loc[mask_na, "cliente_exibicao"] = "Sem cliente vinculado"
+        clientes_agg = df_cli.groupby("cliente_exibicao", as_index=False).agg(
+            Total_Chamados=("nr_chamado", "count"),
+            Fila_Ativa=("is_aberto", "sum"),
+        ).sort_values("Total_Chamados", ascending=False).head(15)
+        clientes_agg.rename(
+            columns={
+                "cliente_exibicao": "Cliente",
+                "Total_Chamados": "Total Abertos (Período)",
+                "Fila_Ativa": "Ainda Pendentes",
+            },
+            inplace=True,
+        )
+        if clientes_agg.empty:
+            st.info("Nenhum chamado no período. Ajuste os filtros.")
         else:
-            # Mostra o Cliente, o total e quantos estão em aberto
-            clientes_agg = df_cli.groupby('cliente_nome').agg(
-                Total_Chamados=('nr_chamado', 'count'),
-                Fila_Ativa=('is_aberto', 'sum')
-            ).reset_index().sort_values('Total_Chamados', ascending=False).head(15)
-            
-            clientes_agg.rename(columns={'cliente_nome': 'Cliente', 'Total_Chamados': 'Total Abertos (Período)', 'Fila_Ativa': 'Ainda Pendentes'}, inplace=True)
-            
-            st.dataframe(clientes_agg, hide_index=True, width='stretch')
+            st.dataframe(clientes_agg, hide_index=True, use_container_width=True)
+            if (clientes_agg["Cliente"] == "Sem cliente vinculado").any():
+                st.caption("💡 Vincule clientes em **Configurações** para identificar por razão social.")
 
 # ------------------------------------------
 # ABA 5: QUALIDADE DE HOMOLOGAÇÃO (ciclos_homologacao)
