@@ -436,6 +436,12 @@ agora = pd.to_datetime(datetime.now())
 # 1. Envelhecimento (Aging)
 df['dias_aberto'] = (agora - df['data_abertura']).dt.days
 df['is_aberto'] = ~df['status_atual'].str.contains("Encerrado|Cancelado", case=False, na=False)
+# Pendente representante (situação no Helpdesk) — contagem de dias para cobrança/notificações
+_sit = df.get("situacao", pd.Series("", index=df.index)).astype(str).str.lower()
+df["pendente_representante"] = _sit.str.contains("pendente", na=False) & _sit.str.contains("representante", na=False)
+df["dias_pendente_repr"] = np.where(
+    df["pendente_representante"] & df["is_aberto"], df["dias_aberto"], np.nan
+)
 
 # 2. Reincidência e Tempo até Liberação (baseado em releases)
 resultados_reincidencia = []
@@ -511,6 +517,18 @@ with aba1:
     reincidentes = len(df[df['classificacao_reincidencia'] == "Reincidência"])
     taxa_reincidencia = (reincidentes / chamados_com_liberacao * 100) if chamados_com_liberacao > 0 else 0
     col4.metric("Índice de Reincidência", f"{taxa_reincidencia:.1f}%", delta="Chamados com Reincidência", delta_color="inverse")
+
+    n_repr = int(df["pendente_representante"].sum())
+    if n_repr > 0:
+        st.warning(
+            f"**{n_repr}** chamado(s) com situação **pendente representante** (média {df.loc[df['pendente_representante'], 'dias_aberto'].mean():.0f} dias abertos). "
+            "Responsável e coordenador recebem aviso na **Home** ao citar em release e a cada **7 dias**."
+        )
+        with st.expander("Lista — pendente representante (dias)"):
+            show = df[df["pendente_representante"]][
+                ["nr_chamado", "usuario_epsy", "dias_aberto", "situacao", "status_atual"]
+            ].sort_values("dias_aberto", ascending=False)
+            st.dataframe(show, use_container_width=True, hide_index=True)
 
     st.divider()
     

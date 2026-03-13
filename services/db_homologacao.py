@@ -183,6 +183,12 @@ def processar_release_completo(
         ensure_chamado(id_chamado_str, assunto=linha[:2000], modulo_sistema=modulo)
         if create_ciclo(id_chamado_str, id_release):
             criados_ciclo += 1
+        try:
+            from services.notificacoes_representante import notificar_release_chamado
+
+            notificar_release_chamado(nr, ver_norm)
+        except Exception:
+            pass
 
     return len(vistos_no_release), criados_ciclo
 

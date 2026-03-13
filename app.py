@@ -577,7 +577,7 @@ Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
         )
         with st.expander("🤔 Como usar esta página?"):
             st.markdown(
-                "**Alertas** mostram plantão do dia e validações de release atribuídas a você. "
+                "**Alertas** incluem plantão, validações de release e avisos de **pendente representante** (release + cobrança 7 em 7 dias). "
                 "**Clima** é informativo. Use o **menu superior** para ir a Importação, Dashboards ou Releases. "
                 "Dúvidas: veja **Ajuda rápida** na barra lateral."
             )
@@ -621,6 +621,24 @@ Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
         # 1. Padronização dos Alertas em uma Lista de Dicionários
         notificacoes_atuais = []
 
+        try:
+            from services.notificacoes_representante import rodar_sincronizacao_completa, listar_notificacoes_usuario
+
+            rodar_sincronizacao_completa()
+            for n in listar_notificacoes_usuario(usuario_id, apenas_nao_lidas=True):
+                notificacoes_atuais.append(
+                    {
+                        "id": f"db_notif_{n['id']}",
+                        "db_id": n["id"],
+                        "icone": "📌",
+                        "titulo": n["titulo"],
+                        "detalhe": n["mensagem"]
+                        + (f"\n\n_Chamado {n['nr_chamado']}_ — {n['tipo']}" if n.get("nr_chamado") else ""),
+                    }
+                )
+        except Exception:
+            pass
+
         if not df_plantao.empty:
             entrada_raw = df_plantao.iloc[0]['data_hora_entrada']
             saida_raw = df_plantao.iloc[0]['data_hora_saida']
@@ -661,6 +679,12 @@ Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
                             # Botão para mover para o histórico
                             if st.button("Marcar como lida", key=f"btn_read_{notif['id']}"):
                                 st.session_state['notificacoes_lidas'].append(notif['id'])
+                                if notif.get("db_id"):
+                                    try:
+                                        from services.notificacoes_representante import marcar_lida
+                                        marcar_lida(int(notif["db_id"]), usuario_id)
+                                    except Exception:
+                                        pass
                                 st.rerun() # Atualiza a tela imediatamente
                 else:
                     st.info("✅ Tudo limpo! Você não possui notificações pendentes no momento.")
