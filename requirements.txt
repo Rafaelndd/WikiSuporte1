@@ -1,0 +1,18 @@
+# WikiSuporte — instale com: pip install -r requirements.txt
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+python-dotenv>=1.0.0
+requests>=2.28.0
+retry-requests>=2.0.0
+requests-cache>=1.0.0
+openmeteo-requests>=1.0.0
+plotly>=5.18.0
+matplotlib>=3.7.0
+selenium>=4.15.0
+beautifulsoup4>=4.12.0
+google-genai>=1.0.0
+pypdf>=4.0.0
+pgvector>=0.2.0

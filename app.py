@@ -513,7 +513,29 @@ def tela_home() -> None:
     st.sidebar.markdown(f"### {obter_saudacao()}!")
     st.sidebar.caption(f"🛡️ Perfil: **{perfil_usuario.title()}**")
     st.sidebar.divider()
-    
+    # --- Onboarding / Ajuda rápida (nativo Streamlit) ---
+    st.sidebar.markdown("### 💡 Ajuda rápida")
+    st.sidebar.info(
+        "**Bem-vindo ao WikiSuporte.** Use o **menu no topo** para abrir cada área "
+        "(Dashboards, Importação, Releases, etc.). Esta barra mostra quem está logado e atalhos."
+    )
+    with st.sidebar.expander("🤔 Mini-FAQ"):
+        st.markdown(
+            """
+**Onde começo?**  
+Home → confira alertas. Depois abra **Importação** se for subir relatórios, ou os **Dashboards** para análise.
+
+**Como sair?**  
+Use o botão **Sair** abaixo (encerra a sessão neste navegador).
+
+**Não vejo uma página**  
+Algumas telas são só para **coordenação** ou **desenvolvimento** — peça acesso ao gestor.
+
+**Documentação completa**  
+Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
+            """
+        )
+    st.sidebar.divider()
     if st.sidebar.button("🚪 Sair do Sistema", use_container_width='stretch'):
         registrar_log_auditoria(usuario_id, "LOGOUT", "Usuário saiu do sistema.")
         st.session_state.clear()
@@ -552,7 +574,12 @@ def tela_home() -> None:
             "Este é o seu painel de controle central do **WikiSuporte**. "
             "Acompanhe os seus indicadores e os alertas do dia."
         )
-        
+        with st.expander("🤔 Como usar esta página?"):
+            st.markdown(
+                "**Alertas** mostram plantão do dia e validações de release atribuídas a você. "
+                "**Clima** é informativo. Use o **menu superior** para ir a Importação, Dashboards ou Releases. "
+                "Dúvidas: veja **Ajuda rápida** na barra lateral."
+            )
         # --- AJUSTE CIRÚRGICO: CÁLCULO REAL DE ALERTAS ---
         # 1. Desempacotamos a tupla nos dois DataFrames correspondentes
         df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)

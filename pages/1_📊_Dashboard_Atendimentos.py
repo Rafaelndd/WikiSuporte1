@@ -116,6 +116,11 @@ def carregar_dados_multi360():
 # ==========================================
 st.title("📊 Dashboard de Atendimentos")
 st.markdown("Análise detalhada dos atendimentos via GoTo e Multi360.")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "Ajuste **Filtros** (período, analista, cliente). As **abas** separam GoTo, Multi360 e visões combinadas. "
+        "Tabelas com cores usam **matplotlib** (instale se faltar). Dados vêm da **Importação** e da API GoTo."
+    )
 
 df_goto_raw = carregar_dados_goto()
 df_multi360_raw = carregar_dados_multi360()

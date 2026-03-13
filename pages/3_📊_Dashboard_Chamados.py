@@ -321,6 +321,12 @@ def sincronizar_chamados(
 # ==========================================
 st.title("🖥️ Dashboard Chamados")
 st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, reincidências e desempenho da desenvolvedora.")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "Use **Filtros** para período, analista e status (abertos x encerrados). "
+        "Cada **aba** mostra um recorte: fila, aging, versões (com **Categoria IA** e filtro), performance e homologação. "
+        "Clique em **Atualizar** nos filtros para recarregar dados do banco."
+    )
 
 df_raw = carregar_dados_tecnuv()
 df_int = carregar_interacoes()

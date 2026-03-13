@@ -99,6 +99,13 @@ def is_plantao_normal(dt):
 # ==========================================
 st.title("📁 Importação e Exportação de Relatórios")
 st.markdown("Importe relatórios mensais e extraia análises de Plantão diário. Cadastro de clientes CRM em Configurações.")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "**API GoTo:** conecta direto na nuvem (precisa de credenciais no `.env`). "
+        "**Importar mensal:** envie o CSV/XLSX exportado do GoTo ou Multi360. "
+        "**Plantões:** só para relatórios curtos (poucos dias). "
+        "Após importar, use **Salvar**; se aparecer cadastro de números sem cliente, preencha para melhorar os dashboards."
+    )
 
 aba1, aba2, aba3 = st.tabs([
     "🔌 Buscar via API GoTo",

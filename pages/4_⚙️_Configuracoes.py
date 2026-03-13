@@ -70,6 +70,12 @@ aba_robo, aba_ramais, aba_usuarios, aba_clientes, aba_diagnostico = st.tabs([
 # ==========================================
 with aba_robo:
     st.subheader("Controle dos Bots de Varredura")
+    with st.expander("🤔 Como usar esta área?"):
+        st.markdown(
+            "**Métricas** mostram se o motor está rodando. **Salvar** grava intervalo e limites de segurança. "
+            "**Raspagens individuais** só funcionam com `python motor_extracao.py` (ou `start_motor.bat`) aberto em outro terminal. "
+            "Evite disparar muitas raspagens seguidas — respeite o limite por hora."
+        )
     estado = ler_estado_robo() if not BOT_CONTROL_DISPONIVEL else ler_estado()
 
     em_andamento = estado.get("em_andamento", False)
@@ -134,6 +140,10 @@ with aba_robo:
                 if BOT_CONTROL_DISPONIVEL:
                     ok, msg = solicitar_raspagem(tipo)
                     st.toast(msg, icon="✅" if ok else "⚠️")
+                    if ok:
+                        st.success("Tarefa enviada ao motor. Aguarde a execução (veja Etapa atual acima).")
+                    else:
+                        st.warning(msg)
                 else:
                     st.info("Serviço de controle de bot não disponível.")
 

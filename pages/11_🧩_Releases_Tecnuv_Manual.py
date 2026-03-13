@@ -34,6 +34,12 @@ st.markdown(
     "homologação (Aprovado/Reprovado) na seção de Auditoria abaixo."
 )
 st.markdown("---")
+with st.expander("🤔 Como usar esta página?"):
+    st.markdown(
+        "Envie o **arquivo do release** (TXT, MD, Word ou PDF). O sistema procura números **(13645)** e cria ciclos de homologação. "
+        "Na **Auditoria**, marque Aprovado/Reprovado por chamado. "
+        "Releases aparecem no Dashboard de Chamados e nos alertas da Home."
+    )
 
 # -----------------------------
 # 1. Formulário de cadastro
