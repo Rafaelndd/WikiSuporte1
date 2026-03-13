@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 import unicodedata
 import re
 from menus import *
-from utils import inicializar_usuario, calcular_patente
+from modules.utils import inicializar_usuario, calcular_patente
 
 
 
@@ -201,7 +201,7 @@ with aba_ranking:
     st.info("💡 **Regra de Agilidade:** Registros em até 7 dias valem 100 XP. Acima de 21 dias valem 0 XP.")
 
     # Importamos a lista de níveis para o sumário visual (expander)
-    from utils import NIVEIS_CONHECIMENTO, calcular_patente
+    from modules.utils import NIVEIS_CONHECIMENTO, calcular_patente
 
     with engine.connect() as conn:
         # A query agora busca diretamente as colunas xp_total e medalha_atual do banco

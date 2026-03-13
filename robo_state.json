@@ -1,7 +1,7 @@
 {
   "ultima_execucao": "2026-03-13T03:42:13.441713",
   "em_andamento": true,
-  "auto_ativo": true,
+  "auto_ativo": false,
   "intervalo": 30,
   "etapa_atual": "Chamados: processando 128 registros",
   "tarefa_solicitada": null,

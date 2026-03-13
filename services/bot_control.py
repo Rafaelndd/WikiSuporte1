@@ -40,6 +40,7 @@ def _estado_default():
         "max_raspagens_hora": MAX_RASPAGENS_POR_HORA,
         "horario_inicio": None,
         "horario_fim": None,
+        "parar_solicitada": False,
     }
 
 
@@ -143,5 +144,17 @@ def finalizar_execucao() -> None:
     estado["em_andamento"] = False
     estado["etapa_atual"] = None
     estado["tarefa_solicitada"] = None
+    estado["parar_solicitada"] = False
     estado["ultima_execucao"] = datetime.now().isoformat()
     salvar_estado(estado)
+
+
+def solicitar_parada_bots() -> None:
+    """Pedido cooperativo: o motor / ciclo de chamados deve encerrar na próxima verificação."""
+    estado = ler_estado()
+    estado["parar_solicitada"] = True
+    salvar_estado(estado)
+
+
+def deve_parar() -> bool:
+    return bool(ler_estado().get("parar_solicitada"))

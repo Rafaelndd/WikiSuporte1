@@ -91,52 +91,100 @@ def salvar_arquivo_release(
     return caminho_rel
 
 
+def _extrair_versao_do_titulo(texto: str) -> str:
+    m = re.search(r"(\d+\.\d+\.\d+)", texto or "")
+    return m.group(1) if m else ""
+
+
 def processar_release_completo(
     versao: str,
     texto_completo: str,
     autor: Optional[str] = None,
     nome_arquivo: Optional[str] = None,
     caminho_arquivo: Optional[str] = None,
+    origem: str = "manual",
 ) -> tuple[int, int]:
     """
-    Processa um release: extrai chamados do texto, cria chamados/ciclos.
-    Usado pelo bot de varredura e pelo fluxo manual.
-    Retorna (qtd_chamados_vinculados, qtd_ciclos_criados).
+    Processa release: grava um registro em release_itens por linha com (nr_chamado);
+    cria chamados + ciclos de homologação.
+    Retorna (qtd_itens_chamados, qtd_ciclos_criados).
     """
+    versao = versao[:50].strip()
+    ver_norm = _extrair_versao_do_titulo(versao) or _extrair_versao_do_titulo(texto_completo[:500]) or versao
+    titulo_release = (texto_completo or "").splitlines()[0].strip()[:500] if texto_completo else versao
     id_release = ensure_release(
-        versao_release=versao[:50].strip(),
+        versao_release=versao,
         autor=autor or "Processamento Automático",
         texto_completo=texto_completo[:100000],
         nome_arquivo=(nome_arquivo or "").strip()[:255] or None,
         caminho_arquivo=(caminho_arquivo or "").strip()[:512] or None,
     )
 
-    chamados_assunto: dict[str, str] = {}
-    for line in texto_completo.splitlines():
+    # Uma entrada por linha que contém (nnnnn) — mesmo chamado pode ter linhas diferentes em releases distintos
+    linhas_por_chamado: list[tuple[str, str]] = []
+    for line in (texto_completo or "").splitlines():
         clean = line.strip()
-        if not clean:
+        if not clean or clean.startswith("#"):
             continue
         for match in re.findall(r"\((\d{4,6})\)", clean):
-            if match not in chamados_assunto:
-                chamados_assunto[match] = clean
+            linhas_por_chamado.append((match, clean[:4000]))
 
     modulos_conhecidos = (
         "POSTOGESTOR", "COMERCIAL", "VENDAS", "FISCAL", "PDV", "FINANCEIRO",
         "ESTOQUE", "COMPRAS", "NF-E", "NFE", "SPED", "CONTRABILIDADE",
     )
 
-    criados = 0
-    for id_chamado, assunto_linha in sorted(chamados_assunto.items()):
+    criados_ciclo = 0
+    vistos_no_release: set[tuple[int, str]] = set()
+    engine = get_connection()
+    tem_itens = False
+    try:
+        with engine.connect() as c:
+            c.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
+        tem_itens = True
+    except Exception:
+        pass
+
+    for id_chamado_str, linha in linhas_por_chamado:
+        nr = int(id_chamado_str)
+        key = (nr, linha[:500])
+        if key in vistos_no_release:
+            continue
+        vistos_no_release.add(key)
+        if tem_itens:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO release_itens
+                            (id_release, nr_chamado, linha_nota, versao, titulo_release, autor, origem)
+                            VALUES (:idr, :nr, :linha, :ver, :tit, :autor, :orig)
+                            ON CONFLICT (id_release, nr_chamado, linha_nota) DO NOTHING
+                            """
+                        ),
+                        {
+                            "idr": id_release,
+                            "nr": nr,
+                            "linha": linha[:8000],
+                            "ver": ver_norm[:80],
+                            "tit": titulo_release,
+                            "autor": (autor or "")[:255] or None,
+                            "orig": (origem or "manual")[:32],
+                        },
+                    )
+            except Exception:
+                pass
         modulo = None
         for m in modulos_conhecidos:
-            if m in assunto_linha.upper():
+            if m in linha.upper():
                 modulo = m
                 break
-        ensure_chamado(id_chamado, assunto=assunto_linha[:2000], modulo_sistema=modulo)
-        if create_ciclo(id_chamado, id_release):
-            criados += 1
+        ensure_chamado(id_chamado_str, assunto=linha[:2000], modulo_sistema=modulo)
+        if create_ciclo(id_chamado_str, id_release):
+            criados_ciclo += 1
 
-    return len(chamados_assunto), criados
+    return len(vistos_no_release), criados_ciclo
 
 
 def ensure_chamado(id_chamado: str, assunto: str = "", modulo_sistema: Optional[str] = None) -> None:

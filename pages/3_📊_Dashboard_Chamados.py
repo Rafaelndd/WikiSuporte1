@@ -138,22 +138,33 @@ def carregar_interacoes():
 @st.cache_data(ttl=300)
 def carregar_releases_chamados():
     """
-    Carrega o número de releases/ciclos em que cada chamado aparece.
-    Usa ciclos_homologacao (novo modelo de qualidade).
+    Quantas vezes o chamado apareceu em releases (release_itens ou ciclos_homologacao).
     """
     engine = get_connection()
     try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
         df_rel = pd.read_sql(
             """
-            SELECT id_chamado::integer AS nr_chamado, COUNT(*) AS qtd_releases
-            FROM ciclos_homologacao
-            GROUP BY id_chamado
+            SELECT nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
+            FROM release_itens
+            GROUP BY nr_chamado
             """,
             engine,
         )
         return df_rel
     except Exception:
-        return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
+        try:
+            return pd.read_sql(
+                """
+                SELECT id_chamado::integer AS nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
+                FROM ciclos_homologacao
+                GROUP BY id_chamado
+                """,
+                engine,
+            )
+        except Exception:
+            return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
 
 def limpar_html(html_text):
     if not html_text or pd.isna(html_text):
@@ -461,12 +472,13 @@ df['tempo_ate_liberacao_dias'] = tempos_liberacao
 # 6. CONSTRUÇÃO DO DASHBOARD (INTERFACE)
 # ==========================================
 
-aba1, aba2, aba3, aba4, aba5 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "🎯 Visão Geral",
     "⏳ Tempo de espera e gargalos nos chamados com a desenvolvedora.",
     "🐛 Detalhamento de Versões",
     "👥 Chamados por Analistas EPSY & Clientes",
-    "📋 Qualidade de Homologação"
+    "📋 Qualidade de Homologação",
+    "📂 Fila aberta & releases",
 ])
 
 # ------------------------------------------
@@ -745,5 +757,66 @@ with aba5:
             "podem não existir ainda. Execute o script `database/migracao_ciclos_homologacao.sql`."
         )
         st.error(str(e))
+
+# ------------------------------------------
+# ABA 6: FILA ABERTA + RELEASES / REINCIDÊNCIA
+# ------------------------------------------
+with aba6:
+    st.subheader("📂 Chamados x releases (tempo real no banco)")
+    st.markdown(
+        "**Reincidência** = chamado citado em **mais de um** release (`release_itens`). "
+        "**Sem release** = ainda não apareceu em nenhum release processado. "
+        "Priorize migrar releases na **Page 11** (grava linha por chamado)."
+    )
+    filtro_fila = st.selectbox(
+        "Exibir",
+        ["Somente ativos (não encerrados/cancelados)", "Encerrados ou cancelados", "Todos"],
+        key="aba6_filtro",
+    )
+    engine = get_connection()
+    try:
+        sql = """
+        SELECT
+            c.nr_chamado,
+            COALESCE(c.cliente_nome, c.nome_cliente, '—') AS cliente,
+            c.data_abertura,
+            COALESCE(c.usuario_epsy, '—') AS quem_abriu,
+            c.status_atual,
+            COALESCE(ri.qtd_releases, 0) AS vezes_em_releases,
+            CASE
+                WHEN COALESCE(ri.qtd_releases, 0) > 1 THEN 'Reincidência (liberado em +1 release)'
+                WHEN COALESCE(ri.qtd_releases, 0) = 1 THEN '1 liberação em release'
+                ELSE 'Não consta em release'
+            END AS situacao_release,
+            COALESCE(c.categoria_ia, '—') AS categoria_ia,
+            LEFT(COALESCE(c.motivo_abertura_html, c.assunto_encerramento, ''), 120) AS resumo
+        FROM chamados_tecnuv c
+        LEFT JOIN (
+            SELECT nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
+            FROM release_itens
+            GROUP BY nr_chamado
+        ) ri ON ri.nr_chamado = c.nr_chamado
+        WHERE 1=1
+        """
+        if filtro_fila.startswith("Somente ativos"):
+            sql += """ AND TRIM(LOWER(COALESCE(c.status_atual, ''))) NOT IN ('encerrado', 'cancelado')
+                AND LOWER(COALESCE(c.status_atual, '')) NOT LIKE '%encerrado%'
+                AND LOWER(COALESCE(c.status_atual, '')) NOT LIKE '%cancelado%' """
+        elif filtro_fila.startswith("Encerrados"):
+            sql += """ AND (
+                TRIM(LOWER(COALESCE(c.status_atual, ''))) IN ('encerrado', 'cancelado')
+                OR LOWER(COALESCE(c.status_atual, '')) LIKE '%encerrado%'
+                OR LOWER(COALESCE(c.status_atual, '')) LIKE '%cancelado%'
+            ) """
+        sql += " ORDER BY c.data_abertura DESC NULLS LAST LIMIT 2000"
+        df_fila = pd.read_sql(text(sql), engine)
+        if df_fila.empty:
+            st.info("Nenhum registro. Rode a migração `release_itens` e processe releases na Page 11.")
+        else:
+            st.metric("Registros", len(df_fila))
+            st.dataframe(df_fila, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.warning("Tabela `release_itens` ausente ou erro de consulta. Execute `database/migracao_release_itens.sql`.")
+        st.code(str(e))
 
 registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD_CHAMADOS", "Acessou Dashboard Analítico - Chamados Tecnuv (EPSY)")

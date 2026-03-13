@@ -35,6 +35,7 @@ try:
         ler_estado,
         salvar_estado,
         solicitar_raspagem,
+        solicitar_parada_bots,
         pode_executar_raspagem,
     )
     BOT_CONTROL_DISPONIVEL = True
@@ -119,6 +120,19 @@ with aba_robo:
         "**⚠️ Para os botões funcionarem:** o motor precisa estar rodando. "
         "Execute `scripts\\start_motor.bat` ou em um terminal: `python motor_extracao.py`"
     )
+    if BOT_CONTROL_DISPONIVEL and em_andamento:
+        st.error(
+            "**Parar bots:** solicita encerramento cooperativo do ciclo atual (entre chamados). "
+            "O navegador do motor fecha ao fim da etapa; se travar, feche o terminal do motor."
+        )
+        if st.button("🛑 Encerrar processo dos bots (parada cooperativa)", type="primary", key="parar_bots"):
+            solicitar_parada_bots()
+            st.success("Parada registrada. O motor deve encerrar em até alguns minutos.")
+            st.rerun()
+    elif BOT_CONTROL_DISPONIVEL:
+        if st.button("🛑 Solicitar parada (quando o motor estiver executando)", key="parar_bots_idle"):
+            solicitar_parada_bots()
+            st.info("Flag de parada ligada. Na próxima raspagem o ciclo encerra mais cedo.")
 
     # Botões individuais de raspagem
     st.markdown("#### Raspagens Individuais")

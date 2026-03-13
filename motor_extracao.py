@@ -124,6 +124,7 @@ class MotorExtracao:
                         versao=titulo_release[:50].strip(),
                         texto_completo=texto_release,
                         autor="Processamento Automático (bot)",
+                        origem="raspagem",
                     )
                     total_vinculados += qtd_vinculados
                     total_ciclos += qtd_ciclos

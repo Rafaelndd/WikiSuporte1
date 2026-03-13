@@ -131,6 +131,7 @@ with st.form("form_novo_release", clear_on_submit=True):
                         autor=autor.strip(),
                         nome_arquivo=nome_arquivo,
                         caminho_arquivo=caminho,
+                        origem="manual",
                     )
 
                     st.success(

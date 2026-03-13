@@ -32,6 +32,7 @@ from modules.utils import inicializar_usuario, calcular_patente
 
 
 
+
 #======================================================================================================================#
 
 #*** Carrega variáveis de ambiente (DB_HOST, DB_NAME, DB_USER, DB_PASS) ***#

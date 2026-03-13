@@ -29,11 +29,19 @@ from modules.utils import ler_estado_robo, salvar_estado_robo
 from services.bot_control import (
     consumir_tarefa,
     definir_etapa,
+    deve_parar,
     iniciar_execucao,
     finalizar_execucao,
     ler_estado,
     pode_executar_raspagem,
 )
+
+
+def _status_encerrado_cancelado(status_txt: str) -> bool:
+    if not status_txt or not str(status_txt).strip():
+        return False
+    s = str(status_txt).strip().lower()
+    return s in ("encerrado", "cancelado") or "encerrado" in s or "cancelado" in s
 
 
 # Configuração de Logs
@@ -266,6 +274,9 @@ class OraculoBot:
                             continue
 
                         nr_chamado = int(nr_chamado_str)
+                        status_web = tds[7].text.strip()
+                        if _status_encerrado_cancelado(status_web):
+                            continue
 
                         data_alt_web = None
                         try:
@@ -287,7 +298,7 @@ class OraculoBot:
                         chamados_helpdesk[nr_chamado] = {
                             "nr_chamado": nr_chamado,
                             "link": f"https://postogestor.com.br/helpdesk/sistema/tecnuv/editar/id/{nr_chamado}",
-                            "status_web": tds[7].text.strip(),
+                            "status_web": status_web,
                             "data_alt_web": data_alt_web,
                             "ticket_vinculado": tds[2].text.strip(),
                             "setor": tds[6].text.strip(),
@@ -322,8 +333,9 @@ class OraculoBot:
                             """
                             SELECT nr_chamado
                             FROM chamados_tecnuv
-                            WHERE status_atual ILIKE '%encerrado%'
-                               OR status_atual ILIKE '%cancelado%'
+                            WHERE TRIM(LOWER(COALESCE(status_atual, ''))) IN ('encerrado', 'cancelado')
+                               OR LOWER(TRIM(COALESCE(status_atual, ''))) LIKE '%encerrado%'
+                               OR LOWER(TRIM(COALESCE(status_atual, ''))) LIKE '%cancelado%'
                             """
                         )
                     ).fetchall()
@@ -363,9 +375,18 @@ class OraculoBot:
             # --- Passo 1: Buscar abertos no banco ---
             ids_helpdesk = set(chamados_helpdesk.keys())
 
-            registros_banco = session.query(ChamadoTecnuv).filter(
-                ChamadoTecnuv.status_atual.notin_(["Encerrado", "Cancelado", "ANALISADO/ARQUIVO"])
-            ).all()
+            # Abertos no banco: exclui encerrado/cancelado (várias grafias)
+            todos = session.query(ChamadoTecnuv).all()
+            registros_banco = []
+            for c in todos:
+                st = (c.status_atual or "").strip().lower()
+                if st in ("encerrado", "cancelado"):
+                    continue
+                if "encerrado" in st or "cancelado" in st:
+                    continue
+                if st == "analisado/arquivo":
+                    continue
+                registros_banco.append(c)
 
             banco_dict = {c.nr_chamado: c for c in registros_banco}
             ids_banco = set(banco_dict.keys())
@@ -385,6 +406,9 @@ class OraculoBot:
 
             # --- Passo 3A: Chamados NOVOS (existem no helpdesk mas não no banco) ---
             for nr in novos_no_helpdesk:
+                if deve_parar():
+                    logging.warning("[PARADA] Encerramento manual solicitado — interrompendo ciclo de chamados.")
+                    break
                 if self._esta_sem_permissao(nr):
                     continue
 
@@ -417,8 +441,12 @@ class OraculoBot:
                     else:
                         falhas_lista.append(nr)
 
-            # --- Passo 3B: Chamados que EXISTEM nos dois lados ---
-            for nr in em_ambos:
+            # --- Passo 3B: Chamados que EXISTEM nos dois lados (prioridade: fila atual do helpdesk) ---
+            em_ambos_lista = sorted(em_ambos)
+            for nr in em_ambos_lista:
+                if deve_parar():
+                    logging.warning("[PARADA] Encerramento manual — interrompendo.")
+                    break
                 if self._esta_sem_permissao(nr):
                     continue
 
@@ -463,14 +491,30 @@ class OraculoBot:
                         else:
                             falhas_lista.append(nr)
 
-            # --- Passo 3C: Chamados que SUMIRAM do helpdesk ---
-            if sumiram_do_helpdesk:
-                logging.info(f"[FASE 2] Buscando paradeiro de {len(sumiram_do_helpdesk)} chamados que sumiram...")
-                for nr in sumiram_do_helpdesk:
+            # --- Passo 3C: Órfãos (no banco como abertos, não na lista atual do helpdesk) — limite por ciclo ---
+            if sumiram_do_helpdesk and not deve_parar():
+                orfaos = list(sumiram_do_helpdesk)
+                try:
+                    orfaos.sort(
+                        key=lambda n: banco_dict[n].ultima_alteracao_tecnuv
+                        or banco_dict[n].data_abertura
+                        or datetime.min,
+                        reverse=True,
+                    )
+                except Exception:
+                    pass
+                max_orfaos = 25
+                fila = orfaos[:max_orfaos]
+                logging.info(
+                    f"[FASE 2] Órfãos: {len(orfaos)} no banco; neste ciclo investigando só {len(fila)} "
+                    f"(mais recentes). Demais ficam para próximos ciclos — prioridade é a fila aberta do helpdesk."
+                )
+                for nr in fila:
+                    if deve_parar():
+                        break
                     if self._esta_sem_permissao(nr):
                         continue
-
-                    logging.info(f"[ÓRFÃO] Chamado {nr} sumiu do helpdesk. Investigando...")
+                    logging.info(f"[ÓRFÃO] Chamado {nr} sumiu da lista ativa. Investigando...")
                     encontrado = self.executar_busca_especifica(nr)
                     if encontrado:
                         if self._verificar_acesso_pagina(nr):
@@ -920,6 +964,9 @@ class OraculoBot:
 
 def _executar_ciclo_chamados():
     """Abre o bot, faz login, coleta chamados, compara e auto-cura."""
+    if deve_parar():
+        logging.info("Parada solicitada antes do ciclo de chamados.")
+        return
     bot = None
     try:
         definir_etapa("Chamados: iniciando navegador")
@@ -931,8 +978,9 @@ def _executar_ciclo_chamados():
             if chamados_helpdesk:
                 definir_etapa(f"Chamados: processando {len(chamados_helpdesk)} registros")
                 bot.comparar_e_processar(chamados_helpdesk)
-            definir_etapa("Chamados: auto-cura de falhas")
-            bot.recuperar_falhas_raspagem()
+            if not deve_parar():
+                definir_etapa("Chamados: auto-cura de falhas")
+                bot.recuperar_falhas_raspagem()
         else:
             logging.error("Falha no login. Abortando ciclo de chamados.")
     except Exception as e_bot:
