@@ -388,7 +388,7 @@ with aba_geral:
             showlegend=False,
             height=280,
         )
-        st.plotly_chart(fig_omni, use_container_width=True)
+        st.plotly_chart(fig_omni, use_container_width='stretch')
         st.caption(
             "Distribuição dos atendimentos por canal. As barras facilitam comparar volumes e funcionam melhor em telas menores."
         )
@@ -600,7 +600,7 @@ with sub_indiv:
                         yaxis_title=None,
                         hovermode="x unified"
                     )
-                    st.plotly_chart(fig_prod, use_container_width=True)
+                    st.plotly_chart(fig_prod, use_container_width='stretch')
                     st.caption("Histórico mensal de atendimentos realizados.")
 
             with col_dir:
@@ -634,7 +634,7 @@ with sub_indiv:
                         xaxis_title="Frequência",
                         yaxis_title=None
                     )
-                    st.plotly_chart(fig_notas, use_container_width=True)
+                    st.plotly_chart(fig_notas, use_container_width='stretch')
                     st.caption("Distribuição das notas dadas pelos clientes ao fim do chat.")
 
             # 4. Tabela de Casos Críticos (Ação Imediata)
@@ -921,7 +921,7 @@ with aba_telefonia:
                         height=320,
                         showlegend=False,
                     )
-                    st.plotly_chart(fig_status, use_container_width=True)
+                    st.plotly_chart(fig_status, use_container_width='stretch')
 
         with tab_tel_agentes:
             if coluna_agente_tel:

@@ -1318,7 +1318,7 @@ with aba_explorar:
                     with col_btn:
                         if not is_obsoleto:
                             label = f"❤️ {row['qtd_upvotes']}" if row["ja_curtiu"] else f"🤍 {row['qtd_upvotes']}"
-                            if st.button(label, key=f"lk_{row['id']}", use_container_width=True):
+                            if st.button(label, key=f"lk_{row['id']}", use_container_width='strech'):
                                 with engine.begin() as conn_voto:
                                     if row["ja_curtiu"]:
                                         conn_voto.execute(
@@ -1358,7 +1358,7 @@ with aba_explorar:
                                     key=f"mot_obs_{row['id']}",
                                     placeholder="Ex.: Procedure mudou na v2.9; incluir novo print",
                                 )
-                                if st.button("Confirmar obsoleta + avisar autor", key=f"obs_{row['id']}", use_container_width=True):
+                                if st.button("Confirmar obsoleta + avisar autor", key=f"obs_{row['id']}", use_container_width='stretch'):
                                     if not (motivo_obs or "").strip():
                                         st.warning("Informe um motivo para o autor.")
                                     else:
@@ -1502,7 +1502,7 @@ with aba_explorar:
                     # 1. Pré-visualização Integrada (Renderização Nativa)
                     if extensao in ['png', 'jpg', 'jpeg']:
                         # Exibe a imagem de forma responsiva sem ultrapassar o layout
-                        st.image(str(caminho_anexo), caption="Imagem em Anexo", use_container_width=True)
+                        st.image(str(caminho_anexo), caption="Imagem em Anexo", use_container_width='strech')
                         
                     elif extensao in ['mp4', 'avi', 'mov']:
                         st.video(str(caminho_anexo))

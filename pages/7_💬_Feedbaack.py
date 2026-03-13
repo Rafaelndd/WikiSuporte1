@@ -69,7 +69,7 @@ with st.container(border=True):
             ),
         )
 
-        enviado = st.form_submit_button("Enviar feedback", use_container_width=True)
+        enviado = st.form_submit_button("Enviar feedback", use_container_width='strech')
 
         # --- 4. PROCESSAMENTO DO FORMULÁRIO ---
         if enviado:

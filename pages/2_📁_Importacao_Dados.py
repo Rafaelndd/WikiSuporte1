@@ -273,7 +273,7 @@ with aba1:
                 df_goto_api['cliente_nome'] = "Não Identificado"
 
         with st.container(border=True):
-            st.dataframe(df_goto_api.head(10), use_container_width=True)
+            st.dataframe(df_goto_api.head(10), use_container_width='stretch')
 
         with st.container(border=True):
             st.markdown("#### 📊 Resumo")
@@ -286,7 +286,7 @@ with aba1:
             if pd.notna(data_max_api):
                 col_r3.metric("Data Final", pd.to_datetime(data_max_api).strftime('%d/%m/%Y'))
 
-        if st.button("💾 Salvar no Banco de Dados", type="primary", key="goto_salvar_api", use_container_width=True):
+        if st.button("💾 Salvar no Banco de Dados", type="primary", key="goto_salvar_api", use_container_width='stretch'):
             with st.spinner("Gravando dados no WikiSuporte..."):
                 sucesso, msg = salvar_no_banco(df_goto_api, "atendimentos_goto", "GOTO")
                 if sucesso:

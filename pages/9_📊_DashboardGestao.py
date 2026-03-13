@@ -123,7 +123,7 @@ with aba_plantoes:
             color_discrete_map={"Normal": "#007BFF", "Personalizado": "#FF9900"} 
         )
         fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width='strech')
         
         with st.expander("Ver Tabela Bruta de Plantões"):
             st.dataframe(df_plantoes)

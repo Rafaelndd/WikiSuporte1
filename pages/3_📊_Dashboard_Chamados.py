@@ -531,7 +531,7 @@ with aba1:
             yaxis_title=None,
             showlegend=False,
         )
-        st.plotly_chart(fig_reinc, use_container_width=True)
+        st.plotly_chart(fig_reinc, use_container_width='stretch')
 
     # NOVO: Tabela detalhada de reincidências
     if reincidentes > 0:
@@ -646,7 +646,7 @@ with aba3:
         agrupamento_bugs = df_ver[
             ["versao_sistema", "nr_chamado", "Cliente", "Categoria (IA)", "Resumo"]
         ].sort_values(by=["versao_sistema", "nr_chamado"], ascending=[False, False])
-        st.dataframe(agrupamento_bugs, hide_index=True, use_container_width=True)
+        st.dataframe(agrupamento_bugs, hide_index=True, use_container_width='stretch')
 
 # ------------------------------------------
 # ABA 4: PERFORMANCE EPSY & OFENSORES
@@ -690,7 +690,7 @@ with aba4:
         if clientes_agg.empty:
             st.info("Nenhum chamado no período. Ajuste os filtros.")
         else:
-            st.dataframe(clientes_agg, hide_index=True, use_container_width=True)
+            st.dataframe(clientes_agg, hide_index=True, use_container_width='stretch')
             if (clientes_agg["Cliente"] == "Sem cliente vinculado").any():
                 st.caption("💡 Vincule clientes em **Configurações** para identificar por razão social.")
 
@@ -728,7 +728,7 @@ with aba5:
                 st.info("Nenhum chamado com múltiplos ciclos ainda.")
             else:
                 df_rank.columns = ["Chamado", "Qtd. Ciclos", "Reprovações"]
-                st.dataframe(df_rank, hide_index=True, use_container_width=True)
+                st.dataframe(df_rank, hide_index=True, use_container_width='')
 
         with r2:
             st.markdown("#### 📊 Vulnerabilidade por Módulo")
@@ -737,7 +737,7 @@ with aba5:
                 st.info("Nenhuma reprovação registrada por módulo.")
             else:
                 df_mod.columns = ["Módulo", "Reprovações"]
-                st.dataframe(df_mod, hide_index=True, use_container_width=True)
+                st.dataframe(df_mod, hide_index=True, use_container_width='stretch')
 
     except Exception as e:
         st.warning(
