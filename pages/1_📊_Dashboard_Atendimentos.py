@@ -15,6 +15,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import text
 from datetime import datetime, timedelta, time
 from modules.database import get_connection
+from services.ui_realtime import render_global_notifications_listener
 
 #======================================================================================================================#
 
@@ -64,6 +65,7 @@ if "notificacoes_lidas" not in st.session_state:
 # Cadeado de segurança: exige login e perfil adequado
 if not st.session_state.get("autenticado", False):
     st.switch_page("app.py")
+render_global_notifications_listener()
 
 perfil_logado_raw = str(st.session_state.get("perfil", "analista")).strip().lower()
 # Aceita tanto nomenclatura nova quanto antiga, se existir

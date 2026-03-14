@@ -47,6 +47,11 @@ def require_login() -> str:
     perfil_norm = normalize_perfil(perfil_raw)
     # Deixa o perfil normalizado disponível para outras partes da app
     st.session_state["perfil_normalizado"] = perfil_norm
+    try:
+        from services.ui_realtime import render_global_notifications_listener
+        render_global_notifications_listener()
+    except Exception:
+        pass
     return perfil_norm
 
 

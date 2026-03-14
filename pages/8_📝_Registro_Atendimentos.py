@@ -13,6 +13,7 @@ from services.atendimentos_service import (
     CANAIS_PADRAO,
     CRITICIDADES,
     atualizar_atendimento,
+    buscar_correspondencias_cliente,
     consultar_atendimentos,
     ensure_schema,
     listar_anexos_atendimento,
@@ -76,89 +77,132 @@ def _to_excel_bytes(df: pd.DataFrame) -> bytes:
 
 with tab_lancar:
     st.subheader("Novo Atendimento")
-    termo = st.text_input("Buscar cliente (razão social, CNPJ ou alias)", key="busca_cliente", placeholder="Ex.: Posto Mahl")
-    df_clientes = listar_clientes(termo, limite=50)
+    if "p8_uploader_nonce" not in st.session_state:
+        st.session_state["p8_uploader_nonce"] = 0
 
-    if df_clientes.empty:
-        st.warning("Nenhum cliente encontrado. Cadastre em `pages/4_⚙️_Configuracoes.py` na aba Clientes e Telefones.")
-    else:
-        opcoes = {
-            f"{r['razao_social']} | CNPJ: {r['cnpj'] or 'Não informado'} | ID:{int(r['id_cliente'])}": int(r["id_cliente"])
-            for _, r in df_clientes.iterrows()
+    def _reset_form_p8() -> None:
+        keys = [
+            "p8_razao_social",
+            "p8_cnpj",
+            "p8_telefone",
+            "p8_match_cliente",
+            "p8_contato_nome",
+            "p8_email_contato",
+            "p8_setor",
+            "p8_categoria",
+            "p8_criticidade",
+            "p8_canal",
+            "p8_protocolo",
+            "p8_duracao_min",
+            "p8_motivo",
+            "p8_solucao",
+            "p8_resolvido",
+            "p8_abriu_chamado",
+            "p8_nr_chamado",
+            "p8_data_atendimento",
+        ]
+        for k in keys:
+            st.session_state.pop(k, None)
+        st.session_state["p8_uploader_nonce"] = st.session_state.get("p8_uploader_nonce", 0) + 1
+
+    st.caption("Digite Razão Social/CNPJ/Telefone. O sistema sugere correspondências exatas em tempo real.")
+    c_ident1, c_ident2, c_ident3 = st.columns(3)
+    razao_social = c_ident1.text_input("Razão Social *", key="p8_razao_social", placeholder="Ex.: Posto Mahl")
+    cnpj_in = c_ident2.text_input("CNPJ", key="p8_cnpj", placeholder="00.000.000/0000-00")
+    telefone = c_ident3.text_input("Telefone/Celular", key="p8_telefone", placeholder="(xx) xxxxx-xxxx")
+
+    df_matches = buscar_correspondencias_cliente(cnpj=cnpj_in, telefone=telefone, limite=8)
+    cliente_id_escolhido = None
+    if not df_matches.empty:
+        st.markdown("**Correspondências exatas encontradas:**")
+        opcoes_match = {
+            f"{r['razao_social']} | CNPJ: {r['cnpj'] or 'não informado'} | TEL: {r['telefone'] or '-'} | via {r['origem_match']}": int(r["id_cliente"])
+            for _, r in df_matches.iterrows()
         }
-        sel_cliente_txt = st.selectbox("Cliente *", list(opcoes.keys()), key="sel_cliente")
-        id_cliente_sel = opcoes[sel_cliente_txt]
-        cliente_row = df_clientes[df_clientes["id_cliente"] == id_cliente_sel].iloc[0]
+        escolha_match = st.selectbox(
+            "Selecione a opção correta (mouse/teclado) ou deixe em branco para cadastrar novo",
+            ["-- Cadastrar novo cliente/informação --"] + list(opcoes_match.keys()),
+            key="p8_match_cliente",
+        )
+        if escolha_match != "-- Cadastrar novo cliente/informação --":
+            cliente_id_escolhido = opcoes_match[escolha_match]
+            st.success("Cadastro existente selecionado. Os dados novos (telefone/CNPJ ausentes) serão incorporados se necessário.")
+    else:
+        if cnpj_in.strip() or telefone.strip():
+            st.info("Nenhuma correspondência exata. Ao salvar, o cadastro será criado/atualizado automaticamente.")
 
-        c_auto1, c_auto2 = st.columns(2)
-        c_auto1.text_input("Razão Social (automático)", value=str(cliente_row["razao_social"]), disabled=True)
-        c_auto2.text_input("CNPJ (automático)", value=str(cliente_row["cnpj"] or ""), disabled=True)
+    with st.form("form_atendimento", clear_on_submit=False):
+        st.markdown("#### 👤 Dados de contato")
+        c1, c2 = st.columns(2)
+        contato_nome = c1.text_input("Contato", key="p8_contato_nome")
+        email_contato = c2.text_input("E-mail do contato", key="p8_email_contato")
 
-        with st.form("form_atendimento", clear_on_submit=True):
-            st.markdown("#### 👤 Dados de contato")
-            c1, c2, c3 = st.columns(3)
-            contato_nome = c1.text_input("Contato")
-            telefone = c2.text_input("Telefone/Celular", placeholder="(xx) xxxxx-xxxx")
-            email_contato = c3.text_input("E-mail do contato")
+        st.markdown("#### 🗂️ Tipificação")
+        t1, t2, t3 = st.columns(3)
+        setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"], key="p8_setor")
+        categoria = t2.text_input("Categoria *", placeholder="Ex.: Instalação, Dúvida Fiscal, Lentidão...", key="p8_categoria")
+        criticidade = t3.selectbox("Criticidade *", CRITICIDADES, key="p8_criticidade")
 
-            st.markdown("#### 🗂️ Tipificação")
-            t1, t2, t3 = st.columns(3)
-            setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"])
-            categoria = t2.text_input("Categoria *", placeholder="Ex.: Instalação, Dúvida Fiscal, Lentidão...")
-            criticidade = t3.selectbox("Criticidade *", CRITICIDADES)
+        st.markdown("#### 📞 Canal")
+        cc1, cc2, cc3 = st.columns(3)
+        canal = cc1.selectbox("Canal *", CANAIS_PADRAO, key="p8_canal")
+        protocolo = cc2.text_input("Protocolo", key="p8_protocolo")
+        duracao_min = cc3.number_input("Duração (min)", min_value=0, step=1, value=0, key="p8_duracao_min")
+        if canal == "Chat Multi360":
+            st.caption("Para canal Multi360, o protocolo é obrigatório.")
 
-            st.markdown("#### 📞 Canal")
-            cc1, cc2, cc3 = st.columns(3)
-            canal = cc1.selectbox("Canal *", CANAIS_PADRAO)
-            protocolo = cc2.text_input("Protocolo")
-            duracao_min = cc3.number_input("Duração (min)", min_value=0, step=1, value=0)
-            if canal == "Chat Multi360":
-                st.caption("Para canal Multi360, o protocolo é obrigatório.")
+        st.markdown("#### 📝 Detalhes")
+        motivo = st.text_area("Motivo / Assunto *", height=120, key="p8_motivo")
+        solucao = st.text_area("Solução", height=120, key="p8_solucao")
+        d1, d2, d3 = st.columns(3)
+        resolvido = d1.checkbox("Resolvido?", key="p8_resolvido")
+        abriu_chamado = d2.checkbox("Precisou abrir chamado?", key="p8_abriu_chamado")
+        nr_chamado = d3.text_input("Nº do chamado (quando houver)", key="p8_nr_chamado")
+        data_atendimento = st.date_input("Data do atendimento", value=date.today(), key="p8_data_atendimento")
 
-            st.markdown("#### 📝 Detalhes")
-            motivo = st.text_area("Motivo / Assunto *", height=120)
-            solucao = st.text_area("Solução", height=120)
-            d1, d2, d3 = st.columns(3)
-            resolvido = d1.checkbox("Resolvido?")
-            abriu_chamado = d2.checkbox("Precisou abrir chamado?")
-            nr_chamado = d3.text_input("Nº do chamado (quando houver)")
-            data_atendimento = st.date_input("Data do atendimento", value=date.today())
+        st.markdown("#### 📎 Anexos")
+        anexos = st.file_uploader(
+            "Selecione arquivos (qualquer formato, múltiplos arquivos)",
+            accept_multiple_files=True,
+            key=f"p8_anexos_{st.session_state['p8_uploader_nonce']}",
+        )
+        salvar = st.form_submit_button("✅ Registrar atendimento", type="primary", use_container_width=True)
 
-            st.markdown("#### 📎 Anexos")
-            anexos = st.file_uploader(
-                "Selecione arquivos (qualquer formato, múltiplos arquivos)",
-                accept_multiple_files=True,
-            )
-            salvar = st.form_submit_button("✅ Registrar atendimento", type="primary", use_container_width=True)
-
-            if salvar:
-                payload = {
-                    "usuario_id": usuario_id,
-                    "nome_analista": nome_usuario,
-                    "cliente_id": id_cliente_sel,
-                    "contato_nome": contato_nome,
-                    "telefone": telefone,
-                    "email_contato": email_contato,
-                    "setor": setor,
-                    "categoria": categoria,
-                    "criticidade": criticidade,
-                    "canal": canal,
-                    "protocolo": protocolo,
-                    "duracao_min": int(duracao_min) if duracao_min else None,
-                    "motivo": motivo,
-                    "solucao": solucao,
-                    "resolvido": resolvido,
-                    "abriu_chamado": abriu_chamado,
-                    "nr_chamado": nr_chamado,
-                    "data_atendimento": datetime.combine(data_atendimento, datetime.now().time()),
-                    "origem_registro": "MANUAL",
-                }
+        if salvar:
+            payload = {
+                "usuario_id": usuario_id,
+                "nome_analista": nome_usuario,
+                "cliente_id": cliente_id_escolhido,
+                "razao_social": razao_social,
+                "cnpj": cnpj_in,
+                "contato_nome": contato_nome,
+                "telefone": telefone,
+                "email_contato": email_contato,
+                "setor": setor,
+                "categoria": categoria,
+                "criticidade": criticidade,
+                "canal": canal,
+                "protocolo": protocolo,
+                "duracao_min": int(duracao_min) if duracao_min else None,
+                "motivo": motivo,
+                "solucao": solucao,
+                "resolvido": resolvido,
+                "abriu_chamado": abriu_chamado,
+                "nr_chamado": nr_chamado,
+                "data_atendimento": datetime.combine(data_atendimento, datetime.now().time()),
+                "origem_registro": "MANUAL",
+            }
+            with st.status("Processando registro do atendimento...", expanded=False) as status:
                 ok, msg, novo_id = registrar_atendimento(payload, anexos=anexos)
-                if ok:
-                    st.success(f"Atendimento #{novo_id} registrado com sucesso.")
-                    st.balloons()
-                else:
-                    st.error(msg)
+                status.update(label="Finalizado." if ok else "Falha no registro.", state="complete" if ok else "error")
+            if ok:
+                st.success(f"Atendimento #{novo_id} registrado com sucesso.")
+                st.toast("✅ Atendimento registrado com sucesso!", icon="✅")
+                _reset_form_p8()
+                st.balloons()
+                st.rerun()
+            else:
+                st.error(msg)
 
 with tab_consulta:
     st.subheader("Consulta e Busca Semântica")

@@ -41,6 +41,32 @@ def _emb_to_sql(emb: List[float]) -> str:
     return "[" + ",".join(str(round(x, 8)) for x in emb) + "]"
 
 
+def _coluna_pk_telefone(conn: Any) -> str:
+    """
+    Detecta a coluna PK da tabela clientes_telefones.
+    Compatível com bases que usam 'id_telefone' ou apenas 'id'.
+    """
+    try:
+        row = conn.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'clientes_telefones'
+                  AND column_name IN ('id_telefone', 'id')
+                ORDER BY CASE WHEN column_name = 'id_telefone' THEN 0 ELSE 1 END
+                LIMIT 1
+                """
+            )
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        pass
+    return "id"
+
+
 def ensure_schema() -> None:
     """
     Cria/ajusta tabelas necessárias para registro de atendimentos e normalização mínima.
@@ -96,7 +122,7 @@ def ensure_schema() -> None:
             nome_analista VARCHAR(150),
             cliente_id INTEGER NOT NULL REFERENCES clientes_crm(id_cliente) ON DELETE RESTRICT,
             contato_id INTEGER REFERENCES clientes_contatos(id) ON DELETE SET NULL,
-            telefone_id INTEGER REFERENCES clientes_telefones(id_telefone) ON DELETE SET NULL,
+            telefone_id INTEGER,
             setor VARCHAR(40) NOT NULL CHECK (setor IN ('Suporte Geral', 'TEF')),
             categoria VARCHAR(255) NOT NULL,
             criticidade VARCHAR(20) NOT NULL CHECK (criticidade IN ('Baixa', 'Média', 'Alta', 'Crítica')),
@@ -176,6 +202,58 @@ def listar_clientes(termo: str = "", limite: int = 30) -> pd.DataFrame:
         return pd.read_sql(q, conn, params={"termo": (termo or "").strip(), "like": termo_like, "lim": limite})
 
 
+def buscar_correspondencias_cliente(cnpj: str = "", telefone: str = "", limite: int = 8) -> pd.DataFrame:
+    """
+    Busca exata por CNPJ e/ou telefone e retorna opções para seleção do usuário.
+    """
+    engine = get_connection()
+    cnpj_limpo = _num(cnpj)
+    tel_limpo = _num(telefone)
+    with engine.connect() as conn:
+        if cnpj_limpo and tel_limpo:
+            q = text(
+                """
+                SELECT DISTINCT c.id_cliente, c.razao_social, c.cnpj, t.numero AS telefone, 'CNPJ/Telefone' AS origem_match
+                FROM clientes_crm c
+                LEFT JOIN clientes_telefones t ON t.id_cliente = c.id_cliente
+                WHERE COALESCE(c.ativo, TRUE) = TRUE
+                  AND (
+                    c.cnpj = :cnpj
+                    OR t.numero = :tel
+                  )
+                ORDER BY c.razao_social
+                LIMIT :lim
+                """
+            )
+            return pd.read_sql(q, conn, params={"cnpj": cnpj_limpo, "tel": tel_limpo, "lim": limite})
+        if cnpj_limpo:
+            q = text(
+                """
+                SELECT c.id_cliente, c.razao_social, c.cnpj, NULL::VARCHAR AS telefone, 'CNPJ' AS origem_match
+                FROM clientes_crm c
+                WHERE COALESCE(c.ativo, TRUE) = TRUE
+                  AND c.cnpj = :cnpj
+                ORDER BY c.razao_social
+                LIMIT :lim
+                """
+            )
+            return pd.read_sql(q, conn, params={"cnpj": cnpj_limpo, "lim": limite})
+        if tel_limpo:
+            q = text(
+                """
+                SELECT DISTINCT c.id_cliente, c.razao_social, c.cnpj, t.numero AS telefone, 'Telefone' AS origem_match
+                FROM clientes_telefones t
+                JOIN clientes_crm c ON c.id_cliente = t.id_cliente
+                WHERE COALESCE(c.ativo, TRUE) = TRUE
+                  AND t.numero = :tel
+                ORDER BY c.razao_social
+                LIMIT :lim
+                """
+            )
+            return pd.read_sql(q, conn, params={"tel": tel_limpo, "lim": limite})
+    return pd.DataFrame(columns=["id_cliente", "razao_social", "cnpj", "telefone", "origem_match"])
+
+
 def obter_cliente_por_id(id_cliente: int) -> Optional[Dict[str, Any]]:
     engine = get_connection()
     q = text(
@@ -246,11 +324,12 @@ def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str 
     if not numero:
         return None
     tel_hash = gerar_hash_lgpd(numero)
+    pk_col = _coluna_pk_telefone(conn)
 
     row = conn.execute(
         text(
-            """
-            SELECT id_telefone
+            f"""
+            SELECT {pk_col}
             FROM clientes_telefones
             WHERE id_cliente = :idc
               AND numero = :num
@@ -265,10 +344,10 @@ def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str 
     try:
         novo = conn.execute(
             text(
-                """
+                f"""
                 INSERT INTO clientes_telefones (id_cliente, origem_dado, numero, telefone_hash, ativo)
                 VALUES (:idc, :origem, :num, :h, TRUE)
-                RETURNING id_telefone
+                RETURNING {pk_col}
                 """
             ),
             {"idc": id_cliente, "origem": origem, "num": numero, "h": tel_hash},
@@ -278,10 +357,10 @@ def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str 
         # Fallback para estruturas mais antigas
         novo = conn.execute(
             text(
-                """
+                f"""
                 INSERT INTO clientes_telefones (id_cliente, origem_dado, numero)
                 VALUES (:idc, :origem, :num)
-                RETURNING id_telefone
+                RETURNING {pk_col}
                 """
             ),
             {"idc": id_cliente, "origem": origem, "num": numero},
@@ -383,23 +462,112 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
         return False, "Motivo/assunto deve ter no mínimo 10 caracteres.", None
 
     id_cliente = payload.get("cliente_id")
-    if not id_cliente:
-        return False, "Não é permitido salvar sem cliente vinculado.", None
+    razao_social = str(payload.get("razao_social") or "").strip()
+    cnpj_limpo = _num(str(payload.get("cnpj") or ""))
+    tel_limpo = _num(str(payload.get("telefone") or ""))
 
     engine = get_connection()
     try:
         with engine.begin() as conn:
+            if not id_cliente:
+                if cnpj_limpo:
+                    row_cnpj = conn.execute(
+                        text(
+                            """
+                            SELECT id_cliente
+                            FROM clientes_crm
+                            WHERE cnpj = :cnpj
+                            LIMIT 1
+                            """
+                        ),
+                        {"cnpj": cnpj_limpo},
+                    ).fetchone()
+                    if row_cnpj:
+                        id_cliente = int(row_cnpj[0])
+                if not id_cliente and tel_limpo:
+                    row_tel = conn.execute(
+                        text(
+                            """
+                            SELECT c.id_cliente
+                            FROM clientes_telefones t
+                            JOIN clientes_crm c ON c.id_cliente = t.id_cliente
+                            WHERE t.numero = :tel
+                            LIMIT 1
+                            """
+                        ),
+                        {"tel": tel_limpo},
+                    ).fetchone()
+                    if row_tel:
+                        id_cliente = int(row_tel[0])
+                if not id_cliente and razao_social:
+                    row_nome = conn.execute(
+                        text(
+                            """
+                            SELECT id_cliente
+                            FROM clientes_crm
+                            WHERE LOWER(TRIM(razao_social)) = LOWER(TRIM(:nome))
+                            LIMIT 1
+                            """
+                        ),
+                        {"nome": razao_social},
+                    ).fetchone()
+                    if row_nome:
+                        id_cliente = int(row_nome[0])
+                if not id_cliente and not razao_social:
+                    return False, "Informe a Razão Social quando não houver correspondência automática.", None
+                if not id_cliente:
+                    try:
+                        novo_cli = conn.execute(
+                            text(
+                                """
+                                INSERT INTO clientes_crm (razao_social, cnpj, ativo)
+                                VALUES (:nome, :cnpj, TRUE)
+                                RETURNING id_cliente
+                                """
+                            ),
+                            {"nome": razao_social, "cnpj": cnpj_limpo or None},
+                        ).fetchone()
+                    except Exception:
+                        novo_cli = conn.execute(
+                            text(
+                                """
+                                INSERT INTO clientes_crm (razao_social, cnpj)
+                                VALUES (:nome, :cnpj)
+                                RETURNING id_cliente
+                                """
+                            ),
+                            {"nome": razao_social, "cnpj": cnpj_limpo or None},
+                        ).fetchone()
+                    id_cliente = int(novo_cli[0]) if novo_cli else None
+            if not id_cliente:
+                return False, "Não foi possível identificar/criar cliente.", None
+
+            if cnpj_limpo:
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE clientes_crm
+                            SET cnpj = COALESCE(NULLIF(cnpj, ''), :cnpj)
+                            WHERE id_cliente = :id
+                            """
+                        ),
+                        {"id": int(id_cliente), "cnpj": cnpj_limpo},
+                    )
+                except Exception:
+                    pass
+
             contato_id = _upsert_contato(
                 conn,
                 int(id_cliente),
                 str(payload.get("contato_nome") or ""),
-                str(payload.get("telefone") or ""),
+                tel_limpo,
                 str(payload.get("email_contato") or ""),
             )
             telefone_id = _upsert_telefone(
                 conn,
                 int(id_cliente),
-                str(payload.get("telefone") or ""),
+                tel_limpo,
                 origem=str(payload.get("origem_registro") or "MANUAL"),
             )
 
@@ -574,6 +742,8 @@ def consultar_atendimentos(
     limite: int = 300,
 ) -> pd.DataFrame:
     engine = get_connection()
+    with engine.connect() as conn_meta:
+        telefone_pk_col = _coluna_pk_telefone(conn_meta)
     where_sql, params = _montar_where_filtros(
         usuario_id, perfil, data_ini, data_fim, cliente_id, setor, canal, analista_id
     )
@@ -615,7 +785,7 @@ def consultar_atendimentos(
             FROM atendimentos_registrados a
             JOIN clientes_crm c ON c.id_cliente = a.cliente_id
             LEFT JOIN clientes_contatos ct ON ct.id = a.contato_id
-            LEFT JOIN clientes_telefones t ON t.id_telefone = a.telefone_id
+            LEFT JOIN clientes_telefones t ON t.{telefone_pk_col} = a.telefone_id
             LEFT JOIN usuarios u ON u.id = a.usuario_id
             LEFT JOIN atendimentos_embeddings e ON e.atendimento_id = a.id_atendimento
             {where_sql}
@@ -661,7 +831,7 @@ def consultar_atendimentos(
             FROM atendimentos_registrados a
             JOIN clientes_crm c ON c.id_cliente = a.cliente_id
             LEFT JOIN clientes_contatos ct ON ct.id = a.contato_id
-            LEFT JOIN clientes_telefones t ON t.id_telefone = a.telefone_id
+            LEFT JOIN clientes_telefones t ON t.{telefone_pk_col} = a.telefone_id
             LEFT JOIN usuarios u ON u.id = a.usuario_id
             {where_sql}
             ORDER BY a.data_atendimento DESC

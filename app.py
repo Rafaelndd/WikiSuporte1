@@ -29,6 +29,10 @@ from modules.auditoria import registrar_log_auditoria
 from typing import Union
 from typing import Optional, Dict, Union  
 from modules.utils import inicializar_usuario, calcular_patente
+from services.ui_realtime import (
+    render_global_notifications_listener,
+    show_gamification_upgrade_card,
+)
 
 
 
@@ -499,6 +503,7 @@ def tela_login() -> None:
 
 def tela_home() -> None:
     """Nova Home principal que consolida a antiga Page 0 no App.py"""
+    render_global_notifications_listener()
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
     perfil_usuario = str(st.session_state.get('perfil', 'analista')).lower()
     usuario_id = st.session_state.get('usuario_id', 0)
@@ -608,6 +613,14 @@ Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
     if usuario_id:
         # BUSCA DOS DADOS (Aqui a variável kpis ganha vida)
         kpis = obter_kpis_home(usuario_id)
+        medalha_atual = str(kpis.get("nivel_atual", "Iniciante 🌱"))
+        medalha_antiga = str(st.session_state.get("ws_last_medalha", medalha_atual))
+        if medalha_antiga != medalha_atual:
+            show_gamification_upgrade_card(
+                "Subida de nível!",
+                f"Parabéns! Você alcançou: <b>{medalha_atual}</b>",
+            )
+        st.session_state["ws_last_medalha"] = medalha_atual
         df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
 
         # 2. RENDERIZAÇÃO DOS TROFÉUS (Logo após o divisor, antes das notificações)
@@ -788,4 +801,5 @@ def renderizar_dashboard_conquistas(kpis):
 if not st.session_state['autenticado']:
     tela_login()
 else:
+    render_global_notifications_listener()
     tela_home()

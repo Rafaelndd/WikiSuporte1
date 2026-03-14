@@ -22,6 +22,14 @@ except ImportError:
 
 from modules.database import get_connection
 from modules.utils import ler_estado_robo, salvar_estado_robo
+from services.system_notifications import (
+    criar_notificacao,
+    desativar_notificacao,
+    ensure_schema as ensure_notifications_schema,
+    listar_notificacoes_admin,
+    registrar_bloqueio_versao,
+)
+from services.ui_realtime import render_global_notifications_listener
 
 try:
     from modules.auditoria import registrar_log_auditoria
@@ -51,23 +59,32 @@ if not st.session_state.get("autenticado"):
     st.switch_page("app.py")
 
 usuario_id = st.session_state.get("usuario_id")
+nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
 perfil_raw = str(st.session_state.get("perfil", "")).strip().lower()
 perfil_usuario = "dev" if perfil_raw in ("dev", "desenvolvedor") else "coordenador" if perfil_raw in ("coordenador", "coordenação") else perfil_raw
+render_global_notifications_listener()
+ensure_notifications_schema()
 
-if perfil_usuario not in ["dev", "coordenador"]:
+if perfil_usuario not in ["dev", "coordenador", "supervisor"]:
     st.error("⛔ Acesso Negado.")
     st.stop()
 
 st.title("⚙️ WikiSuporte - Configurações")
-st.markdown("Controle dos bots de varredura, gestão de usuários/ramais e cadastro de clientes com telefones. Acesso restrito a perfis 'dev' e 'coordenador'.")
+st.markdown("Controle dos bots, gestão de usuários, clientes e comunicados globais do sistema.")
 
-aba_robo, aba_ramais, aba_usuarios, aba_clientes, aba_diagnostico = st.tabs([
+nomes_abas = [
     "🤖 Bots",
     "📞 Ramais e Analistas",
     "👥 Usuários",
     "🏢 Clientes e Telefones",
     "🛠️ Funcionalidade inativa",
-])
+]
+tem_painel_notifs = perfil_usuario in ("coordenador", "supervisor")
+if tem_painel_notifs:
+    nomes_abas.append("📣 Notificações e Comunicados")
+abas = st.tabs(nomes_abas)
+aba_robo, aba_ramais, aba_usuarios, aba_clientes, aba_diagnostico = abas[:5]
+aba_notificacoes = abas[5] if tem_painel_notifs else None
 
 # ==========================================
 # ABA 1: BOTS DE VARREDURA
@@ -350,3 +367,71 @@ with aba_clientes:
     except Exception as e:
         st.caption(f"Listagem indisponível: {e}")
 
+if aba_notificacoes:
+    with aba_notificacoes:
+        st.subheader("📣 Painel Administrativo de Notificações")
+        st.caption("Dispare comunicados em tempo real para usuários ativos. Tipos: comunicado, aviso, erro crítico e bloqueio de versão.")
+
+        with st.form("form_notificacao_admin"):
+            c1, c2, c3 = st.columns(3)
+            tipo = c1.selectbox(
+                "Tipo *",
+                ["comunicado", "aviso", "erro_critico", "versao_bloqueada"],
+                help="Erro crítico e versão bloqueada aparecem com destaque no topo.",
+            )
+            target_role = c2.selectbox("Público-alvo", ["todos", "tecnico", "supervisor", "coordenador"])
+            horas_expira = c3.number_input("Expira em (horas, 0 = sem expiração)", min_value=0, max_value=720, value=0, step=1)
+            titulo = st.text_input("Título")
+            mensagem = st.text_area("Mensagem *", height=120)
+            cmod1, cmod2 = st.columns(2)
+            modulo_nome = cmod1.text_input("Módulo com erro de versão (opcional)")
+            versao_prob = cmod2.text_input("Versão problemática (opcional)")
+            motivo_bloqueio = st.text_area("Motivo do bloqueio de versão (opcional)", height=80)
+            salvar_notif = st.form_submit_button("🚀 Publicar notificação", type="primary", use_container_width=True)
+
+            if salvar_notif:
+                if not mensagem.strip():
+                    st.error("Mensagem é obrigatória.")
+                else:
+                    with st.status("Publicando comunicado...", expanded=False) as status:
+                        exp = None
+                        if int(horas_expira or 0) > 0:
+                            exp = datetime.now() + pd.Timedelta(hours=int(horas_expira))
+                        ok, msg = criar_notificacao(
+                            tipo=tipo,
+                            mensagem=mensagem,
+                            autor=nome_usuario,
+                            titulo=titulo,
+                            target_role=target_role,
+                            data_expiracao=exp,
+                        )
+                        if ok and tipo == "versao_bloqueada" and modulo_nome.strip() and versao_prob.strip():
+                            okb, _ = registrar_bloqueio_versao(modulo_nome.strip(), versao_prob.strip(), motivo_bloqueio.strip())
+                            if not okb:
+                                st.warning("Notificação publicada, mas falhou ao gravar em bloqueio_versoes.")
+                        if ok:
+                            status.update(label="Notificação publicada com sucesso.", state="complete")
+                            st.toast("✅ Comunicado publicado em tempo real.", icon="✅")
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            status.update(label="Falha ao publicar.", state="error")
+                            st.error(msg)
+
+        st.markdown("### Notificações recentes")
+        df_not = listar_notificacoes_admin(120)
+        if df_not.empty:
+            st.info("Nenhuma notificação cadastrada.")
+        else:
+            st.dataframe(df_not, hide_index=True, use_container_width=True)
+            with st.form("form_desativar_notificacao"):
+                ids = df_not[df_not["ativo"] == True]["id"].tolist()
+                id_desativar = st.selectbox("Desativar notificação ativa", [""] + [str(i) for i in ids])
+                btn_off = st.form_submit_button("Desativar", use_container_width=True)
+                if btn_off and id_desativar:
+                    okd, msgd = desativar_notificacao(int(id_desativar))
+                    if okd:
+                        st.success(msgd)
+                        st.rerun()
+                    else:
+                        st.error(msgd)

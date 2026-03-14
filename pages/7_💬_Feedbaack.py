@@ -2,12 +2,14 @@ import streamlit as st
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime
+from services.ui_realtime import render_global_notifications_listener
 
 # --- 1. CONFIGURAÇÃO INICIAL E SEGURANÇA ---
 st.set_page_config(page_title="WikiSuporte - Feedback", page_icon="💬", layout="wide")
 if not st.session_state.get("autenticado"):
     st.warning("⚠️ Acesso negado. Por favor, faça o login.")
     st.stop()
+render_global_notifications_listener()
 
 # --- 2. ESTILO DISCRETO (SEM GIFS / MASCOTES) ---
 st.markdown(

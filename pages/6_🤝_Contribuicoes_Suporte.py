@@ -22,6 +22,7 @@ import unicodedata
 import re
 from menus import *
 from modules.utils import inicializar_usuario, calcular_patente
+from services.ui_realtime import render_global_notifications_listener, show_gamification_upgrade_card
 
 load_dotenv()
 
@@ -40,6 +41,7 @@ st.set_page_config(page_title="WikiSuporte", page_icon="🏆", layout="wide")
 if not st.session_state.get('autenticado', False):
     st.info("Redirecionando para a página de login...")  # Sugestão: Adicionar feedback ao usuário
     st.switch_page("app.py")
+render_global_notifications_listener()
 
 # Recuperação de variáveis de sessão com verificações para evitar erros
 usuario_logado_id = st.session_state.get('usuario_id')
@@ -885,6 +887,10 @@ with aba_nova:
                     
                     # UX: Feedback elegante conforme solicitado
                     st.toast("✅ Contribuição enviada! Seu XP será atualizado após a aprovação.", icon="🚀")
+                    show_gamification_upgrade_card(
+                        "Contribuição registrada",
+                        "Excelente! Sua contribuição foi enviada para o fluxo de conhecimento.",
+                    )
                     
                     try:
                         registrar_log_auditoria(usuario_logado_id, "NOVA_CONTRIBUICAO", f"Submeteu: {titulo[:30]}")

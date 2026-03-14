@@ -13,6 +13,7 @@ from modules.database import get_connection
 from retry_requests import retry
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+from services.ui_realtime import render_global_notifications_listener
 
 # ==========================================
 # 1. SEGURANÇA E SESSÃO
@@ -35,6 +36,7 @@ st.set_page_config(
 # Cadeado: impede acesso direto sem login
 if not st.session_state.get("autenticado", False):
     st.switch_page("app.py")
+render_global_notifications_listener()
 
 # ID do usuário logado (usado nos logs de auditoria)
 usuario_id = st.session_state.get("usuario_id")

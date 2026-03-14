@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS atendimentos_registrados (
     nome_analista VARCHAR(150),
     cliente_id INTEGER NOT NULL REFERENCES clientes_crm(id_cliente) ON DELETE RESTRICT,
     contato_id INTEGER REFERENCES clientes_contatos(id) ON DELETE SET NULL,
-    telefone_id INTEGER REFERENCES clientes_telefones(id_telefone) ON DELETE SET NULL,
+    telefone_id INTEGER,
     setor VARCHAR(40) NOT NULL CHECK (setor IN ('Suporte Geral', 'TEF')),
     categoria VARCHAR(255) NOT NULL,
     criticidade VARCHAR(20) NOT NULL CHECK (criticidade IN ('Baixa', 'Média', 'Alta', 'Crítica')),
