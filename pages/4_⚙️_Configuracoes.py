@@ -319,38 +319,19 @@ with aba_clientes:
         tel = _apenas_numeros(st.text_input("Telefone/Celular *", placeholder="48999999999"))
         if st.form_submit_button("Salvar e vincular"):
             if razao and tel:
-                engine = get_connection()
                 try:
-                    from modules.processador_csv import gerar_hash_lgpd
-                    tel_hash = gerar_hash_lgpd(tel)
-                    with engine.begin() as conn:
-                        id_cli = None
-                        if cnpj:
-                            try:
-                                id_cli = conn.execute(text("SELECT id_cliente FROM clientes_crm WHERE cnpj = :c LIMIT 1"), {"c": cnpj}).scalar()
-                            except Exception:
-                                pass
-                        if not id_cli:
-                            try:
-                                id_cli = conn.execute(text("SELECT id_cliente FROM clientes_crm WHERE razao_social ILIKE :n LIMIT 1"), {"n": f"%{razao.strip()}%"}).scalar()
-                            except Exception:
-                                pass
-                        if not id_cli:
-                            try:
-                                id_cli = conn.execute(text("INSERT INTO clientes_crm (razao_social, cnpj) VALUES (:n, :c) RETURNING id_cliente"), {"n": razao.strip(), "c": cnpj or None}).scalar()
-                            except Exception:
-                                id_cli = conn.execute(text("INSERT INTO clientes_crm (razao_social) VALUES (:n) RETURNING id_cliente"), {"n": razao.strip()}).scalar()
-                        for sql, params in [
-                            (text("INSERT INTO clientes_telefones (id_cliente, numero, telefone_hash, origem_dado) VALUES (:id, :tel, :h, 'MANUAL')"), {"id": id_cli, "tel": tel, "h": tel_hash}),
-                            (text("INSERT INTO clientes_telefones (id_cliente, numero, origem_dado) VALUES (:id, :tel, 'MANUAL')"), {"id": id_cli, "tel": tel}),
-                        ]:
-                            try:
-                                conn.execute(sql, params)
-                                break
-                            except Exception:
-                                continue
-                    st.success(f"Cliente {razao} vinculado ao telefone.")
-                    st.rerun()
+                    from services.clientes_service import vincular_telefone_cliente
+
+                    ok, msg = vincular_telefone_cliente(
+                        razao_social=razao.strip(),
+                        numero_raw=tel,
+                        cnpj=cnpj or None,
+                    )
+                    if ok:
+                        st.success(f"Cliente {razao} vinculado ao telefone.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
                 except Exception as e:
                     st.error(str(e))
             else:

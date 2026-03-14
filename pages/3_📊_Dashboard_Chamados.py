@@ -901,11 +901,8 @@ with aba3:
     _teto_v = _teto_versao_atual_sistema()
     _ok_ver = lambda v: _versao_sistema_listagem_ok(v, teto=_teto_v)
     _teto_str = ".".join(str(x) for x in _teto_v[:3]) + (f".{_teto_v[3]}" if _teto_v[3] else "")
-    st.caption(
-        f"Somente versões no **padrão** (2.9.x), **sem vírgulas** nem **.** no início; "
-        f"**teto = {_teto_str}** (último **1º release** sincronizado do Helpdesk; senão .env). "
-        "**Erro ativo** / **Corrigido** / **release_itens** como antes."
-    )
+
+
 
     dfv = df_raw.copy()
     bad_ver = {"não informada", "não informado", "", "nan", "none"}

@@ -65,6 +65,13 @@ def vincular_telefone_cliente(
     try:
         tel_hash = gerar_hash_lgpd(numero)
         with engine.begin() as conn:
+            try:
+                conn.execute(text("ALTER TABLE clientes_crm ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE"))
+                conn.execute(text("ALTER TABLE clientes_telefones ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_cliente_telefone ON clientes_telefones(id_cliente, numero) WHERE numero IS NOT NULL AND numero <> ''"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_crm_cnpj_not_null ON clientes_crm(cnpj) WHERE cnpj IS NOT NULL AND cnpj <> ''"))
+            except Exception:
+                pass
             id_cli = None
             cnpj_limpo = extrair_numeros(cnpj) if cnpj else None
             if cnpj_limpo:
@@ -82,7 +89,15 @@ def vincular_telefone_cliente(
                     id_cli = conn.execute(text("INSERT INTO clientes_crm (razao_social, cnpj) VALUES (:n, :c) RETURNING id_cliente"), {"n": razao_social.strip(), "c": cnpj_limpo}).scalar()
                 except Exception:
                     id_cli = conn.execute(text("INSERT INTO clientes_crm (razao_social) VALUES (:n) RETURNING id_cliente"), {"n": razao_social.strip()}).scalar()
+            ja_vinculado = conn.execute(
+                text("SELECT id_telefone FROM clientes_telefones WHERE id_cliente = :id AND numero = :num LIMIT 1"),
+                {"id": id_cli, "num": numero},
+            ).fetchone()
+            if ja_vinculado:
+                return True, "Telefone já vinculado ao cliente (registro reaproveitado)."
             for sql, params in [
+                (text("INSERT INTO clientes_telefones (id_cliente, numero, telefone_hash, origem_dado, ativo) VALUES (:id, :num, :h, 'IMPORT', TRUE)"), {"id": id_cli, "num": numero, "h": tel_hash}),
+                (text("INSERT INTO clientes_telefones (id_cliente, numero, origem_dado, ativo) VALUES (:id, :num, 'IMPORT', TRUE)"), {"id": id_cli, "num": numero}),
                 (text("INSERT INTO clientes_telefones (id_cliente, numero, telefone_hash, origem_dado) VALUES (:id, :num, :h, 'IMPORT')"), {"id": id_cli, "num": numero, "h": tel_hash}),
                 (text("INSERT INTO clientes_telefones (id_cliente, numero, origem_dado) VALUES (:id, :num, 'IMPORT')"), {"id": id_cli, "num": numero}),
             ]:

@@ -5,13 +5,20 @@ o ciclo de vida completo dos chamados através de múltiplas releases.
 """
 import io
 import re
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
 
 from modules.database import get_connection
-from services.auth_guard import require_profile
+from services.atendimentos_service import (
+    CANAIS_PADRAO,
+    CRITICIDADES,
+    ensure_schema,
+    listar_clientes,
+    registrar_atendimento,
+)
+from services.auth_guard import require_login
 from services.db_homologacao import (
     get_ciclos_aguardando,
     processar_release_completo,
@@ -21,11 +28,11 @@ from services.db_homologacao import (
 
 st.set_page_config(page_title="Releases Tecnuv (Manual)", page_icon="🧩", layout="wide")
 
-perfil = require_profile(
-    ["dev", "coordenador"],
-    titulo_bloqueio="⛔ Acesso Negado",
-    detalhes="Esta tela é exclusiva para registro e manutenção manual dos releases da Tecnuv.",
-)
+perfil = require_login()
+usuario_id = st.session_state.get("usuario_id")
+nome_usuario = str(st.session_state.get("usuario_nome", "Analista"))
+pode_gerenciar_release = perfil in ("dev", "coordenador")
+ensure_schema()
 
 st.title("🧩 Cadastro Manual de Releases Tecnuv")
 st.markdown(
@@ -41,223 +48,328 @@ with st.expander("🤔 Como usar esta página?"):
         "Releases aparecem no Dashboard de Chamados e nos alertas da Home."
     )
 
-# -----------------------------
-# 1. Formulário de cadastro
-# -----------------------------
-st.subheader("📤 Novo release")
+tab_release, tab_atendimento = st.tabs(
+    ["🧩 Releases e Homologação", "📝 Registro Manual de Atendimento"]
+)
 
-with st.form("form_novo_release", clear_on_submit=True):
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        data_release = st.date_input("Data do Release", value=date.today())
-    with col2:
-        autor = st.text_input("Autor", placeholder="Ex.: Cristiano Felicidade")
-
-    arquivo_release = st.file_uploader(
-        "Arquivo do release (texto, Word, RTF ou PDF)",
-        type=["txt", "md", "doc", "docx", "rtf", "pdf"],
-        help=(
-            "O sistema identifica números de chamados no formato (13645) e cria ciclos "
-            "de homologação com status 'Aguardando'."
-        ),
-    )
-
-    colb1, colb2 = st.columns([1, 3])
-    with colb1:
-        salvar = st.form_submit_button("Processar e salvar", type="primary", use_container_width='strech')
-    with colb2:
-        st.caption(
-            "Será criado o release, o arquivo será anexado em `releases_tecnuv/` e "
-            "os chamados/ciclos registrados com status 'Aguardando'."
-        )
-
-    if salvar:
-        if not autor.strip():
-            st.error("Informe o **Autor** do release.")
-        elif not arquivo_release:
-            st.error("Carregue o **arquivo do release**.")
-        else:
-            try:
-                raw_bytes = arquivo_release.read()
-                text_content = ""
-                nome_arquivo = arquivo_release.name or ""
-                nome_lower = nome_arquivo.lower()
-
-                if nome_lower.endswith((".doc", ".docx")):
-                    try:
-                        import docx  # type: ignore
-                        doc = docx.Document(io.BytesIO(raw_bytes))
-                        text_content = "\n".join(p.text for p in doc.paragraphs)
-                    except Exception:
-                        text_content = raw_bytes.decode("utf-8", errors="ignore")
-                elif nome_lower.endswith(".rtf"):
-                    try:
-                        from striprtf.striprtf import rtf_to_text  # type: ignore
-                        text_content = rtf_to_text(raw_bytes.decode("latin-1", errors="ignore"))
-                    except Exception:
-                        s = raw_bytes.decode("latin-1", errors="ignore")
-                        s = re.sub(r"{\\.*?}|{.*?}", " ", s)
-                        s = re.sub(r"\\[a-zA-Z]+\d*", " ", s)
-                        text_content = re.sub(r"\s+", " ", s).replace("\n ", "\n").strip()
-                elif nome_lower.endswith(".pdf"):
-                    try:
-                        from pypdf import PdfReader  # type: ignore
-                        reader = PdfReader(io.BytesIO(raw_bytes))
-                        text_content = "\n".join((p.extract_text() or "") for p in reader.pages)
-                    except Exception:
-                        text_content = raw_bytes.decode("utf-8", errors="ignore")
-                else:
-                    text_content = raw_bytes.decode("utf-8", errors="ignore")
-
-                text_content = (text_content or "").strip()
-                if not text_content:
-                    st.error("Não foi possível extrair texto do arquivo.")
-                else:
-                    first_line = next(
-                        (ln.strip() for ln in text_content.splitlines() if ln.strip()),
-                        "Release sem título",
-                    )
-                    versao = first_line[:50].strip()
-
-                    # Salva o arquivo em disco e obtém o caminho
-                    caminho = salvar_arquivo_release(
-                        raw_bytes, nome_arquivo, versao
-                    )
-
-                    # ETL: release + chamados + ciclos (com anexo)
-                    qtd_vinculados, qtd_ciclos = processar_release_completo(
-                        versao=versao,
-                        texto_completo=text_content,
-                        autor=autor.strip(),
-                        nome_arquivo=nome_arquivo,
-                        caminho_arquivo=caminho,
-                        origem="manual",
-                    )
-
-                    st.success(
-                        f"Release **{versao}** registrado e arquivo anexado em `{caminho}`. "
-                        f"{qtd_vinculados} chamado(s) vinculado(s), {qtd_ciclos} novo(s) ciclo(s)."
-                    )
-                    if qtd_vinculados > 0:
-                        chamados_assunto = {}
-                        for line in text_content.splitlines():
-                            clean = line.strip()
-                            if not clean:
-                                continue
-                            for match in re.findall(r"\((\d{4,6})\)", clean):
-                                if match not in chamados_assunto:
-                                    chamados_assunto[match] = clean
-                        df_prev = pd.DataFrame({
-                            "Chamado": list(chamados_assunto.keys()),
-                            "Assunto": [v[:150] for v in chamados_assunto.values()],
-                        })
-                        st.dataframe(df_prev, hide_index=True, use_container_width='strech')
-            except Exception as e:
-                st.error(f"Erro ao processar release: {e}")
-
-st.markdown("---")
-
-# -----------------------------
-# 2. Auditoria de Ciclos (status Aguardando)
-# -----------------------------
-st.subheader("✅ Auditoria de Ciclos de Homologação")
-st.caption("Altere o status dos ciclos em 'Aguardando'. Se 'Reprovado', informe o motivo.")
-
-try:
-    df_aud = get_ciclos_aguardando()
-    if df_aud.empty:
-        st.info("Nenhum ciclo com status 'Aguardando' no momento.")
+with tab_release:
+    if not pode_gerenciar_release:
+        st.error("⛔ Acesso Negado")
+        st.warning("Esta aba é exclusiva para perfis de coordenador e desenvolvedor.")
     else:
-        # Colunas exibidas (editáveis: status_teste e motivo_reprovacao)
-        colunas_exibir = ["id_ciclo", "id_chamado", "assunto", "modulo_sistema", "versao_release", "status_teste", "motivo_reprovacao"]
-        df_edit = df_aud[colunas_exibir].copy()
-        df_edit.columns = ["ID Ciclo", "Chamado", "Assunto", "Módulo", "Versão", "Status", "Motivo Reprovação"]
+        # -----------------------------
+        # 1. Formulário de cadastro
+        # -----------------------------
+        st.subheader("📤 Novo release")
 
-        edited = st.data_editor(
-            df_edit,
-            key="editor_ciclos",
-            use_container_width='strech',
-            column_config={
-                "ID Ciclo": st.column_config.NumberColumn(format="%d"),
-                "Chamado": st.column_config.TextColumn(disabled=True),
-                "Assunto": st.column_config.TextColumn(disabled=True),
-                "Módulo": st.column_config.TextColumn(disabled=True),
-                "Versão": st.column_config.TextColumn(disabled=True),
-                "Status": st.column_config.SelectboxColumn(
-                    "Status",
-                    options=["Aguardando", "Aprovado", "Reprovado"],
-                    required=True,
-                ),
-                "Motivo Reprovação": st.column_config.TextColumn(
-                    "Motivo (obrigatório se Reprovado)",
-                    help="Preencha quando o status for Reprovado",
-                ),
-            },
-            hide_index=True,
-        )
+        with st.form("form_novo_release", clear_on_submit=True):
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                data_release = st.date_input("Data do Release", value=date.today())
+            with col2:
+                autor = st.text_input("Autor", placeholder="Ex.: Cristiano Felicidade")
 
-        if st.button("💾 Salvar alterações de status"):
-            erros = []
-            for idx, row in edited.iterrows():
-                id_ciclo = int(row["ID Ciclo"])
-                status = str(row["Status"] or "").strip()
-                motivo = str(row["Motivo Reprovação"] or "").strip()
-                if status == "Reprovado" and not motivo:
-                    erros.append(f"Ciclo {id_ciclo}: motivo obrigatório quando Reprovado.")
-                    continue
-                if status in ("Aprovado", "Reprovado"):
-                    if update_ciclo_status(id_ciclo, status, motivo or None):
-                        pass  # sucesso
-                    else:
-                        erros.append(f"Ciclo {id_ciclo}: falha ao atualizar.")
-            if erros:
-                for e in erros:
-                    st.error(e)
+            arquivo_release = st.file_uploader(
+                "Arquivo do release (texto, Word, RTF ou PDF)",
+                type=["txt", "md", "doc", "docx", "rtf", "pdf"],
+                help=(
+                    "O sistema identifica números de chamados no formato (13645) e cria ciclos "
+                    "de homologação com status 'Aguardando'."
+                ),
+            )
+
+            colb1, colb2 = st.columns([1, 3])
+            with colb1:
+                salvar = st.form_submit_button("Processar e salvar", type="primary", use_container_width='strech')
+            with colb2:
+                st.caption(
+                    "Será criado o release, o arquivo será anexado em `releases_tecnuv/` e "
+                    "os chamados/ciclos registrados com status 'Aguardando'."
+                )
+
+            if salvar:
+                if not autor.strip():
+                    st.error("Informe o **Autor** do release.")
+                elif not arquivo_release:
+                    st.error("Carregue o **arquivo do release**.")
+                else:
+                    try:
+                        raw_bytes = arquivo_release.read()
+                        text_content = ""
+                        nome_arquivo = arquivo_release.name or ""
+                        nome_lower = nome_arquivo.lower()
+
+                        if nome_lower.endswith((".doc", ".docx")):
+                            try:
+                                import docx  # type: ignore
+                                doc = docx.Document(io.BytesIO(raw_bytes))
+                                text_content = "\n".join(p.text for p in doc.paragraphs)
+                            except Exception:
+                                text_content = raw_bytes.decode("utf-8", errors="ignore")
+                        elif nome_lower.endswith(".rtf"):
+                            try:
+                                from striprtf.striprtf import rtf_to_text  # type: ignore
+                                text_content = rtf_to_text(raw_bytes.decode("latin-1", errors="ignore"))
+                            except Exception:
+                                s = raw_bytes.decode("latin-1", errors="ignore")
+                                s = re.sub(r"{\\.*?}|{.*?}", " ", s)
+                                s = re.sub(r"\\[a-zA-Z]+\d*", " ", s)
+                                text_content = re.sub(r"\s+", " ", s).replace("\n ", "\n").strip()
+                        elif nome_lower.endswith(".pdf"):
+                            try:
+                                from pypdf import PdfReader  # type: ignore
+                                reader = PdfReader(io.BytesIO(raw_bytes))
+                                text_content = "\n".join((p.extract_text() or "") for p in reader.pages)
+                            except Exception:
+                                text_content = raw_bytes.decode("utf-8", errors="ignore")
+                        else:
+                            text_content = raw_bytes.decode("utf-8", errors="ignore")
+
+                        text_content = (text_content or "").strip()
+                        if not text_content:
+                            st.error("Não foi possível extrair texto do arquivo.")
+                        else:
+                            first_line = next(
+                                (ln.strip() for ln in text_content.splitlines() if ln.strip()),
+                                "Release sem título",
+                            )
+                            versao = first_line[:50].strip()
+
+                            # Salva o arquivo em disco e obtém o caminho
+                            caminho = salvar_arquivo_release(
+                                raw_bytes, nome_arquivo, versao
+                            )
+
+                            # ETL: release + chamados + ciclos (com anexo)
+                            qtd_vinculados, qtd_ciclos = processar_release_completo(
+                                versao=versao,
+                                texto_completo=text_content,
+                                autor=autor.strip(),
+                                nome_arquivo=nome_arquivo,
+                                caminho_arquivo=caminho,
+                                origem="manual",
+                            )
+
+                            st.success(
+                                f"Release **{versao}** registrado e arquivo anexado em `{caminho}`. "
+                                f"{qtd_vinculados} chamado(s) vinculado(s), {qtd_ciclos} novo(s) ciclo(s)."
+                            )
+                            if qtd_vinculados > 0:
+                                chamados_assunto = {}
+                                for line in text_content.splitlines():
+                                    clean = line.strip()
+                                    if not clean:
+                                        continue
+                                    for match in re.findall(r"\((\d{4,6})\)", clean):
+                                        if match not in chamados_assunto:
+                                            chamados_assunto[match] = clean
+                                df_prev = pd.DataFrame({
+                                    "Chamado": list(chamados_assunto.keys()),
+                                    "Assunto": [v[:150] for v in chamados_assunto.values()],
+                                })
+                                st.dataframe(df_prev, hide_index=True, use_container_width='strech')
+                    except Exception as e:
+                        st.error(f"Erro ao processar release: {e}")
+
+        st.markdown("---")
+
+        # -----------------------------
+        # 2. Auditoria de Ciclos (status Aguardando)
+        # -----------------------------
+        st.subheader("✅ Auditoria de Ciclos de Homologação")
+        st.caption("Altere o status dos ciclos em 'Aguardando'. Se 'Reprovado', informe o motivo.")
+
+        try:
+            df_aud = get_ciclos_aguardando()
+            if df_aud.empty:
+                st.info("Nenhum ciclo com status 'Aguardando' no momento.")
             else:
-                st.success("Alterações salvas com sucesso.")
-                st.rerun()
-except Exception as e:
-    st.error(f"Erro ao carregar ciclos: {e}")
+                # Colunas exibidas (editáveis: status_teste e motivo_reprovacao)
+                colunas_exibir = ["id_ciclo", "id_chamado", "assunto", "modulo_sistema", "versao_release", "status_teste", "motivo_reprovacao"]
+                df_edit = df_aud[colunas_exibir].copy()
+                df_edit.columns = ["ID Ciclo", "Chamado", "Assunto", "Módulo", "Versão", "Status", "Motivo Reprovação"]
 
-st.markdown("---")
+                edited = st.data_editor(
+                    df_edit,
+                    key="editor_ciclos",
+                    use_container_width='strech',
+                    column_config={
+                        "ID Ciclo": st.column_config.NumberColumn(format="%d"),
+                        "Chamado": st.column_config.TextColumn(disabled=True),
+                        "Assunto": st.column_config.TextColumn(disabled=True),
+                        "Módulo": st.column_config.TextColumn(disabled=True),
+                        "Versão": st.column_config.TextColumn(disabled=True),
+                        "Status": st.column_config.SelectboxColumn(
+                            "Status",
+                            options=["Aguardando", "Aprovado", "Reprovado"],
+                            required=True,
+                        ),
+                        "Motivo Reprovação": st.column_config.TextColumn(
+                            "Motivo (obrigatório se Reprovado)",
+                            help="Preencha quando o status for Reprovado",
+                        ),
+                    },
+                    hide_index=True,
+                )
 
-# -----------------------------
-# 3. Releases recentes
-# -----------------------------
-st.subheader("📋 Releases cadastrados recentemente")
+                if st.button("💾 Salvar alterações de status"):
+                    erros = []
+                    for idx, row in edited.iterrows():
+                        id_ciclo = int(row["ID Ciclo"])
+                        status = str(row["Status"] or "").strip()
+                        motivo = str(row["Motivo Reprovação"] or "").strip()
+                        if status == "Reprovado" and not motivo:
+                            erros.append(f"Ciclo {id_ciclo}: motivo obrigatório quando Reprovado.")
+                            continue
+                        if status in ("Aprovado", "Reprovado"):
+                            if update_ciclo_status(id_ciclo, status, motivo or None):
+                                pass  # sucesso
+                            else:
+                                erros.append(f"Ciclo {id_ciclo}: falha ao atualizar.")
+                    if erros:
+                        for e in erros:
+                            st.error(e)
+                    else:
+                        st.success("Alterações salvas com sucesso.")
+                        st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao carregar ciclos: {e}")
 
-try:
-    engine = get_connection()
-    df_rel = pd.read_sql(
-        """
-        SELECT
-            r.id_release,
-            r.versao_release AS versao,
-            r.data_liberacao AS data_lancamento,
-            COALESCE(cr.qtd_chamados, 0) AS qtd_chamados
-        FROM releases r
-        LEFT JOIN (
-            SELECT id_release, COUNT(*) AS qtd_chamados
-            FROM ciclos_homologacao
-            GROUP BY id_release
-        ) cr ON cr.id_release = r.id_release
-        ORDER BY r.data_liberacao DESC, r.id_release DESC
-        LIMIT 20
-        """,
-        engine,
+        st.markdown("---")
+
+        # -----------------------------
+        # 3. Releases recentes
+        # -----------------------------
+        st.subheader("📋 Releases cadastrados recentemente")
+
+        try:
+            engine = get_connection()
+            df_rel = pd.read_sql(
+                """
+                SELECT
+                    r.id_release,
+                    r.versao_release AS versao,
+                    r.data_liberacao AS data_lancamento,
+                    COALESCE(cr.qtd_chamados, 0) AS qtd_chamados
+                FROM releases r
+                LEFT JOIN (
+                    SELECT id_release, COUNT(*) AS qtd_chamados
+                    FROM ciclos_homologacao
+                    GROUP BY id_release
+                ) cr ON cr.id_release = r.id_release
+                ORDER BY r.data_liberacao DESC, r.id_release DESC
+                LIMIT 20
+                """,
+                engine,
+            )
+            if df_rel.empty:
+                st.info("Nenhum release cadastrado na tabela `releases`.")
+            else:
+                df_rel.rename(
+                    columns={
+                        "id_release": "ID",
+                        "versao": "Versão",
+                        "data_lancamento": "Data",
+                        "qtd_chamados": "Ciclos",
+                    },
+                    inplace=True,
+                )
+                st.dataframe(df_rel, hide_index=True, use_container_width='stretch')
+        except Exception as e:
+            st.error(f"Erro ao carregar releases: {e}")
+
+with tab_atendimento:
+    st.subheader("📝 Registro Manual de Atendimento (padrão da operação)")
+    st.caption("Use esta aba para registrar atendimentos com cliente obrigatório, anexos e dados completos.")
+
+    termo = st.text_input(
+        "Buscar cliente (razão social, CNPJ ou alias)",
+        key="release_busca_cliente",
+        placeholder="Ex.: Posto Mahl",
     )
-    if df_rel.empty:
-        st.info("Nenhum release cadastrado na tabela `releases`.")
+    df_clientes = listar_clientes(termo, limite=50)
+    if df_clientes.empty:
+        st.warning("Nenhum cliente encontrado. Cadastre em Configurações > Clientes e Telefones.")
     else:
-        df_rel.rename(
-            columns={
-                "id_release": "ID",
-                "versao": "Versão",
-                "data_lancamento": "Data",
-                "qtd_chamados": "Ciclos",
-            },
-            inplace=True,
-        )
-        st.dataframe(df_rel, hide_index=True, use_container_width='stretch')
-except Exception as e:
-    st.error(f"Erro ao carregar releases: {e}")
+        opcoes = {
+            f"{r['razao_social']} | CNPJ: {r['cnpj'] or 'Não informado'} | ID:{int(r['id_cliente'])}": int(r["id_cliente"])
+            for _, r in df_clientes.iterrows()
+        }
+        cli_txt = st.selectbox("Cliente *", list(opcoes.keys()), key="release_cliente_sel")
+        id_cliente_sel = opcoes[cli_txt]
+        row_cli = df_clientes[df_clientes["id_cliente"] == id_cliente_sel].iloc[0]
+
+        cc1, cc2 = st.columns(2)
+        cc1.text_input("Razão Social (automático)", value=str(row_cli["razao_social"]), disabled=True)
+        cc2.text_input("CNPJ (automático)", value=str(row_cli["cnpj"] or ""), disabled=True)
+
+        with st.form("form_registro_atendimento_release", clear_on_submit=True):
+            st.markdown("#### 👤 Dados de contato")
+            c1, c2, c3 = st.columns(3)
+            contato_nome = c1.text_input("Contato")
+            telefone = c2.text_input("Telefone/Celular")
+            email_contato = c3.text_input("E-mail do contato")
+
+            st.markdown("#### 🗂️ Tipificação")
+            t1, t2, t3 = st.columns(3)
+            setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"], key="release_setor")
+            categoria = t2.text_input("Categoria *", key="release_categoria")
+            criticidade = t3.selectbox("Criticidade *", CRITICIDADES, key="release_criticidade")
+
+            st.markdown("#### 📞 Canal")
+            ca1, ca2, ca3 = st.columns(3)
+            canal = ca1.selectbox("Canal *", CANAIS_PADRAO, key="release_canal")
+            protocolo = ca2.text_input("Protocolo", key="release_protocolo")
+            duracao_min = ca3.number_input("Duração (min)", min_value=0, step=1, value=0, key="release_duracao")
+            if canal == "Chat Multi360":
+                st.caption("Para canal Multi360, o protocolo é obrigatório.")
+
+            st.markdown("#### 📝 Motivo e solução")
+            motivo = st.text_area("Motivo / Assunto *", height=120, key="release_motivo")
+            solucao = st.text_area("Solução", height=120, key="release_solucao")
+            d1, d2, d3 = st.columns(3)
+            resolvido = d1.checkbox("Resolvido?", key="release_resolvido")
+            abriu_chamado = d2.checkbox("Precisou abrir chamado?", key="release_abriu_chamado")
+            nr_chamado = d3.text_input("Nº chamado", key="release_nr_chamado")
+            data_atendimento = st.date_input("Data do atendimento", value=date.today(), key="release_data")
+
+            st.markdown("#### 📎 Anexos")
+            anexos = st.file_uploader(
+                "Selecione arquivos (qualquer formato, múltiplos)",
+                accept_multiple_files=True,
+                key="release_anexos",
+            )
+
+            salvar_atendimento = st.form_submit_button(
+                "✅ Registrar atendimento",
+                type="primary",
+                use_container_width=True,
+            )
+            if salvar_atendimento:
+                payload = {
+                    "usuario_id": usuario_id,
+                    "nome_analista": nome_usuario,
+                    "cliente_id": id_cliente_sel,
+                    "contato_nome": contato_nome,
+                    "telefone": telefone,
+                    "email_contato": email_contato,
+                    "setor": setor,
+                    "categoria": categoria,
+                    "criticidade": criticidade,
+                    "canal": canal,
+                    "protocolo": protocolo,
+                    "duracao_min": int(duracao_min) if duracao_min else None,
+                    "motivo": motivo,
+                    "solucao": solucao,
+                    "resolvido": resolvido,
+                    "abriu_chamado": abriu_chamado,
+                    "nr_chamado": nr_chamado,
+                    "data_atendimento": datetime.combine(data_atendimento, datetime.now().time()),
+                    "origem_registro": "RELEASE_MANUAL",
+                }
+                ok, msg, novo_id = registrar_atendimento(payload, anexos=anexos)
+                if ok:
+                    st.success(f"Atendimento #{novo_id} registrado com sucesso.")
+                    st.balloons()
+                else:
+                    st.error(msg)
