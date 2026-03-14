@@ -1,4 +1,15 @@
-.\.venv\Scripts\activate.bat
-python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install streamlit google-generativeai
-pip install -r requirements.txt
+# WikiSuporte — dependências do ambiente virtual
+#
+# Criar venv (raiz do projeto):
+#   python -m venv .venv
+#
+# Ativar no PowerShell:
+#   .\.venv\Scripts\Activate.ps1
+#
+# Instalar tudo:
+#   pip install --upgrade pip
+#   pip install -r ambientevirtual.txt
+#
+# Este ficheiro é consumido por pip (-r). Inclui requirements.txt + pacotes extra.
+-r requirements.txt
+google-generativeai>=0.8.0
