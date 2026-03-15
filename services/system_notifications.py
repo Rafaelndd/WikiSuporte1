@@ -111,6 +111,10 @@ def get_active_notifications(role: str = "todos") -> pd.DataFrame:
     ensure_schema()
     engine = get_connection()
     role = (role or "todos").strip().lower()
+    if role in ("desenvolvedor",):
+        role = "dev"
+    elif role in ("coordenação",):
+        role = "coordenador"
     q = text(
         """
         SELECT id, tipo, titulo, mensagem, autor, data_criacao, data_expiracao, ativo, target_role
@@ -118,7 +122,8 @@ def get_active_notifications(role: str = "todos") -> pd.DataFrame:
         WHERE ativo = TRUE
           AND (data_expiracao IS NULL OR data_expiracao >= CURRENT_TIMESTAMP)
           AND (
-             target_role = 'todos'
+             :role = 'dev'
+             OR target_role = 'todos'
              OR target_role = :role
              OR (:role = 'analista' AND target_role = 'tecnico')
           )
@@ -171,6 +176,21 @@ def registrar_bloqueio_versao(modulo_nome: str, versao: str, motivo: str) -> tup
                 {"m": modulo_nome.strip()[:100], "v": versao.strip()[:50], "mot": (motivo or "").strip() or None},
             )
         return True, "Bloqueio registrado."
+    except Exception as e:
+        return False, str(e)
+
+
+def resolver_bloqueio_versao(id_bloqueio: int) -> tuple[bool, str]:
+    engine = get_connection()
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(
+                text("UPDATE bloqueio_versoes SET resolvido = TRUE WHERE id = :id"),
+                {"id": int(id_bloqueio)},
+            )
+        if r.rowcount:
+            return True, "Bloqueio de versão resolvido."
+        return False, "Bloqueio não encontrado."
     except Exception as e:
         return False, str(e)
 

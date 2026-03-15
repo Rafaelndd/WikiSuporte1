@@ -283,36 +283,26 @@ with tab_atendimento:
     st.caption("Use esta aba para registrar atendimentos com cliente obrigatório, anexos e dados completos.")
     if "p11_uploader_nonce" not in st.session_state:
         st.session_state["p11_uploader_nonce"] = 0
+    if "p11_form_nonce" not in st.session_state:
+        st.session_state["p11_form_nonce"] = 0
+    if st.session_state.get("p11_reset_pending"):
+        st.session_state["p11_uploader_nonce"] = st.session_state.get("p11_uploader_nonce", 0) + 1
+        st.session_state["p11_form_nonce"] = st.session_state.get("p11_form_nonce", 0) + 1
+        st.session_state["p11_reset_pending"] = False
+    p11n = st.session_state["p11_form_nonce"]
+    if st.session_state.get("p11_last_saved_id"):
+        st.toast("✅ Atendimento registrado com sucesso!", icon="✅")
+        st.success(f"Atendimento #{st.session_state['p11_last_saved_id']} registrado com sucesso.")
+        st.balloons()
+        st.session_state.pop("p11_last_saved_id", None)
 
     def _reset_form_p11() -> None:
-        keys = [
-            "release_razao",
-            "release_cnpj",
-            "release_telefone",
-            "release_match_cliente",
-            "release_contato_nome",
-            "release_email_contato",
-            "release_setor",
-            "release_categoria",
-            "release_criticidade",
-            "release_canal",
-            "release_protocolo",
-            "release_duracao",
-            "release_motivo",
-            "release_solucao",
-            "release_resolvido",
-            "release_abriu_chamado",
-            "release_nr_chamado",
-            "release_data",
-        ]
-        for k in keys:
-            st.session_state.pop(k, None)
-        st.session_state["p11_uploader_nonce"] = st.session_state.get("p11_uploader_nonce", 0) + 1
+        st.session_state["p11_reset_pending"] = True
 
     c_ident1, c_ident2, c_ident3 = st.columns(3)
-    razao_social = c_ident1.text_input("Razão Social *", key="release_razao", placeholder="Ex.: Posto Mahl")
-    cnpj_in = c_ident2.text_input("CNPJ", key="release_cnpj")
-    telefone = c_ident3.text_input("Telefone/Celular", key="release_telefone")
+    razao_social = c_ident1.text_input("Razão Social *", key=f"release_razao_{p11n}", placeholder="Ex.: Posto Mahl")
+    cnpj_in = c_ident2.text_input("CNPJ", key=f"release_cnpj_{p11n}")
+    telefone = c_ident3.text_input("Telefone/Celular", key=f"release_telefone_{p11n}")
 
     df_matches = buscar_correspondencias_cliente(cnpj=cnpj_in, telefone=telefone, limite=8)
     cliente_id_escolhido = None
@@ -324,7 +314,7 @@ with tab_atendimento:
         escolha_match = st.selectbox(
             "Correspondência exata encontrada (selecione) ou deixe em branco para cadastrar novo",
             ["-- Cadastrar novo cliente/informação --"] + list(opcoes_match.keys()),
-            key="release_match_cliente",
+            key=f"release_match_cliente_{p11n}",
         )
         if escolha_match != "-- Cadastrar novo cliente/informação --":
             cliente_id_escolhido = opcoes_match[escolha_match]
@@ -336,31 +326,31 @@ with tab_atendimento:
     with st.form("form_registro_atendimento_release", clear_on_submit=False):
         st.markdown("#### 👤 Dados de contato")
         c1, c2 = st.columns(2)
-        contato_nome = c1.text_input("Contato", key="release_contato_nome")
-        email_contato = c2.text_input("E-mail do contato", key="release_email_contato")
+        contato_nome = c1.text_input("Contato", key=f"release_contato_nome_{p11n}")
+        email_contato = c2.text_input("E-mail do contato", key=f"release_email_contato_{p11n}")
 
         st.markdown("#### 🗂️ Tipificação")
         t1, t2, t3 = st.columns(3)
-        setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"], key="release_setor")
-        categoria = t2.text_input("Categoria *", key="release_categoria")
-        criticidade = t3.selectbox("Criticidade *", CRITICIDADES, key="release_criticidade")
+        setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"], key=f"release_setor_{p11n}")
+        categoria = t2.text_input("Categoria *", key=f"release_categoria_{p11n}")
+        criticidade = t3.selectbox("Criticidade *", CRITICIDADES, key=f"release_criticidade_{p11n}")
 
         st.markdown("#### 📞 Canal")
         ca1, ca2, ca3 = st.columns(3)
-        canal = ca1.selectbox("Canal *", CANAIS_PADRAO, key="release_canal")
-        protocolo = ca2.text_input("Protocolo", key="release_protocolo")
-        duracao_min = ca3.number_input("Duração (min)", min_value=0, step=1, value=0, key="release_duracao")
+        canal = ca1.selectbox("Canal *", CANAIS_PADRAO, key=f"release_canal_{p11n}")
+        protocolo = ca2.text_input("Protocolo", key=f"release_protocolo_{p11n}")
+        duracao_min = ca3.number_input("Duração (min)", min_value=0, step=1, value=0, key=f"release_duracao_{p11n}")
         if canal == "Chat Multi360":
             st.caption("Para canal Multi360, o protocolo é obrigatório.")
 
         st.markdown("#### 📝 Motivo e solução")
-        motivo = st.text_area("Motivo / Assunto *", height=120, key="release_motivo")
-        solucao = st.text_area("Solução", height=120, key="release_solucao")
+        motivo = st.text_area("Motivo / Assunto *", height=120, key=f"release_motivo_{p11n}")
+        solucao = st.text_area("Solução", height=120, key=f"release_solucao_{p11n}")
         d1, d2, d3 = st.columns(3)
-        resolvido = d1.checkbox("Resolvido?", key="release_resolvido")
-        abriu_chamado = d2.checkbox("Precisou abrir chamado?", key="release_abriu_chamado")
-        nr_chamado = d3.text_input("Nº chamado", key="release_nr_chamado")
-        data_atendimento = st.date_input("Data do atendimento", value=date.today(), key="release_data")
+        resolvido = d1.checkbox("Resolvido?", key=f"release_resolvido_{p11n}")
+        abriu_chamado = d2.checkbox("Precisou abrir chamado?", key=f"release_abriu_chamado_{p11n}")
+        nr_chamado = d3.text_input("Nº chamado", key=f"release_nr_chamado_{p11n}")
+        data_atendimento = st.date_input("Data do atendimento", value=date.today(), key=f"release_data_{p11n}")
 
         st.markdown("#### 📎 Anexos")
         anexos = st.file_uploader(
@@ -402,10 +392,8 @@ with tab_atendimento:
                 ok, msg, novo_id = registrar_atendimento(payload, anexos=anexos)
                 status.update(label="Finalizado." if ok else "Falha no registro.", state="complete" if ok else "error")
             if ok:
-                st.success(f"Atendimento #{novo_id} registrado com sucesso.")
-                st.toast("✅ Atendimento registrado com sucesso!", icon="✅")
+                st.session_state["p11_last_saved_id"] = novo_id
                 _reset_form_p11()
-                st.balloons()
                 st.rerun()
             else:
                 st.error(msg)

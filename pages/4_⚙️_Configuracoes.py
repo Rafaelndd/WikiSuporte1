@@ -28,6 +28,8 @@ from services.system_notifications import (
     ensure_schema as ensure_notifications_schema,
     listar_notificacoes_admin,
     registrar_bloqueio_versao,
+    resolver_bloqueio_versao,
+    bloqueios_versao_ativos,
 )
 from services.ui_realtime import render_global_notifications_listener
 
@@ -79,7 +81,7 @@ nomes_abas = [
     "🏢 Clientes e Telefones",
     "🛠️ Funcionalidade inativa",
 ]
-tem_painel_notifs = perfil_usuario in ("coordenador", "supervisor")
+tem_painel_notifs = perfil_usuario in ("coordenador", "supervisor", "dev")
 if tem_painel_notifs:
     nomes_abas.append("📣 Notificações e Comunicados")
 abas = st.tabs(nomes_abas)
@@ -379,7 +381,7 @@ if aba_notificacoes:
                 ["comunicado", "aviso", "erro_critico", "versao_bloqueada"],
                 help="Erro crítico e versão bloqueada aparecem com destaque no topo.",
             )
-            target_role = c2.selectbox("Público-alvo", ["todos", "tecnico", "supervisor", "coordenador"])
+            target_role = c2.selectbox("Público-alvo", ["todos", "tecnico", "supervisor", "coordenador", "dev"])
             horas_expira = c3.number_input("Expira em (horas, 0 = sem expiração)", min_value=0, max_value=720, value=0, step=1)
             titulo = st.text_input("Título")
             mensagem = st.text_area("Mensagem *", height=120)
@@ -425,13 +427,36 @@ if aba_notificacoes:
         else:
             st.dataframe(df_not, hide_index=True, use_container_width=True)
             with st.form("form_desativar_notificacao"):
-                ids = df_not[df_not["ativo"] == True]["id"].tolist()
+                ativo_series = df_not["ativo"].astype(str).str.lower().isin(["true", "t", "1"])
+                ids = df_not[ativo_series]["id"].tolist()
                 id_desativar = st.selectbox("Desativar notificação ativa", [""] + [str(i) for i in ids])
                 btn_off = st.form_submit_button("Desativar", use_container_width=True)
                 if btn_off and id_desativar:
                     okd, msgd = desativar_notificacao(int(id_desativar))
                     if okd:
+                        st.cache_data.clear()
                         st.success(msgd)
                         st.rerun()
                     else:
                         st.error(msgd)
+
+        st.markdown("### Bloqueios de versão ativos")
+        df_blocks = bloqueios_versao_ativos()
+        if df_blocks.empty:
+            st.caption("Sem bloqueios ativos.")
+        else:
+            st.dataframe(df_blocks, hide_index=True, use_container_width=True)
+            with st.form("form_resolver_bloqueio_versao"):
+                id_resolver = st.selectbox(
+                    "Marcar bloqueio como resolvido",
+                    [""] + [str(i) for i in df_blocks["id"].astype(int).tolist()],
+                )
+                btn_resolver = st.form_submit_button("Resolver bloqueio", use_container_width=True)
+                if btn_resolver and id_resolver:
+                    okr, msgr = resolver_bloqueio_versao(int(id_resolver))
+                    if okr:
+                        st.cache_data.clear()
+                        st.success(msgr)
+                        st.rerun()
+                    else:
+                        st.error(msgr)

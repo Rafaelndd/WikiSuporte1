@@ -551,11 +551,13 @@ Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
     # Mata o espaço em branco inútil do topo do Streamlit
     st.markdown("<style>.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }</style>", unsafe_allow_html=True)
 
-    # --- LOGO DA EPSY SISTEMAS ---
-    # As colunas [3, 1, 3] centralizam a logo e deixam ela com um tamanho elegante
-    _, col_logo, _ = st.columns([3, 1, 3])
+    # --- LOGO DA EPSY SISTEMAS (responsiva e sem interferir no layout) ---
+    _, col_logo, _ = st.columns([2, 1, 2])
     with col_logo:
-        st.image("assets/imgepsy.png", use_container_width='stretch')
+        try:
+            st.image("assets/imgepsy.png", width=220)
+        except Exception:
+            pass
 
     st.divider() # Linha para separar a logo do seu painel
 
@@ -801,5 +803,4 @@ def renderizar_dashboard_conquistas(kpis):
 if not st.session_state['autenticado']:
     tela_login()
 else:
-    render_global_notifications_listener()
     tela_home()

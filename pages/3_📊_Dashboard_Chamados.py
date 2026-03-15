@@ -398,8 +398,7 @@ st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, 
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
         "**Período padrão:** 12 meses. **Status padrão:** Pendente representante. "
-        "`status_atual` do banco é normalizado (minúsculas, sem acento) para bater com a lista e cores.\n\n"
-        "**Após o bot sincronizar:** os dados vêm do Postgres, mas esta página usa **cache ~45s**. "
+        "\n\n"
         "Se não vir mudança na hora, clique **🔄 Atualizar** nos filtros (limpa cache)."
     )
 

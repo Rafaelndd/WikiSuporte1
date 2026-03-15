@@ -275,6 +275,12 @@ def _upsert_contato(conn: Any, id_cliente: int, contato_nome: str, telefone: str
     contato_nome = (contato_nome or "").strip()
     telefone = _num(telefone)
     email = (email or "").strip()
+    # Alguns fluxos podem enviar telefone no campo de e-mail; corrige automaticamente.
+    if email and ("@" not in email):
+        email_num = _num(email)
+        if email_num and not telefone:
+            telefone = email_num
+            email = ""
     if not contato_nome and not telefone and not email:
         return None
 
@@ -311,7 +317,8 @@ def _upsert_contato(conn: Any, id_cliente: int, contato_nome: str, telefone: str
         {
             "idc": id_cliente,
             "nome": contato_nome or None,
-            "fantasia": contato_nome or None,
+            # Algumas bases possuem NOT NULL em nome_fantasia.
+            "fantasia": contato_nome or (f"Contato {telefone}" if telefone else "Contato não informado"),
             "tel": telefone or None,
             "email": email or None,
         },

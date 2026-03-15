@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import math
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -69,47 +70,182 @@ def _carregar_analistas_ativos() -> pd.DataFrame:
 
 
 def _to_excel_bytes(df: pd.DataFrame) -> bytes:
+    df_export = df.copy()
+    for col in df_export.columns:
+        serie = df_export[col]
+        if pd.api.types.is_datetime64tz_dtype(serie):
+            df_export[col] = serie.dt.tz_localize(None)
+        elif col == "data_atendimento":
+            dt = pd.to_datetime(serie, errors="coerce")
+            if getattr(dt.dt, "tz", None) is not None:
+                dt = dt.dt.tz_localize(None)
+            df_export[col] = dt
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Atendimentos")
+        df_export.to_excel(writer, index=False, sheet_name="Atendimentos")
     return out.getvalue()
+
+
+def _to_pdf_bytes(
+    df: pd.DataFrame,
+    report_type: str = "Relatório de Atendimentos",
+    periodo: str = "",
+    emitido_por: str = "",
+) -> bytes:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas
+        from reportlab.platypus import Table, TableStyle
+    except Exception as e:
+        raise RuntimeError(
+            "Biblioteca 'reportlab' não encontrada para gerar PDF. "
+            "Instale com: pip install reportlab"
+        ) from e
+
+    data_geracao = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    sistema_nome = "WikiSuporte"
+    arquivo = io.BytesIO()
+    page_w, page_h = landscape(A4)
+    c = canvas.Canvas(arquivo, pagesize=landscape(A4))
+
+    # Colunas para relatório em PDF (organizado para leitura)
+    cols = [
+        "id_atendimento",
+        "data_atendimento",
+        "analista",
+        "cliente",
+        "setor",
+        "categoria",
+        "criticidade",
+        "canal",
+        "resolvido",
+    ]
+    cols_existentes = [col for col in cols if col in df.columns]
+    pdf_df = df[cols_existentes].copy()
+    if "data_atendimento" in pdf_df.columns:
+        dt = pd.to_datetime(pdf_df["data_atendimento"], errors="coerce")
+        if getattr(dt.dt, "tz", None) is not None:
+            dt = dt.dt.tz_localize(None)
+        pdf_df["data_atendimento"] = dt.dt.strftime("%d/%m/%Y %H:%M").fillna("")
+    if "resolvido" in pdf_df.columns:
+        pdf_df["resolvido"] = pdf_df["resolvido"].map(lambda x: "Sim" if bool(x) else "Não")
+
+    # Limita tamanho textual para caber na página
+    for col in pdf_df.columns:
+        pdf_df[col] = pdf_df[col].astype(str).str.slice(0, 48)
+
+    rows_per_page = 22
+    total_rows = len(pdf_df)
+    total_pages = max(1, math.ceil(total_rows / rows_per_page))
+
+    # Larguras de coluna em milímetros (proporção visual)
+    col_width_map = {
+        "id_atendimento": 18,
+        "data_atendimento": 34,
+        "analista": 32,
+        "cliente": 68,
+        "setor": 25,
+        "categoria": 52,
+        "criticidade": 24,
+        "canal": 32,
+        "resolvido": 18,
+    }
+    col_widths = [col_width_map.get(col, 25) * mm for col in pdf_df.columns]
+
+    for page_idx in range(total_pages):
+        y_top = page_h - 12 * mm
+        x_left = 12 * mm
+
+        # Cabeçalho institucional
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(x_left, y_top, sistema_nome)
+        c.setFont("Helvetica", 10)
+        c.drawString(x_left, y_top - 6 * mm, report_type)
+        c.drawString(x_left, y_top - 11 * mm, f"Data da geração: {data_geracao}")
+        c.drawString(x_left, y_top - 16 * mm, f"Total de registros: {total_rows}")
+        if periodo:
+            c.drawString(x_left, y_top - 21 * mm, f"Período: {periodo}")
+        if emitido_por:
+            c.drawString(x_left, y_top - 26 * mm, f"Emitido por: {emitido_por}")
+
+        # Rodapé com paginação
+        c.setFont("Helvetica", 9)
+        c.drawRightString(page_w - 12 * mm, 8 * mm, f"Página {page_idx + 1} de {total_pages}")
+
+        ini = page_idx * rows_per_page
+        fim = ini + rows_per_page
+        page_df = pdf_df.iloc[ini:fim]
+
+        data = [list(page_df.columns)] + page_df.values.tolist()
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 8),
+                    ("FONTSIZE", (0, 1), (-1, -1), 7),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.HexColor("#eef2f7")]),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
+        )
+
+        tw, th = table.wrapOn(c, page_w - 24 * mm, page_h - 54 * mm)
+        table.drawOn(c, x_left, page_h - 46 * mm - th)
+        c.showPage()
+
+    c.save()
+    arquivo.seek(0)
+    return arquivo.getvalue()
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, float) and pd.isna(value):
+            return default
+        if pd.isna(value):  # type: ignore[arg-type]
+            return default
+        return int(value)
+    except Exception:
+        return default
 
 
 with tab_lancar:
     st.subheader("Novo Atendimento")
     if "p8_uploader_nonce" not in st.session_state:
         st.session_state["p8_uploader_nonce"] = 0
+    if "p8_form_nonce" not in st.session_state:
+        st.session_state["p8_form_nonce"] = 0
+    if st.session_state.get("p8_reset_pending"):
+        st.session_state["p8_uploader_nonce"] = st.session_state.get("p8_uploader_nonce", 0) + 1
+        st.session_state["p8_form_nonce"] = st.session_state.get("p8_form_nonce", 0) + 1
+        st.session_state["p8_reset_pending"] = False
+    p8n = st.session_state["p8_form_nonce"]
+    if st.session_state.get("p8_last_saved_id"):
+        st.toast("✅ Atendimento registrado com sucesso!", icon="✅")
+        st.success(f"Atendimento #{st.session_state['p8_last_saved_id']} registrado com sucesso.")
+        st.balloons()
+        st.session_state.pop("p8_last_saved_id", None)
 
     def _reset_form_p8() -> None:
-        keys = [
-            "p8_razao_social",
-            "p8_cnpj",
-            "p8_telefone",
-            "p8_match_cliente",
-            "p8_contato_nome",
-            "p8_email_contato",
-            "p8_setor",
-            "p8_categoria",
-            "p8_criticidade",
-            "p8_canal",
-            "p8_protocolo",
-            "p8_duracao_min",
-            "p8_motivo",
-            "p8_solucao",
-            "p8_resolvido",
-            "p8_abriu_chamado",
-            "p8_nr_chamado",
-            "p8_data_atendimento",
-        ]
-        for k in keys:
-            st.session_state.pop(k, None)
-        st.session_state["p8_uploader_nonce"] = st.session_state.get("p8_uploader_nonce", 0) + 1
+        st.session_state["p8_reset_pending"] = True
 
     st.caption("Digite Razão Social/CNPJ/Telefone. O sistema sugere correspondências exatas em tempo real.")
     c_ident1, c_ident2, c_ident3 = st.columns(3)
-    razao_social = c_ident1.text_input("Razão Social *", key="p8_razao_social", placeholder="Ex.: Posto Mahl")
-    cnpj_in = c_ident2.text_input("CNPJ", key="p8_cnpj", placeholder="00.000.000/0000-00")
-    telefone = c_ident3.text_input("Telefone/Celular", key="p8_telefone", placeholder="(xx) xxxxx-xxxx")
+    razao_social = c_ident1.text_input("Razão Social *", key=f"p8_razao_social_{p8n}", placeholder="Ex.: Posto Mahl")
+    cnpj_in = c_ident2.text_input("CNPJ", key=f"p8_cnpj_{p8n}", placeholder="00.000.000/0000-00")
+    telefone = c_ident3.text_input("Telefone/Celular", key=f"p8_telefone_{p8n}", placeholder="(xx) xxxxx-xxxx")
 
     df_matches = buscar_correspondencias_cliente(cnpj=cnpj_in, telefone=telefone, limite=8)
     cliente_id_escolhido = None
@@ -122,7 +258,7 @@ with tab_lancar:
         escolha_match = st.selectbox(
             "Selecione a opção correta (mouse/teclado) ou deixe em branco para cadastrar novo",
             ["-- Cadastrar novo cliente/informação --"] + list(opcoes_match.keys()),
-            key="p8_match_cliente",
+            key=f"p8_match_cliente_{p8n}",
         )
         if escolha_match != "-- Cadastrar novo cliente/informação --":
             cliente_id_escolhido = opcoes_match[escolha_match]
@@ -134,31 +270,31 @@ with tab_lancar:
     with st.form("form_atendimento", clear_on_submit=False):
         st.markdown("#### 👤 Dados de contato")
         c1, c2 = st.columns(2)
-        contato_nome = c1.text_input("Contato", key="p8_contato_nome")
-        email_contato = c2.text_input("E-mail do contato", key="p8_email_contato")
+        contato_nome = c1.text_input("Contato", key=f"p8_contato_nome_{p8n}")
+        email_contato = c2.text_input("E-mail do contato", key=f"p8_email_contato_{p8n}")
 
         st.markdown("#### 🗂️ Tipificação")
         t1, t2, t3 = st.columns(3)
-        setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"], key="p8_setor")
-        categoria = t2.text_input("Categoria *", placeholder="Ex.: Instalação, Dúvida Fiscal, Lentidão...", key="p8_categoria")
-        criticidade = t3.selectbox("Criticidade *", CRITICIDADES, key="p8_criticidade")
+        setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"], key=f"p8_setor_{p8n}")
+        categoria = t2.text_input("Categoria *", placeholder="Ex.: Instalação, Dúvida Fiscal, Lentidão...", key=f"p8_categoria_{p8n}")
+        criticidade = t3.selectbox("Criticidade *", CRITICIDADES, key=f"p8_criticidade_{p8n}")
 
         st.markdown("#### 📞 Canal")
         cc1, cc2, cc3 = st.columns(3)
-        canal = cc1.selectbox("Canal *", CANAIS_PADRAO, key="p8_canal")
-        protocolo = cc2.text_input("Protocolo", key="p8_protocolo")
-        duracao_min = cc3.number_input("Duração (min)", min_value=0, step=1, value=0, key="p8_duracao_min")
+        canal = cc1.selectbox("Canal *", CANAIS_PADRAO, key=f"p8_canal_{p8n}")
+        protocolo = cc2.text_input("Protocolo", key=f"p8_protocolo_{p8n}")
+        duracao_min = cc3.number_input("Duração (min)", min_value=0, step=1, value=0, key=f"p8_duracao_min_{p8n}")
         if canal == "Chat Multi360":
             st.caption("Para canal Multi360, o protocolo é obrigatório.")
 
         st.markdown("#### 📝 Detalhes")
-        motivo = st.text_area("Motivo / Assunto *", height=120, key="p8_motivo")
-        solucao = st.text_area("Solução", height=120, key="p8_solucao")
+        motivo = st.text_area("Motivo / Assunto *", height=120, key=f"p8_motivo_{p8n}")
+        solucao = st.text_area("Solução", height=120, key=f"p8_solucao_{p8n}")
         d1, d2, d3 = st.columns(3)
-        resolvido = d1.checkbox("Resolvido?", key="p8_resolvido")
-        abriu_chamado = d2.checkbox("Precisou abrir chamado?", key="p8_abriu_chamado")
-        nr_chamado = d3.text_input("Nº do chamado (quando houver)", key="p8_nr_chamado")
-        data_atendimento = st.date_input("Data do atendimento", value=date.today(), key="p8_data_atendimento")
+        resolvido = d1.checkbox("Resolvido?", key=f"p8_resolvido_{p8n}")
+        abriu_chamado = d2.checkbox("Precisou abrir chamado?", key=f"p8_abriu_chamado_{p8n}")
+        nr_chamado = d3.text_input("Nº do chamado (quando houver)", key=f"p8_nr_chamado_{p8n}")
+        data_atendimento = st.date_input("Data do atendimento", value=date.today(), key=f"p8_data_atendimento_{p8n}")
 
         st.markdown("#### 📎 Anexos")
         anexos = st.file_uploader(
@@ -196,10 +332,8 @@ with tab_lancar:
                 ok, msg, novo_id = registrar_atendimento(payload, anexos=anexos)
                 status.update(label="Finalizado." if ok else "Falha no registro.", state="complete" if ok else "error")
             if ok:
-                st.success(f"Atendimento #{novo_id} registrado com sucesso.")
-                st.toast("✅ Atendimento registrado com sucesso!", icon="✅")
+                st.session_state["p8_last_saved_id"] = novo_id
                 _reset_form_p8()
-                st.balloons()
                 st.rerun()
             else:
                 st.error(msg)
@@ -270,21 +404,23 @@ with tab_consulta:
         mc5.metric("Ano", m["ano"])
 
         st.dataframe(df_result, hide_index=True, use_container_width=True)
-        col_exp1, col_exp2 = st.columns(2)
-        col_exp1.download_button(
-            "📥 Exportar Excel",
-            data=_to_excel_bytes(df_result),
-            file_name=f"atendimentos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-        col_exp2.download_button(
-            "📥 Exportar CSV",
-            data=df_result.to_csv(index=False).encode("utf-8"),
-            file_name=f"atendimentos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+        try:
+            periodo_txt = f"{data_ini.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}"
+            pdf_bytes = _to_pdf_bytes(
+                df_result,
+                report_type="Relatório de Atendimentos",
+                periodo=periodo_txt,
+                emitido_por=nome_usuario,
+            )
+            st.download_button(
+                "📄 Exportar PDF",
+                data=pdf_bytes,
+                file_name=f"atendimentos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.error(f"Falha ao gerar PDF: {e}")
 
         st.markdown("### ✏️ Editar atendimento")
         edf = df_result[["id_atendimento", "data_atendimento", "cliente", "setor", "categoria", "canal", "motivo"]].copy()
@@ -305,7 +441,8 @@ with tab_consulta:
             ec1, ec2, ec3 = st.columns(3)
             canal_e = ec1.selectbox("Canal", CANAIS_PADRAO, index=CANAIS_PADRAO.index(str(row["canal"])) if str(row["canal"]) in CANAIS_PADRAO else 0)
             protocolo_e = ec2.text_input("Protocolo", value=str(row["protocolo"] or ""))
-            duracao_e = ec3.number_input("Duração (min)", min_value=0, step=1, value=int(row["duracao_min"] or 0) if "duracao_min" in row else 0)
+            duracao_base = _safe_int(row["duracao_min"], 0) if "duracao_min" in row.index else 0
+            duracao_e = ec3.number_input("Duração (min)", min_value=0, step=1, value=duracao_base)
             motivo_e = st.text_area("Motivo", value=str(row["motivo"] or ""), height=100)
             solucao_e = st.text_area("Solução", value=str(row["solucao"] or ""), height=100)
             eb1, eb2, eb3 = st.columns(3)
@@ -325,7 +462,7 @@ with tab_consulta:
                         "criticidade": criticidade_e,
                         "canal": canal_e,
                         "protocolo": protocolo_e,
-                        "duracao_min": int(duracao_e) if duracao_e else None,
+                        "duracao_min": _safe_int(duracao_e, 0),
                         "motivo": motivo_e,
                         "solucao": solucao_e,
                         "resolvido": resolvido_e,

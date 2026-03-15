@@ -1,0 +1,20 @@
+Relatório Oficial de Atendimentos - Plantão
+============================================================
+
+👤 ATENDENTE: ADILTON
+------------------------------------------------------------
+Data: 02/03/2026   Início: 20:28:28   Fim: 20:31:09   Total (Min): 2.38
+Data: 02/03/2026   Início: 20:33:27   Fim: 20:47:06   Total (Min): 13.27
+Data: 03/03/2026   Início: 03:12:06   Fim: 03:15:33   Total (Min): 3.08
+Data: 03/03/2026   Início: 03:19:49   Fim: 03:22:04   Total (Min): 2.07
+Data: 03/03/2026   Início: 03:23:57   Fim: 03:27:41   Total (Min): 3.6
+Data: 03/03/2026   Início: 04:13:26   Fim: 04:14:11   Total (Min): 0.45
+Data: 03/03/2026   Início: 04:30:14   Fim: 04:32:00   Total (Min): 1.65
+Data: 03/03/2026   Início: 05:45:40   Fim: 05:49:08   Total (Min): 3.25
+Data: 03/03/2026   Início: 06:34:46   Fim: 06:36:37   Total (Min): 1.73
+Data: 03/03/2026   Início: 07:00:25   Fim: 07:07:51   Total (Min): 7.37
+Data: 03/03/2026   Início: 07:27:56   Fim: 07:31:19   Total (Min): 3.15
+
+-> TOTAL DE ATENDIMENTOS (ADILTON): 11
+============================================================
+

@@ -152,7 +152,7 @@ def _render_proximo_ponto_sidebar() -> None:
     faltam = int((dt_evt - now).total_seconds())
     contagem = _formatar_contagem(faltam)
     classe_extra = " ws-pulse" if faltam <= 300 else ""
-    st.sidebar.markdown(
+    st.markdown(
         f"""
         <div class="ws-card{classe_extra}">
             <b>🕒 Próximo ponto no VR</b><br/>
@@ -163,6 +163,18 @@ def _render_proximo_ponto_sidebar() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _render_proximo_ponto_sidebar_live() -> None:
+    _render_proximo_ponto_sidebar()
+
+
+if hasattr(st, "fragment"):
+    try:
+        _render_proximo_ponto_sidebar_live = st.fragment(run_every="1s")(_render_proximo_ponto_sidebar_live)
+    except Exception:
+        # Fallback silencioso para versões sem suporte completo
+        pass
 
 
 def _render_pendencias_sidebar(usuario_id: Optional[int]) -> None:
@@ -215,10 +227,15 @@ def render_global_notifications_listener() -> None:
     """
     inject_modern_css()
     role = str(st.session_state.get("perfil", "analista")).strip().lower()
+    if role in ("desenvolvedor",):
+        role = "dev"
+    elif role in ("coordenação",):
+        role = "coordenador"
     usuario_id = st.session_state.get("usuario_id")
 
     _emit_ponto_eletronico_toasts()
-    _render_proximo_ponto_sidebar()
+    with st.sidebar:
+        _render_proximo_ponto_sidebar_live()
     _render_inatividade_sidebar(usuario_id)
     _render_pendencias_sidebar(usuario_id)
     _render_plantao_sidebar(usuario_id)
