@@ -16,6 +16,13 @@ from sqlalchemy import text
 from datetime import datetime, timedelta, time
 from modules.database import get_connection
 from services.ui_realtime import render_global_notifications_listener
+from config_ramais import (
+    RAMAIS_EXCLUIR,
+    RAMAL_NOME_ESPECIAL,
+    obter_setor_por_nome_analista,
+    SETOR_TEF,
+    SETOR_SUPORTE_GERAL,
+)
 
 #======================================================================================================================#
 
@@ -94,6 +101,19 @@ def carregar_dados_goto():
         return df
     except: return pd.DataFrame()
 
+
+@st.cache_data(ttl=300)
+def carregar_goto_agent_calls():
+    """Chamadas atendidas do relatório GoTo Agent Calls (Contact Resolution = COMPLETED)."""
+    engine = get_connection()
+    try:
+        df = pd.read_sql("SELECT contact_id, contact_creation_time, agent_name, talk_time_millis FROM goto_agent_calls", engine)
+        if not df.empty and "contact_creation_time" in df.columns:
+            df["contact_creation_time"] = pd.to_datetime(df["contact_creation_time"], errors="coerce")
+        return df
+    except Exception:
+        return pd.DataFrame()
+
 @st.cache_data(ttl=300)
 def carregar_dados_multi360():
     engine = get_connection()
@@ -126,6 +146,7 @@ with st.expander("🤔 Como usar esta página?"):
 
 df_goto_raw = carregar_dados_goto()
 df_multi360_raw = carregar_dados_multi360()
+df_goto_agent_calls_raw = carregar_goto_agent_calls()
 
 if df_goto_raw.empty and df_multi360_raw.empty:
     st.warning("⚠️ WikiSuporte - Nenhum atendimento encontrado no sistema ou falha de conexão.")
@@ -172,16 +193,21 @@ with st.expander("⚙️ Filtros: ", expanded=True):
 # --- APLICAÇÃO DE FILTROS BÁSICOS (DATAS) ---
 df_tel = df_goto_raw.copy()
 df_wpp = df_multi360_raw.copy()
-
+df_agent_calls_periodo = pd.DataFrame()
 if len(datas_selecionadas) == 2:
     data_inicio, data_fim = datas_selecionadas
-    data_fim = pd.to_datetime(data_fim) + timedelta(days=1)
+    data_fim_excl = pd.to_datetime(data_fim) + timedelta(days=1)
     data_inicio = pd.to_datetime(data_inicio)
 
     if not df_tel.empty:
-        df_tel = df_tel[(df_tel['data_chamada'] >= data_inicio) & (df_tel['data_chamada'] < data_fim)]
+        df_tel = df_tel[(df_tel['data_chamada'] >= data_inicio) & (df_tel['data_chamada'] < data_fim_excl)]
     if not df_wpp.empty:
-        df_wpp = df_wpp[(df_wpp['data_inicio'] >= data_inicio) & (df_wpp['data_inicio'] < data_fim)]
+        df_wpp = df_wpp[(df_wpp['data_inicio'] >= data_inicio) & (df_wpp['data_inicio'] < data_fim_excl)]
+    if not df_goto_agent_calls_raw.empty and "contact_creation_time" in df_goto_agent_calls_raw.columns:
+        df_agent_calls_periodo = df_goto_agent_calls_raw[
+            (df_goto_agent_calls_raw["contact_creation_time"] >= data_inicio)
+            & (df_goto_agent_calls_raw["contact_creation_time"] < data_fim_excl)
+        ].copy()
 
 # ==========================================
 # 4. TRATAMENTO DE DADOS (WPP & GOTO)
@@ -226,14 +252,36 @@ if not df_wpp.empty:
 # --- TRATAMENTO TELEFONIA (GOTO) ---
 coluna_agente_tel = None
 
+def _obter_mapa_ramal_nome_goto():
+    """Retorna dict ramal -> nome (exclui ramais ignorados e inclui rótulos especiais: Caixa Parado, Chamador, Jairo/TEF)."""
+    mapa = {}
+    try:
+        engine = get_connection()
+        df_u = pd.read_sql(
+            text("SELECT nome, ramal FROM usuarios WHERE ramal IS NOT NULL AND TRIM(ramal) <> '' AND ativo = TRUE"),
+            engine,
+        )
+        if not df_u.empty:
+            for _, row in df_u.iterrows():
+                r = str(row["ramal"]).strip()
+                if r not in RAMAIS_EXCLUIR:
+                    mapa[r] = str(row["nome"]).strip()
+    except Exception:
+        pass
+    for ramal, nome in RAMAL_NOME_ESPECIAL.items():
+        if ramal not in RAMAIS_EXCLUIR:
+            mapa[str(ramal).strip()] = nome
+    return mapa
+
 if not df_tel.empty:
     colunas_lower = {str(c).lower(): c for c in df_tel.columns}
-    
-    # =======================================================
-    # CORREÇÃO DEFINITIVA: FILTRO DE CAIXA POSTAL / SELF-CALL
-    # =======================================================
     col_part = next((c for c in colunas_lower.values() if 'participante' in c.lower()), None)
-    
+
+    # Ramal 5355: não considerar nem as ligações para ele (excluir das métricas)
+    if col_part:
+        mascara_5355 = df_tel[col_part].astype(str).str.contains("5355", regex=False, na=False)
+        df_tel = df_tel[~mascara_5355].copy()
+
     if col_part:
         def is_ligacao_interna(valor):
             """
@@ -282,25 +330,33 @@ if not df_tel.empty:
             df_tel['duracao_ms_val'] = 0.0
             df_tel['duracao_minutos'] = 0.0
             
-        # 2. TRADUTOR DE STATUS (UX) - Entendendo o comportamento da chamada
+        # 2. TRADUTOR DE STATUS (UX) - Classificação correta por resultado da chamada (GoTo)
+        # Atendida = "Encerrada com sucesso" ou "Chamada do plano de discagem encerrada"
+        # Perdida = "Chamada perdida" (não atendida no ramal)
+        # Abandonada na URA = desistiu no menu (sem encerrada); demais = Falha/Outros
         if 'resultado' in colunas_lower:
             col_res = colunas_lower['resultado']
-            df_tel['resultado_upper'] = df_tel[col_res].fillna("").astype(str).str.upper()
+            df_tel['resultado_upper'] = df_tel[col_res].fillna("").astype(str).str.upper().str.strip()
 
-            LIMITE_MS = 5 * 60 * 1000  # 5 minutos em ms
+            LIMITE_MS = 5 * 60 * 1000  # 5 minutos em ms (fallback quando resultado não é reconhecido)
 
             def categorizar_chamada(row):
                 status = row['resultado_upper']
                 dur_ms = row.get('duracao_ms_val', 0)
 
-                if "PLANO DE DISCAGEM" in status:
-                    return "Abandonada na URA"
                 if "CHAMADA PERDIDA" in status:
                     return "Perdida (Tocou no Ramal)"
-                if "INDETERMINADO" in status:
+                if "COMPLETED" in status or "ENCERRADA COM SUCESSO" in status:
+                    return "Atendida"
+                # "Chamada do plano de discagem encerrada" = ligação atendida e encerrada (não é abandono)
+                if "PLANO DE DISCAGEM" in status and "ENCERRADA" in status:
+                    return "Atendida"
+                if "PLANO DE DISCAGEM" in status:
+                    return "Abandonada na URA"
+                if "INDETERMINADO" in status or "CANCELADA" in status:
                     return "Falha Técnica / Cancelada"
 
-                # Regra de negócio: não atendida em até 5 minutos => perdida; caso contrário => atendida
+                # Fallback: por duração (quando resultado não é um dos textos conhecidos)
                 if dur_ms <= LIMITE_MS:
                     return "Perdida (Tocou no Ramal)"
                 return "Atendida"
@@ -312,14 +368,41 @@ if not df_tel.empty:
         df_tel['Is_Atendida'] = (df_tel['Categoria_UX'] == "Atendida").astype(int)
         df_tel['Is_Perdida_Ramal'] = (df_tel['Categoria_UX'] == "Perdida (Tocou no Ramal)").astype(int)
 
-        # 3. Ajuste do Agente Principal
+        # 3. Agente principal: usar coluna do banco ou inferir a partir de participantes (ramal)
+        col_part = next((c for c in colunas_lower.values() if 'participante' in c.lower()), None)
         if 'nome_analista_epsy' in colunas_lower:
             coluna_agente_tel = colunas_lower['nome_analista_epsy']
         elif 'usuario' in colunas_lower:
             coluna_agente_tel = colunas_lower['usuario']
-            
+        else:
+            coluna_agente_tel = None
+        # Se a coluna existe mas está vazia, ou não existe: preencher a partir de participantes
+        if col_part and (coluna_agente_tel is None or df_tel[coluna_agente_tel].fillna("").astype(str).str.strip().eq("").all()):
+            mapa_ramal = _obter_mapa_ramal_nome_goto()
+            if mapa_ramal:
+                def _analista_de_participantes(row):
+                    texto = str(row.get(col_part, "")) + " " + str(row.get("telefone_origem", "")) if "telefone_origem" in df_tel.columns else str(row.get(col_part, ""))
+                    for ramal, nome in mapa_ramal.items():
+                        if ramal and ramal in texto:
+                            return nome
+                    return "Não Identificado"
+                if coluna_agente_tel is None:
+                    df_tel["nome_analista_epsy"] = df_tel.apply(_analista_de_participantes, axis=1)
+                    coluna_agente_tel = "nome_analista_epsy"
+                    colunas_lower["nome_analista_epsy"] = "nome_analista_epsy"
+                else:
+                    vazios = df_tel[coluna_agente_tel].fillna("").astype(str).str.strip().eq("")
+                    df_tel.loc[vazios, coluna_agente_tel] = df_tel.loc[vazios].apply(_analista_de_participantes, axis=1)
         if coluna_agente_tel:
             df_tel[coluna_agente_tel] = df_tel[coluna_agente_tel].fillna("Não Identificado")
+        # Setor (TEF x Suporte Geral) para cada linha
+        mapa_ramal = _obter_mapa_ramal_nome_goto()
+        if coluna_agente_tel and mapa_ramal:
+            df_tel["setor_epsy"] = df_tel[coluna_agente_tel].apply(
+                lambda nome: obter_setor_por_nome_analista(nome, mapa_ramal)
+            )
+        else:
+            df_tel["setor_epsy"] = SETOR_SUPORTE_GERAL
 
 # ==========================================
 # 5. CONSTRUÇÃO DAS ABAS PRINCIPAIS (UX/UI)
@@ -859,16 +942,22 @@ with aba_telefonia:
             st.markdown("### 📞 Dashboard de Ligações - GoTo")
             st.caption("Análise detalhada do fluxo de chamadas, status e comportamento dos clientes ao longo do tempo.")
             
-            # Cálculos dos novos KPIs baseados no status real
+            # Cálculos: quando há relatório Agent Calls no período, usá-lo para Atendidas (fonte fiel)
             vol_total = len(df_tel)
-            vol_atendidas = df_tel['Is_Atendida'].sum() if 'Is_Atendida' in df_tel.columns else 0
-            vol_perdidas_ramal = df_tel['Is_Perdida_Ramal'].sum() if 'Is_Perdida_Ramal' in df_tel.columns else 0
+            if not df_agent_calls_periodo.empty:
+                vol_atendidas = len(df_agent_calls_periodo)
+                fonte_atendidas = " (relatório Agent Calls)"
+            else:
+                vol_atendidas = int(df_tel['Is_Atendida'].sum()) if 'Is_Atendida' in df_tel.columns else 0
+                fonte_atendidas = ""
+            vol_perdidas_ramal = int(df_tel['Is_Perdida_Ramal'].sum()) if 'Is_Perdida_Ramal' in df_tel.columns else 0
             vol_ura = len(df_tel[df_tel['Categoria_UX'] == "Abandonada na URA"]) if 'Categoria_UX' in df_tel.columns else 0
-            
+            vol_total_exib = vol_atendidas + vol_perdidas_ramal if not df_agent_calls_periodo.empty else vol_total
+
             with st.container(border=True):
                 t_col1, t_col2, t_col3, t_col4 = st.columns(4)
-                t_col1.metric("Total de Entradas", vol_total, "No PABX")
-                t_col2.metric("✅ Atendidas", vol_atendidas, f"{(vol_atendidas/vol_total*100):.1f}%" if vol_total > 0 else "0%", delta_color="normal")
+                t_col1.metric("Total de Entradas", vol_total_exib, "Atendidas + Perdidas" if not df_agent_calls_periodo.empty else "No PABX")
+                t_col2.metric("✅ Atendidas" + fonte_atendidas, vol_atendidas, f"{(vol_atendidas/vol_total_exib*100):.1f}%" if vol_total_exib > 0 else "0%", delta_color="normal")
                 t_col3.metric("⚠️ Perdidas no Ramal", vol_perdidas_ramal, "Chamadas não atendidas", delta_color="inverse")
                 t_col4.metric("🚪 Abandonadas na URA", vol_ura, "Desistiu no Menu", delta_color="inverse")
             
@@ -927,8 +1016,11 @@ with aba_telefonia:
 
         with tab_tel_agentes:
             if coluna_agente_tel:
-                # Agrupamento Master com todos os dados
-                df_agentes_tel = df_tel.groupby(coluna_agente_tel).agg(
+                # Agrupamento: por analista e, se existir, por setor (TEF / Suporte Geral)
+                cols_agrup = [coluna_agente_tel]
+                if 'setor_epsy' in df_tel.columns:
+                    cols_agrup = [coluna_agente_tel, 'setor_epsy']
+                df_agentes_tel = df_tel.groupby(cols_agrup).agg(
                     Total_Direcionado=('DIA', 'count'),
                     Atendidas=('Is_Atendida', 'sum'),
                     Perdidas_Ramal=('Is_Perdida_Ramal', 'sum'),
@@ -936,20 +1028,27 @@ with aba_telefonia:
                     Tempo_Total_Minutos=('duracao_minutos', 'sum')
                 ).reset_index().sort_values('Atendidas', ascending=False)
                 
-                # --- A MÁGICA DA SEPARAÇÃO (Sem quebrar o código) ---
-                # Identifica rótulos que NÃO SÃO analistas usando palavras-chave do nosso script do banco
-                termos_sistema = ['Transferência', 'Ramal', 'Sistema', 'Abandono', 'Não Identificado', 'Retenção']
-                mascara_sistema = df_agentes_tel[coluna_agente_tel].astype(str).str.contains('|'.join(termos_sistema), case=False, na=False)
+                # --- SEPARAÇÃO: rotas/sistema vs equipe real ---
+                termos_sistema = ['Transferência', 'Ramal \\d', 'Sistema', 'Abandono', 'Retenção']
+                mascara_sistema = df_agentes_tel[coluna_agente_tel].astype(str).str.contains('|'.join(termos_sistema), case=False, na=False, regex=True)
                 
-                # Divide o Dataframe em dois: Um só de Pessoas, outro só de Rotas/Sistemas
                 df_equipe_real = df_agentes_tel[~mascara_sistema].copy()
                 df_sistema_rotas = df_agentes_tel[mascara_sistema].copy()
                 
-                # ----------------------------------------------------
-                # BLOCO 1: APENAS A EQUIPE REAL (Analistas)
-                # ----------------------------------------------------
                 st.markdown("### 👤 Desempenho dos Analistas")
-                st.caption("Visão isolada dos analistas. Veja claramente os atendimentos efetivos separados das chamadas não atendidas.")
+                st.caption("Visão isolada dos analistas por setor (TEF e Suporte Geral). Ligações para o ramal 5355 não são contabilizadas.")
+                
+                # Resumo por setor (TEF x Suporte Geral)
+                if 'setor_epsy' in df_equipe_real.columns:
+                    resumo_setor = df_equipe_real.groupby('setor_epsy').agg(
+                        Chamadas=('Total_Direcionado', 'sum'),
+                        Atendidas=('Atendidas', 'sum'),
+                        Analistas=(coluna_agente_tel, 'nunique')
+                    ).reset_index()
+                    resumo_setor.columns = ['Setor', 'Chamadas direcionadas', 'Atendidas', 'Qtd. analistas']
+                    st.markdown("#### 📂 Por setor")
+                    st.dataframe(resumo_setor, hide_index=True, use_container_width=True)
+                    st.divider()
                 
                 c_tel1, c_tel2 = st.columns(2)
                 with c_tel1:
@@ -963,7 +1062,6 @@ with aba_telefonia:
                     st.plotly_chart(fig_tel_perd, width='stretch')
                 
                 st.markdown("#### 📋 Produtividade por Analista")
-                # Prepara os nomes das colunas com extrema clareza
                 df_exibicao_equipe = df_equipe_real.rename(columns={
                     coluna_agente_tel: "Analista", 
                     "Total_Direcionado": "Chamadas Direcionadas",
@@ -972,6 +1070,8 @@ with aba_telefonia:
                     "TMA_Minutos": "Duração Média (Min)", 
                     "Tempo_Total_Minutos": "Horas Totais na Linha"
                 })
+                if 'setor_epsy' in df_exibicao_equipe.columns:
+                    df_exibicao_equipe = df_exibicao_equipe.rename(columns={'setor_epsy': 'Setor'})
                 df_exibicao_equipe['Horas Totais na Linha'] = df_exibicao_equipe['Horas Totais na Linha'] / 60
                 
                 st.dataframe(df_exibicao_equipe.style.format({

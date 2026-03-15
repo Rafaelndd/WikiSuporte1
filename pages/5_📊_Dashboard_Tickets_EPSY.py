@@ -103,7 +103,6 @@ with st.expander("🤔 Como usar esta página?"):
         "Use os **filtros** para mudar período, status ou analista. O padrão é **Somente abertos**. "
         "Os **gráficos de barras** mostram quais clientes mais abriram tickets e os principais assuntos. "
         "**Tempo médio em aberto** refere-se aos tickets ainda abertos; **tempo médio até fechamento** "
-        "usa os dados disponíveis dos tickets já fechados. Dados vêm da tabela **tickets_epsy** (raspagem/bot)."
     )
 
 df_raw = carregar_tickets_cruzados()

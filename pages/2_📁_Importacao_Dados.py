@@ -9,12 +9,20 @@ from sqlalchemy import text
 from modules.database import get_connection
 from modules.processador_csv import gerar_hash_lgpd
 from dotenv import load_dotenv
+from config_ramais import RAMAIS_EXCLUIR, RAMAL_NOME_ESPECIAL
 from services.auth_guard import require_profile
 
 load_dotenv()
 
 # Importa as suas funções de LGPD e limpeza
-from modules.processador_csv import processar_csv_goto, processar_csv_multi360, ler_arquivo_dinamico
+from modules.processador_csv import (
+    processar_csv_goto,
+    processar_csv_multi360,
+    ler_arquivo_dinamico,
+    processar_agent_calls_goto,
+    extrair_agent_calls_do_zip,
+    _is_agent_calls_csv,
+)
 
 # Importa o módulo de integração com a API do GoTo Connect
 try:
@@ -47,6 +55,29 @@ nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
 # ==========================================
 # 2. FUNÇÕES AUXILIARES DE BANCO DE DADOS E REGRAS
 # ==========================================
+def _garantir_tabela_goto_agent_calls(conn):
+    """Cria a tabela goto_agent_calls se não existir (migração sob demanda)."""
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS goto_agent_calls (
+            contact_id VARCHAR(255) PRIMARY KEY,
+            queue_name VARCHAR(255),
+            contact_creation_time TIMESTAMP WITH TIME ZONE,
+            contact_resolution_time TIMESTAMP WITH TIME ZONE,
+            time_in_queue_millis BIGINT,
+            talk_time_millis BIGINT,
+            wrap_time_millis BIGINT,
+            handle_time_millis BIGINT,
+            contact_resolution VARCHAR(100),
+            contact_type VARCHAR(100),
+            contact_participant_value VARCHAR(255),
+            agent_name VARCHAR(255),
+            telefone_hash VARCHAR(256),
+            telefone_origem VARCHAR(50),
+            data_importacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+
+
 def salvar_no_banco(df, nome_tabela, tipo_arquivo):
     engine = get_connection()
     try:
@@ -56,21 +87,77 @@ def salvar_no_banco(df, nome_tabela, tipo_arquivo):
                 data_max = df['data_chamada'].max()
                 query_delete = text("DELETE FROM atendimentos_goto WHERE data_chamada >= :dmin AND data_chamada <= :dmax")
                 conn.execute(query_delete, {"dmin": data_min, "dmax": data_max})
-                
+            elif tipo_arquivo == "GOTO_AGENT_CALLS":
+                _garantir_tabela_goto_agent_calls(conn)
+                col = "contact_creation_time"
+                if col in df.columns and not df[col].isna().all():
+                    data_min = df[col].min()
+                    data_max = df[col].max()
+                    conn.execute(
+                        text("DELETE FROM goto_agent_calls WHERE contact_creation_time >= :dmin AND contact_creation_time <= :dmax"),
+                        {"dmin": data_min, "dmax": data_max},
+                    )
             elif tipo_arquivo == "MULTI360":
                 lista_protocolos = df['protocolo'].dropna().tolist()
                 if lista_protocolos:
                     query_delete = text("DELETE FROM atendimentos_multi360 WHERE protocolo = ANY(:ids)")
                     conn.execute(query_delete, {"ids": lista_protocolos})
-            
             df.to_sql(nome_tabela, conn, if_exists='append', index=False)
-            
         return True, "Sucesso"
     except Exception as e:
         return False, str(e)
 
 def apenas_numeros(texto):
     return re.sub(r'\D', '', str(texto))
+
+
+def _obter_mapa_ramal_analista():
+    """Retorna dicionário ramal -> (id_usuario, nome). Exclui 5355; inclui 5366=Caixa Parado, 5365=Chamador, 5364=Jairo (TEF)."""
+    engine = get_connection()
+    mapa = {}
+    try:
+        df_u = pd.read_sql(
+            text("SELECT id, nome, ramal FROM usuarios WHERE ramal IS NOT NULL AND TRIM(ramal) <> '' AND ativo = TRUE"),
+            engine,
+        )
+        if not df_u.empty:
+            for _, row in df_u.iterrows():
+                r = str(row["ramal"]).strip()
+                if r not in RAMAIS_EXCLUIR:
+                    mapa[r] = (int(row["id"]), str(row["nome"]).strip())
+    except Exception:
+        pass
+    # Ramais especiais (rotulos): 5366 Caixa Parado, 5365 Chamador, 5364 Jairo
+    for ramal, nome in RAMAL_NOME_ESPECIAL.items():
+        if ramal in RAMAIS_EXCLUIR:
+            continue
+        r = str(ramal).strip()
+        if r not in mapa:
+            # Jairo (5364) pode ter id em usuarios; demais (None, nome)
+            try:
+                df_j = pd.read_sql(text("SELECT id FROM usuarios WHERE UPPER(TRIM(nome)) = :n AND ativo = TRUE"), engine, params={"n": nome.strip().upper()})
+                uid = int(df_j.iloc[0]["id"]) if not df_j.empty else None
+            except Exception:
+                uid = None
+            mapa[r] = (uid, nome)
+    if not mapa:
+        try:
+            path_ramais = os.path.join(os.path.dirname(__file__), "..", "ramais_config.json")
+            if not os.path.exists(path_ramais):
+                path_ramais = "ramais_config.json"
+            if os.path.exists(path_ramais):
+                import json
+                with open(path_ramais, "r", encoding="utf-8") as f:
+                    nome_para_ramal = json.load(f)
+                df_u = pd.read_sql(text("SELECT id, nome FROM usuarios WHERE ativo = TRUE"), engine)
+                mapa_nome_id = {str(row["nome"]).strip().upper(): (int(row["id"]), str(row["nome"]).strip()) for _, row in df_u.iterrows()}
+                for nome, ramal in nome_para_ramal.items():
+                    r = str(ramal).strip()
+                    if r not in RAMAIS_EXCLUIR:
+                        mapa[r] = mapa_nome_id.get(str(nome).strip().upper(), (None, str(nome).strip()))
+        except Exception:
+            pass
+    return mapa
 
 # 🌟 REGRA CIRÚRGICA DE PLANTÃO CRUZADO (Ciclos exatos do Regime Normal)
 def is_plantao_normal(dt):
@@ -306,18 +393,39 @@ with aba2:
     )
     st.info("💡 **Dica:** O sistema cruza os telefones com o CRM automaticamente para identificar o nome do cliente no Dashboard!")
     with st.container(border=True):
-        arquivo_upload = st.file_uploader("📂 Selecione o seu arquivo de atendimento:", type=['csv', 'xlsx'], key="up_import_mensal")
-    
+        arquivo_upload = st.file_uploader(
+            "📂 Selecione o seu arquivo de atendimento (CSV, XLSX ou ZIP com agent-calls):",
+            type=['csv', 'xlsx', 'zip'],
+            key="up_import_mensal",
+        )
     if arquivo_upload:
-        df_preview = ler_arquivo_dinamico(arquivo_upload)
         tipo_identificado, df_processado, erro_processamento = None, None, None
-        
+        if arquivo_upload.name.lower().endswith('.zip'):
+            zip_bytes = io.BytesIO(arquivo_upload.read())
+            csv_io, nome_zip = extrair_agent_calls_do_zip(zip_bytes)
+            if csv_io is None:
+                st.error("❌ O ZIP não contém um arquivo 'agent-calls_*.csv'. Exporte o relatório Agent Calls do GoTo ou anexe o CSV diretamente.")
+                st.stop()
+            st.session_state['import_agent_calls_bytes'] = csv_io.read()
+            df_preview = pd.read_csv(io.BytesIO(st.session_state['import_agent_calls_bytes']), nrows=15)
+        else:
+            if 'import_agent_calls_bytes' in st.session_state:
+                del st.session_state['import_agent_calls_bytes']
+            df_preview = ler_arquivo_dinamico(arquivo_upload)
+
         is_goto_conversations = 'Conversation space id' in df_preview.columns
+        is_goto_call_report = not is_goto_conversations and any(
+            df_preview[col].astype(str).str.contains("Chamada perdida|Encerrada com sucesso|Chamada do plano de discagem", case=False, na=False).any()
+            for col in df_preview.columns
+        )
         is_goto_user_activity = 'Queue Name' in df_preview.columns and 'Start Time (local)' in df_preview.columns
+        is_goto_agent_calls = _is_agent_calls_csv(df_preview)
         is_multi360 = 'PROTOCOLO' in df_preview.columns
         
-        if is_goto_conversations: 
+        if is_goto_conversations or is_goto_call_report: 
             tipo_identificado = "GOTO"
+        elif is_goto_agent_calls:
+            tipo_identificado = "GOTO_AGENT_CALLS"
         elif is_multi360: 
             tipo_identificado = "MULTI360"
         elif is_goto_user_activity:
@@ -329,11 +437,19 @@ with aba2:
             
         with st.spinner(f"🔍 Processando arquivo do {tipo_identificado}..."):
             try:
-                arquivo_upload.seek(0) 
                 if tipo_identificado == "GOTO":
+                    arquivo_upload.seek(0)
                     df_processado = processar_csv_goto(arquivo_upload)
                     nome_tabela_bd = "atendimentos_goto"
+                elif tipo_identificado == "GOTO_AGENT_CALLS":
+                    if "import_agent_calls_bytes" in st.session_state:
+                        df_processado = processar_agent_calls_goto(io.BytesIO(st.session_state["import_agent_calls_bytes"]))
+                    else:
+                        arquivo_upload.seek(0)
+                        df_processado = processar_agent_calls_goto(arquivo_upload)
+                    nome_tabela_bd = "goto_agent_calls"
                 else:
+                    arquivo_upload.seek(0)
                     df_processado = processar_csv_multi360(arquivo_upload)
                     nome_tabela_bd = "atendimentos_multi360"
             except Exception as e: erro_processamento = str(e)
@@ -359,33 +475,47 @@ with aba2:
 
             if not bloqueio_plantao:
                 if tipo_identificado == "GOTO":
+                    # Vincular atendimentos aos ramais dos analistas (nome_analista_epsy, id_analista_epsy)
+                    mapa_ramal = _obter_mapa_ramal_analista()
+                    if mapa_ramal:
+                        def identificar_analista(row):
+                            texto = (str(row.get("participantes", "")) + " " + str(row.get("telefone_origem", ""))).strip()
+                            for ramal, (uid, nome) in mapa_ramal.items():
+                                if ramal and ramal in texto:
+                                    return (uid, nome)
+                            return (None, None)
+                        aplicado = df_processado.apply(identificar_analista, axis=1)
+                        df_processado["id_analista_epsy"] = aplicado.apply(lambda x: x[0])
+                        df_processado["nome_analista_epsy"] = aplicado.apply(lambda x: x[1])
+                    else:
+                        df_processado["id_analista_epsy"] = None
+                        df_processado["nome_analista_epsy"] = None
                     with st.spinner("🔄 Cruzando telefones com os cadastros dos clientes..."):
                         try:
                             from services.clientes_service import obter_mapa_hash_cliente
                             mapa_hash = obter_mapa_hash_cliente()
-                            df_processado['cliente_nome'] = df_processado['telefone_hash'].map(mapa_hash).fillna("Não Identificado")
-                            sucesso_crm = len(df_processado[df_processado['cliente_nome'] != "Não Identificado"])
-                            st.success(f"🎯 **Identificação:** {sucesso_crm} chamadas vinculadas a clientes.")
-                            # Números sem vínculo para cadastro opcional
-                            hashes_sem_vinculo = df_processado[df_processado['cliente_nome'] == "Não Identificado"]['telefone_hash'].dropna().unique().tolist()
-                            if hashes_sem_vinculo:
-                                df_raw = ler_arquivo_dinamico(arquivo_upload)
-                                col_de = df_raw.get('De', pd.Series(dtype=str))
-                                numeros_raw = col_de.apply(apenas_numeros)
-                                numeros_raw = numeros_raw[numeros_raw.str.len() >= 8]
-                                mapa_raw_hash = {gerar_hash_lgpd(str(n)): str(n) for n in numeros_raw.unique() if n}
-                                sem_vinculo_raw = [(mapa_raw_hash.get(h, ""), h) for h in hashes_sem_vinculo if mapa_raw_hash.get(h)]
-                                st.session_state['import_numero_sem_vinculo'] = sem_vinculo_raw[:50]
-                                st.info(f"📋 **{len(sem_vinculo_raw)}** números sem cliente vinculado. Deseja cadastrar antes de salvar?")
-                            st.session_state['import_df_processado'] = df_processado.copy()
-                            st.session_state['import_nome_tabela'] = nome_tabela_bd
-                            st.session_state['import_tipo'] = tipo_identificado
-                            st.session_state['import_arquivo_nome'] = arquivo_upload.name
+                            df_processado["cliente_nome"] = df_processado["telefone_hash"].map(mapa_hash)
+                            # Sem cadastro: deixar o número em claro (telefone_origem), sem mensagem de tratamento
+                            idx_sem = df_processado["cliente_nome"].isna()
+                            df_processado.loc[idx_sem, "cliente_nome"] = df_processado.loc[idx_sem, "telefone_origem"].astype(str).replace("nan", "").replace("<NA>", "")
+                            df_processado["cliente_nome"] = df_processado["cliente_nome"].fillna("")
+                            st.session_state["import_df_processado"] = df_processado.copy()
+                            st.session_state["import_nome_tabela"] = nome_tabela_bd
+                            st.session_state["import_tipo"] = tipo_identificado
+                            st.session_state["import_arquivo_nome"] = arquivo_upload.name
                         except ImportError:
-                            df_processado['cliente_nome'] = "Não Identificado"
+                            df_processado["cliente_nome"] = df_processado.get("telefone_origem", pd.Series(dtype=str)).astype(str).replace("nan", "")
+                            st.session_state["import_df_processado"] = df_processado.copy()
+                            st.session_state["import_nome_tabela"] = nome_tabela_bd
+                            st.session_state["import_tipo"] = tipo_identificado
+                            st.session_state["import_arquivo_nome"] = arquivo_upload.name
                         except Exception as e:
                             st.warning(f"⚠️ Erro ao identificar clientes: {e}")
-                            df_processado['cliente_nome'] = "Não Identificado"
+                            df_processado["cliente_nome"] = df_processado.get("telefone_origem", pd.Series(dtype=str)).astype(str).replace("nan", "")
+                            st.session_state["import_df_processado"] = df_processado.copy()
+                            st.session_state["import_nome_tabela"] = nome_tabela_bd
+                            st.session_state["import_tipo"] = tipo_identificado
+                            st.session_state["import_arquivo_nome"] = arquivo_upload.name
 
                 if tipo_identificado == "MULTI360":
                     with st.spinner("🔄 Cruzando com CRM..."):
@@ -396,40 +526,12 @@ with aba2:
                         except Exception:
                             df_processado['cliente_nome'] = df_processado.get('cliente_nome', "Não Identificado")
 
-                # Cadastro one-by-one de números sem vínculo
-                nums_sem_vinculo = st.session_state.get('import_numero_sem_vinculo', [])
-                if nums_sem_vinculo and tipo_identificado == "GOTO":
-                    with st.container(border=True):
-                        st.markdown("#### 📞 Cadastrar clientes para números sem vínculo")
-                        raw, _ = nums_sem_vinculo[0]
-                        mask = f"(**) *****-{raw[-4:]}" if len(raw) >= 4 else "****"
-                        st.caption(f"Número {mask} ({len(nums_sem_vinculo)} restantes)")
-                        with st.form("form_cadastro_numero"):
-                            razao_cad = st.text_input("Razão Social *", key="cad_razao")
-                            cnpj_cad = st.text_input("CNPJ", key="cad_cnpj")
-                            if st.form_submit_button("Salvar e próximo"):
-                                if razao_cad.strip():
-                                    try:
-                                        from services.clientes_service import vincular_telefone_cliente
-                                        ok, msg = vincular_telefone_cliente(razao_cad, raw, cnpj_cad)
-                                        if ok:
-                                            h = gerar_hash_lgpd(raw)
-                                            df_p = st.session_state.get('import_df_processado')
-                                            if df_p is not None and 'telefone_hash' in df_p.columns:
-                                                df_p.loc[df_p['telefone_hash'] == h, 'cliente_nome'] = razao_cad.strip()
-                                                st.session_state['import_df_processado'] = df_p
-                                            st.session_state['import_numero_sem_vinculo'] = nums_sem_vinculo[1:]
-                                            st.success("Cadastrado!")
-                                            st.rerun()
-                                        else:
-                                            st.error(msg)
-                                    except Exception as ex:
-                                        st.error(str(ex))
-                                else:
-                                    st.warning("Informe a Razão Social.")
-                        if st.button("Pular cadastro (continuar sem vincular estes)", key="pular_cad"):
-                            st.session_state['import_numero_sem_vinculo'] = []
-                            st.rerun()
+                if tipo_identificado == "GOTO_AGENT_CALLS":
+                    st.success(f"📞 **Relatório Agent Calls:** {len(df_processado)} chamadas atendidas (Contact Resolution = COMPLETED). Salve no banco para o Dashboard usar estes números.")
+                    st.session_state['import_df_processado'] = df_processado.copy()
+                    st.session_state['import_nome_tabela'] = nome_tabela_bd
+                    st.session_state['import_tipo'] = tipo_identificado
+                    st.session_state['import_arquivo_nome'] = arquivo_upload.name
 
                 with st.container(border=True):
                     st.markdown("### 🔍 Pré-visualização dos Dados (Prontos para o Banco)")
@@ -453,7 +555,7 @@ with aba2:
                         if sucesso:
                             st.success(f"{len(df_para_salvar)} registros foram salvos com sucesso.")
                             registrar_log_auditoria(usuario_id, "IMPORT_CSV", f"Importado {arquivo_upload.name}")
-                            for k in ['import_df_processado', 'import_numero_sem_vinculo', 'import_nome_tabela', 'import_tipo', 'import_arquivo_nome']:
+                            for k in ['import_df_processado', 'import_numero_sem_vinculo', 'import_nome_tabela', 'import_tipo', 'import_arquivo_nome', 'import_agent_calls_bytes']:
                                 st.session_state.pop(k, None)
                             st.rerun()
                         else: st.error(f"❌ Erro ao salvar o arquivo: {msg}")
@@ -569,23 +671,21 @@ with aba3:
                         df_temp['Horário inicio atendimento'] = df_temp['Data_Real'].dt.round('min').dt.strftime('%H:%M')
                         df_temp['Horário fim do atendimento'] = df_temp['Data_Fim_Real'].dt.round('min').dt.strftime('%H:%M')
                         
-                        mapa_ramais = {
-                            "5335": "RENATO", "5333": "AGNALDO", "5331": "BRUNO", "5340": "EMIL",
-                            "5332": "DANIEL", "5344": "MARCELO", "5336": "ADILTON", "5339": "LUIS",
-                            "5343": "JOAO", "5341": "GABRIEL", "5338": "RAFAEL NASCIMENTO", "5337": "RAFAEL FREITAS"
-                        }
+                        # Mapa ramal -> nome (inclui especiais: 5366=Caixa Parado, 5365=Chamador, 5364=Jairo; exclui 5355)
+                        mapa_ramal_full = _obter_mapa_ramal_analista()
+                        mapa_ramais = {r: nome for r, (_, nome) in mapa_ramal_full.items()}
 
-                        # 🛡️ SCANNER MULTI-FORMATOS: Trata os ramais independentemente do arquivo GoTo escolhido
                         def identificar_atendente(row):
                             texto_busca = str(row.get('participantes', '')) + " " + str(row.get('telefone_origem', ''))
+                            if "5355" in texto_busca:
+                                return "Sistema / Sem Ramal"
                             for ramal, nome in mapa_ramais.items():
-                                if ramal in texto_busca: return nome
-                                    
+                                if ramal in texto_busca:
+                                    return nome
                             import re
                             match = re.search(r'(?<!\d)(\d{4}):', texto_busca)
                             if not match: match = re.search(r'\((\d{4})\)', texto_busca)
                             if not match: match = re.search(r'(?<!\d)(\d{4})\s', texto_busca)
-                            
                             if match: return f"Ramal {match.group(1)} (Não Cadastrado)"
                             return "Sistema / Sem Ramal"
 
