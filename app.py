@@ -82,7 +82,15 @@ if 'autenticado' not in st.session_state:
 if 'notificacoes_lidas' not in st.session_state:
     st.session_state['notificacoes_lidas'] = []
 
-
+# Oculta sidebar e menus (pages) na tela de login — aplicado cedo para evitar piscar
+if not st.session_state['autenticado']:
+    st.markdown("""
+        <style>
+            [data-testid="collapsedControl"] { display: none !important; }
+            [data-testid="stSidebar"] { display: none !important; }
+            [data-testid="stSidebarNav"], [data-testid="stSidebarNavItems"] { display: none !important; }
+        </style>
+    """, unsafe_allow_html=True)
 
 # ==========================================
 # 3. FUNÇÕES DE DADOS PARA A HOME (CACHED)
@@ -405,13 +413,10 @@ def obter_saudacao() -> str:
 def tela_login() -> None:
     st.markdown("""
         <style>
-            [data-testid="collapsedControl"] {display: none;}
-            [data-testid="stSidebar"] {display: none;}
-            /* Força a centralização de textos dentro de elementos de alerta e captions */
-            .stAlert p, .stCaption {
-                text-align: center;
-                display: block;
-            }
+            [data-testid="collapsedControl"] { display: none !important; }
+            [data-testid="stSidebar"] { display: none !important; }
+            [data-testid="stSidebarNav"], [data-testid="stSidebarNavItems"] { display: none !important; }
+            .stAlert p, .stCaption { text-align: center; display: block; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -446,10 +451,8 @@ def tela_login() -> None:
                         st.session_state['usuario_nome'] = usuario
                         st.session_state['perfil'] = user_perfil 
                         st.session_state['ultimo_acesso'] = datetime.now() 
-                        
                         registrar_log_auditoria(user_id, "LOGIN", "Usuário autenticou-se com sucesso.")
-                        st.success("✅ Login bem-sucedido! Redirecionando...")
-                        st.rerun() 
+                        st.rerun()  # Redireciona imediatamente, sem mostrar mensagem para evitar flash da tela de login
                     else:
                         st.error("❌ Usuário ou senha incorretos. Por favor, tente novamente.")
                 else:
@@ -519,26 +522,21 @@ def tela_home() -> None:
     st.sidebar.markdown(f"### {obter_saudacao()}!")
     st.sidebar.caption(f"🛡️ Perfil: **{perfil_usuario.title()}**")
     st.sidebar.divider()
-    # --- Onboarding / Ajuda rápida (nativo Streamlit) ---
-    st.sidebar.markdown("### 💡 Ajuda rápida")
-    st.sidebar.info(
-        "**Bem-vindo ao WikiSuporte.** Use o **menu no topo** para abrir cada área "
-        "(Dashboards, Importação, Releases, etc.). Esta barra mostra quem está logado e atalhos."
-    )
-    with st.sidebar.expander("🤔 Mini-FAQ"):
+
+    with st.sidebar.expander("🤔 Mini-FAQ — Dúvidas frequentes"):
         st.markdown(
             """
-**Onde começo?**  
-Home → confira alertas. Depois abra **Importação** se for subir relatórios, ou os **Dashboards** para análise.
+**Por onde começo?**  
+Comece pela **Home**: aqui você vê seus alertas do dia (plantão, validações pendentes) e seus indicadores. Se precisar enviar relatórios ou planilhas, use o menu **Importação**. Para analisar atendimentos e chamados, os **Dashboards** estão à sua disposição.
 
-**Como sair?**  
-Use o botão **Sair** abaixo (encerra a sessão neste navegador).
+**Como faço para sair do sistema?**  
+Use o botão **Sair do Sistema** aqui embaixo na barra lateral.
 
-**Não vejo uma página**  
-Algumas telas são só para **coordenação** ou **desenvolvimento** — peça acesso ao gestor.
+**Não consigo ver alguma página ou menu.**  
+Algumas telas são restritas a **Coordenação**. Se achar que deveria ter acesso a alguma área, converse com seu gestor.
 
-**Documentação completa**  
-Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
+**Onde fica a documentação do sistema?**  
+Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A documentação em PDF fica na pasta **Documentação do sistema**, na raiz do projeto.
             """
         )
     st.sidebar.divider()
@@ -584,9 +582,9 @@ Na pasta do projeto: `MANUAL_USUARIO.md` (uso), `DOC_TECNICA.md` (TI).
         )
         with st.expander("🤔 Como usar esta página?"):
             st.markdown(
-                "**Alertas** incluem plantão, validações de release e avisos de **pendente representante** (release + cobrança 7 em 7 dias). "
-                "**Clima** é informativo. Use o **menu superior** para ir a Importação, Dashboards ou Releases. "
-                "Dúvidas: veja **Ajuda rápida** na barra lateral."
+                "**Alertas** incluem plantão, validações de release e avisos  **importantes para o dia a dia ** (release + cobrança 7 em 7 dias). "
+                "**Clima** é informativo. Use o **lateral** para ter acesso as funcionalidades do sistema. "
+                "Dúvidas: Em todas as rotinas o sistema mostrará a seguinte mensagem  ****"
             )
         # --- AJUSTE CIRÚRGICO: CÁLCULO REAL DE ALERTAS ---
         # 1. Desempacotamos a tupla nos dois DataFrames correspondentes
@@ -782,19 +780,6 @@ def renderizar_dashboard_conquistas(kpis):
     c3.write(f"📅 **Última Atividade:** Hoje") # Você pode puxar isso do banco depois
 
 
-    # # --- OS MEUS INDICADORES Contribuições ---
-    # st.subheader("🏆 Meu Desempenho", anchor=False)
-    # col_xp, col_dicas, col_rank = st.columns(3)
-
-    # with col_xp:
-    #     with st.container(border=True):
-    #         st.metric(label="⚡ Meu XP Total", value=f"{kpis.get('meu_xp', 0)} XP", delta="Baseado em aprovações")
-    # with col_dicas:
-    #     with st.container(border=True):
-    #         st.metric(label="📚 Contribuições Oficiais", value=kpis.get('minhas_dicas', 0), delta="Dicas ativas", delta_color="normal")
-    # with col_rank:
-    #     with st.container(border=True):
-    #         st.metric(label="🏅 Posição na Equipe", value=kpis.get('posicao_ranking', 'N/A'), delta="Leaderboard")
 
     # st.divider()
 # ==========================================
