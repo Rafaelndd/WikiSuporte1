@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 import os
-import math
 from datetime import date, datetime, timedelta
+from typing import Any, Dict, Optional
 
 import pandas as pd
 import streamlit as st
@@ -86,6 +86,67 @@ def _to_excel_bytes(df: pd.DataFrame) -> bytes:
     return out.getvalue()
 
 
+def _formatar_cnpj(cnpj: Any) -> str:
+    s = "".join(ch for ch in str(cnpj or "") if ch.isdigit())
+    if len(s) != 14:
+        return str(cnpj or "")
+    return f"{s[:2]}.{s[2:5]}.{s[5:8]}/{s[8:12]}-{s[12:]}"
+
+
+def _formatar_telefone(numero: Any) -> str:
+    s = "".join(ch for ch in str(numero or "") if ch.isdigit())
+    if len(s) == 11:
+        return f"({s[:2]}) {s[2:7]}-{s[7:]}"
+    if len(s) == 10:
+        return f"({s[:2]}) {s[2:6]}-{s[6:]}"
+    return str(numero or "")
+
+
+def _fmt_bool(valor: Any, positivo: str = "Sim", negativo: str = "Não") -> str:
+    return positivo if bool(valor) else negativo
+
+
+def _preparar_df_usuario(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    base = df.copy()
+    base["data_atendimento"] = pd.to_datetime(base["data_atendimento"], errors="coerce")
+    out = pd.DataFrame(
+        {
+            "Data/Hora": base["data_atendimento"].dt.strftime("%d/%m/%Y %H:%M"),
+            "Analista": base["analista"].fillna("-"),
+            "Cliente": base["cliente"].fillna("-"),
+            "CNPJ": base["cnpj"].apply(_formatar_cnpj),
+            "Contato": base["contato"].replace("", "-").fillna("-"),
+            "Telefone": base["telefone"].apply(_formatar_telefone),
+            "Setor": base["setor"].fillna("-"),
+            "Categoria": base["categoria"].fillna("-"),
+            "Criticidade": base["criticidade"].fillna("-"),
+            "Canal": base["canal"].fillna("-"),
+            "Protocolo": base["protocolo"].replace("", "-").fillna("-"),
+            "Duração (min)": base["duracao_min"].fillna(0).astype(int),
+            "Motivo do contato": base["motivo"].fillna("-"),
+            "Solução aplicada": base["solucao"].replace("", "-").fillna("-"),
+            "Status": base["resolvido"].apply(lambda x: _fmt_bool(x, "Resolvido", "Pendente")),
+            "Chamado aberto": base["abriu_chamado"].apply(_fmt_bool),
+            "Nº do chamado": base["nr_chamado"].replace("", "-").fillna("-"),
+        }
+    )
+    if "score_semantico" in base.columns and base["score_semantico"].notna().any():
+        out["Aderência da busca"] = (
+            (base["score_semantico"].fillna(0).clip(lower=0, upper=1) * 100).round(0).astype(int).astype(str) + "%"
+        )
+    return out
+
+
+def _render_kpi_cards(cards: list[tuple[str, str]]) -> None:
+    if not cards:
+        return
+    cols = st.columns(len(cards))
+    for col, (label, value) in zip(cols, cards):
+        col.metric(label, value)
+
+
 def _to_pdf_bytes(
     df: pd.DataFrame,
     report_type: str = "Relatório de Atendimentos",
@@ -110,47 +171,37 @@ def _to_pdf_bytes(
     page_w, page_h = landscape(A4)
     c = canvas.Canvas(arquivo, pagesize=landscape(A4))
 
-    # Colunas para relatório em PDF (organizado para leitura)
+    # Colunas amigáveis para usuário final (sem IDs técnicos)
     cols = [
-        "id_atendimento",
-        "data_atendimento",
-        "analista",
-        "cliente",
-        "setor",
-        "categoria",
-        "criticidade",
-        "canal",
-        "resolvido",
+        "Data/Hora",
+        "Analista",
+        "Cliente",
+        "Categoria",
+        "Criticidade",
+        "Canal",
+        "Status",
+        "Chamado aberto",
     ]
-    cols_existentes = [col for col in cols if col in df.columns]
-    pdf_df = df[cols_existentes].copy()
-    if "data_atendimento" in pdf_df.columns:
-        dt = pd.to_datetime(pdf_df["data_atendimento"], errors="coerce")
-        if getattr(dt.dt, "tz", None) is not None:
-            dt = dt.dt.tz_localize(None)
-        pdf_df["data_atendimento"] = dt.dt.strftime("%d/%m/%Y %H:%M").fillna("")
-    if "resolvido" in pdf_df.columns:
-        pdf_df["resolvido"] = pdf_df["resolvido"].map(lambda x: "Sim" if bool(x) else "Não")
+    pdf_df = df[[col for col in cols if col in df.columns]].copy()
 
     # Limita tamanho textual para caber na página
     for col in pdf_df.columns:
         pdf_df[col] = pdf_df[col].astype(str).str.slice(0, 48)
 
-    rows_per_page = 22
+    rows_per_page = 24
     total_rows = len(pdf_df)
-    total_pages = max(1, math.ceil(total_rows / rows_per_page))
+    total_pages = max(1, (total_rows + rows_per_page - 1) // rows_per_page)
 
     # Larguras de coluna em milímetros (proporção visual)
     col_width_map = {
-        "id_atendimento": 18,
-        "data_atendimento": 34,
-        "analista": 32,
-        "cliente": 68,
-        "setor": 25,
-        "categoria": 52,
-        "criticidade": 24,
-        "canal": 32,
-        "resolvido": 18,
+        "Data/Hora": 34,
+        "Analista": 32,
+        "Cliente": 68,
+        "Categoria": 52,
+        "Criticidade": 24,
+        "Canal": 32,
+        "Status": 22,
+        "Chamado aberto": 26,
     }
     col_widths = [col_width_map.get(col, 25) * mm for col in pdf_df.columns]
 
@@ -344,75 +395,124 @@ with tab_consulta:
     ini_default = hoje - timedelta(days=30)
 
     with st.container(border=True):
-        f1, f2, f3, f4 = st.columns([1, 1, 1.2, 1.2])
-        data_ini = f1.date_input("Data inicial", value=ini_default, key="f_data_ini")
-        data_fim = f2.date_input("Data final", value=hoje, key="f_data_fim")
-        setor_f = f3.selectbox("Setor", ["Todos", "Suporte Geral", "TEF"], key="f_setor")
-        canal_f = f4.selectbox("Canal", ["Todos"] + CANAIS_PADRAO, key="f_canal")
+        with st.form("filtro_consulta_atendimentos", clear_on_submit=False):
+            f1, f2, f3, f4 = st.columns([1, 1, 1.2, 1.2])
+            data_ini = f1.date_input("Data inicial", value=ini_default, key="f_data_ini")
+            data_fim = f2.date_input("Data final", value=hoje, key="f_data_fim")
+            setor_f = f3.selectbox("Setor", ["Todos", "Suporte Geral", "TEF"], key="f_setor")
+            canal_f = f4.selectbox("Canal", ["Todos"] + CANAIS_PADRAO, key="f_canal")
 
-        busca_sem = st.text_input(
-            "Busca semântica por assunto/motivo/solução",
-            key="f_semantica",
-            placeholder="Ex.: problema TEF em fechamento no mês passado",
-        )
+            busca_sem = st.text_input(
+                "Busca semântica por assunto/motivo/solução",
+                key="f_semantica",
+                placeholder="Ex.: problema TEF em fechamento no mês passado",
+            )
 
-        cli_termo = st.text_input("Filtrar cliente por nome/CNPJ/alias", key="f_cli_termo")
-        cli_df = listar_clientes(cli_termo, limite=50)
-        cli_opts = {"Todos": None}
-        for _, r in cli_df.iterrows():
-            label = f"{r['razao_social']} ({r['cnpj'] or 'sem CNPJ'})"
-            cli_opts[label] = int(r["id_cliente"])
-        cliente_lbl = st.selectbox("Cliente", list(cli_opts.keys()), key="f_cliente")
-        cliente_id = cli_opts[cliente_lbl]
+            cli_termo = st.text_input("Filtrar cliente por nome/CNPJ/alias", key="f_cli_termo")
+            cli_df = listar_clientes(cli_termo, limite=50)
+            cli_opts: Dict[str, Optional[int]] = {"Todos": None}
+            for _, r in cli_df.iterrows():
+                label = f"{r['razao_social']} ({r['cnpj'] or 'sem CNPJ'})"
+                cli_opts[label] = int(r["id_cliente"])
+            cliente_lbl = st.selectbox("Cliente", list(cli_opts.keys()), key="f_cliente")
+            cliente_id = cli_opts[cliente_lbl]
 
-        analistas_df = _carregar_analistas_ativos()
-        analista_id = None
-        if perfil in ("coordenador", "dev", "supervisor") and not analistas_df.empty:
-            dic_analistas = {"Todos": None}
-            for _, r in analistas_df.iterrows():
-                dic_analistas[f"{r['nome']} ({r['perfil_norm']})"] = int(r["id"])
-            analista_lbl = st.selectbox("Analista", list(dic_analistas.keys()), key="f_analista")
-            analista_id = dic_analistas[analista_lbl]
+            analistas_df = _carregar_analistas_ativos()
+            analista_id = None
+            if perfil in ("coordenador", "dev", "supervisor") and not analistas_df.empty:
+                dic_analistas: Dict[str, Optional[int]] = {"Todos": None}
+                for _, r in analistas_df.iterrows():
+                    dic_analistas[f"{r['nome']} ({r['perfil_norm']})"] = int(r["id"])
+                analista_lbl = st.selectbox("Analista", list(dic_analistas.keys()), key="f_analista")
+                analista_id = dic_analistas[analista_lbl]
 
-        buscar = st.button("Buscar", type="primary", use_container_width=True)
+            b1, b2 = st.columns([2, 1])
+            buscar = b1.form_submit_button("Buscar", type="primary", use_container_width=True)
+            limpar = b2.form_submit_button("Limpar filtros", use_container_width=True)
 
+    if limpar:
+        for k in [
+            "f_data_ini",
+            "f_data_fim",
+            "f_setor",
+            "f_canal",
+            "f_semantica",
+            "f_cli_termo",
+            "f_cliente",
+            "f_analista",
+            "df_consulta_atend",
+            "consulta_realizada_p8",
+        ]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    # Consulta só roda quando o usuário clica em Buscar (garante uso do termo digitado)
     if buscar:
-        df = consultar_atendimentos(
-            usuario_id=usuario_id,
-            perfil=perfil,
-            data_ini=data_ini,
-            data_fim=data_fim,
-            cliente_id=cliente_id,
-            setor=setor_f,
-            canal=canal_f,
-            analista_id=analista_id,
-            busca_semantica=busca_sem,
-            limite=1000,
-        )
-        st.session_state["df_consulta_atend"] = df
+        if data_ini > data_fim:
+            st.error("A data inicial não pode ser maior que a data final.")
+        else:
+            df = consultar_atendimentos(
+                usuario_id=usuario_id,
+                perfil=perfil,
+                data_ini=data_ini,
+                data_fim=data_fim,
+                cliente_id=cliente_id,
+                setor=setor_f,
+                canal=canal_f,
+                analista_id=analista_id,
+                busca_semantica=(busca_sem or "").strip(),
+                limite=1000,
+            )
+            st.session_state["df_consulta_atend"] = df
+            st.session_state["consulta_realizada_p8"] = True
 
-    df_result = st.session_state.get("df_consulta_atend", pd.DataFrame())
-    if df_result.empty:
-        st.info("Nenhum atendimento encontrado para os filtros selecionados.")
+    df_result = st.session_state.get("df_consulta_atend")
+    if df_result is None:
+        st.info("Defina os filtros (período, setor, canal, cliente, etc.) e clique em **Buscar** para listar os atendimentos.")
+    elif df_result.empty:
+        st.warning("Nenhum atendimento encontrado para os filtros e o termo de busca informados. Ajuste o período, o termo ou os filtros e clique em **Buscar** novamente.")
     else:
         m = metricas_resumo(df_result)
-        mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-        mc1.metric("Total", m["total"])
-        mc2.metric("Dia", m["dia"])
-        mc3.metric("Semana", m["semana"])
-        mc4.metric("Mês", m["mes"])
-        mc5.metric("Ano", m["ano"])
+        perc_resolvidos = float(df_result["resolvido"].fillna(False).mean() * 100) if "resolvido" in df_result else 0.0
+        media_duracao = float(df_result["duracao_min"].fillna(0).mean()) if "duracao_min" in df_result else 0.0
+        qtd_chamados = int(df_result["abriu_chamado"].fillna(False).sum()) if "abriu_chamado" in df_result else 0
+        _render_kpi_cards(
+            [
+                ("Total", str(m["total"])),
+                ("Resolvidos", f"{perc_resolvidos:.1f}%"),
+                ("Tempo médio", f"{media_duracao:.0f} min"),
+                ("Com chamado", str(qtd_chamados)),
+                ("No mês", str(m["mes"])),
+            ]
+        )
 
-        st.dataframe(df_result, hide_index=True, use_container_width=True)
+        st.markdown("#### Resultados para usuário final")
+        df_view = _preparar_df_usuario(df_result)
+        st.dataframe(df_view, hide_index=True, use_container_width=True)
         try:
             periodo_txt = f"{data_ini.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}"
             pdf_bytes = _to_pdf_bytes(
-                df_result,
+                df_view,
                 report_type="Relatório de Atendimentos",
                 periodo=periodo_txt,
                 emitido_por=nome_usuario,
             )
-            st.download_button(
+            exp1, exp2, exp3 = st.columns(3)
+            exp1.download_button(
+                "📥 Exportar Excel",
+                data=_to_excel_bytes(df_view),
+                file_name=f"atendimentos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+            exp2.download_button(
+                "📥 Exportar CSV",
+                data=df_view.to_csv(index=False).encode("utf-8"),
+                file_name=f"atendimentos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            exp3.download_button(
                 "📄 Exportar PDF",
                 data=pdf_bytes,
                 file_name=f"atendimentos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
@@ -424,9 +524,18 @@ with tab_consulta:
 
         st.markdown("### ✏️ Editar atendimento")
         edf = df_result[["id_atendimento", "data_atendimento", "cliente", "setor", "categoria", "canal", "motivo"]].copy()
-        choices = [f"#{int(r.id_atendimento)} | {r.cliente} | {r.data_atendimento}" for r in edf.itertuples(index=False)]
+        choices = []
+        id_por_label: Dict[str, int] = {}
+        for r in edf.itertuples(index=False):
+            dt = pd.to_datetime(r.data_atendimento, errors="coerce")
+            dt_txt = dt.strftime("%d/%m/%Y %H:%M") if pd.notna(dt) else "-"
+            label = f"{dt_txt} | {r.cliente} | {r.categoria} ({r.canal})"
+            if label in id_por_label:
+                label = f"{label} | ref {int(r.id_atendimento)}"
+            id_por_label[label] = int(r.id_atendimento)
+            choices.append(label)
         escolha = st.selectbox("Selecione o atendimento", choices, key="ed_sel")
-        id_editar = int(escolha.split("|")[0].strip().replace("#", ""))
+        id_editar = id_por_label[escolha]
         row = df_result[df_result["id_atendimento"] == id_editar].iloc[0]
 
         with st.form("form_editar_atendimento"):
@@ -495,14 +604,31 @@ with tab_consulta:
 if tab_gestao:
     with tab_gestao:
         st.subheader("Visão Consolidada de Gestão")
+        st.caption("Indicadores de performance, volume e qualidade para acompanhamento diário.")
+        g1, g2, g3 = st.columns([1, 1, 1.2])
+        periodo = g1.selectbox("Período", ["30 dias", "90 dias", "180 dias", "365 dias", "Personalizado"], index=1)
+        setor_g = g2.selectbox("Setor", ["Todos", "Suporte Geral", "TEF"], key="g_setor")
+        canal_g = g3.selectbox("Canal", ["Todos"] + CANAIS_PADRAO, key="g_canal")
+        ini_g = date.today() - timedelta(days=90)
+        fim_g = date.today()
+        if periodo == "30 dias":
+            ini_g = date.today() - timedelta(days=30)
+        elif periodo == "180 dias":
+            ini_g = date.today() - timedelta(days=180)
+        elif periodo == "365 dias":
+            ini_g = date.today() - timedelta(days=365)
+        elif periodo == "Personalizado":
+            p1, p2 = st.columns(2)
+            ini_g = p1.date_input("Data inicial da gestão", value=date.today() - timedelta(days=90), key="g_data_ini")
+            fim_g = p2.date_input("Data final da gestão", value=date.today(), key="g_data_fim")
         df_g = consultar_atendimentos(
             usuario_id=usuario_id,
             perfil=perfil,
-            data_ini=date.today() - timedelta(days=3650),
-            data_fim=date.today(),
+            data_ini=ini_g,
+            data_fim=fim_g,
             cliente_id=None,
-            setor="Todos",
-            canal="Todos",
+            setor=setor_g,
+            canal=canal_g,
             analista_id=None,
             busca_semantica="",
             limite=10000,
@@ -511,12 +637,19 @@ if tab_gestao:
             st.info("Sem registros para consolidar.")
         else:
             m = metricas_resumo(df_g)
-            k1, k2, k3, k4, k5 = st.columns(5)
-            k1.metric("Total geral", m["total"])
-            k2.metric("Hoje", m["dia"])
-            k3.metric("Semana", m["semana"])
-            k4.metric("Mês", m["mes"])
-            k5.metric("Ano", m["ano"])
+            perc_resolvidos = float(df_g["resolvido"].fillna(False).mean() * 100) if "resolvido" in df_g else 0.0
+            media_duracao = float(df_g["duracao_min"].fillna(0).mean()) if "duracao_min" in df_g else 0.0
+            clientes_unicos = int(df_g["cliente"].nunique()) if "cliente" in df_g else 0
+            analistas_ativos = int(df_g["analista"].nunique()) if "analista" in df_g else 0
+            _render_kpi_cards(
+                [
+                    ("Total geral", str(m["total"])),
+                    ("Resolvidos", f"{perc_resolvidos:.1f}%"),
+                    ("Tempo médio", f"{media_duracao:.0f} min"),
+                    ("Clientes únicos", str(clientes_unicos)),
+                    ("Analistas ativos", str(analistas_ativos)),
+                ]
+            )
 
             top_clientes, top_motivos = ranking_clientes_motivos(df_g, top_n=10)
             c1, c2 = st.columns(2)
@@ -532,3 +665,34 @@ if tab_gestao:
             por_dia = serie.groupby("data").size().reset_index(name="total")
             st.markdown("#### Volume de atendimentos por dia")
             st.line_chart(por_dia.set_index("data")["total"])
+            c3, c4 = st.columns(2)
+            with c3:
+                st.markdown("#### Distribuição por canal")
+                por_canal = (
+                    df_g.groupby("canal", dropna=False)
+                    .size()
+                    .reset_index(name="total")
+                    .sort_values("total", ascending=False)
+                    .head(10)
+                )
+                st.bar_chart(por_canal.set_index("canal")["total"])
+            with c4:
+                st.markdown("#### Distribuição por criticidade")
+                por_criticidade = (
+                    df_g.groupby("criticidade", dropna=False)
+                    .size()
+                    .reset_index(name="total")
+                    .sort_values("total", ascending=False)
+                )
+                st.bar_chart(por_criticidade.set_index("criticidade")["total"])
+
+            st.markdown("#### Qualidade operacional")
+            qual = pd.DataFrame(
+                [
+                    {"Indicador": "Taxa de resolução", "Valor": f"{perc_resolvidos:.1f}%"},
+                    {"Indicador": "Tempo médio por atendimento", "Valor": f"{media_duracao:.0f} min"},
+                    {"Indicador": "Atendimentos no período", "Valor": str(m["total"])},
+                    {"Indicador": "Atendimentos com chamado aberto", "Valor": str(int(df_g['abriu_chamado'].fillna(False).sum()))},
+                ]
+            )
+            st.dataframe(qual, hide_index=True, use_container_width=True)

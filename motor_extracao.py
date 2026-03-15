@@ -4,6 +4,7 @@ import re
 import sys
 import logging
 
+
 # Windows: evita UnicodeEncodeError no console ao logar/imprimir emoji
 if sys.platform == "win32":
     for _stream in (sys.stdout, sys.stderr):

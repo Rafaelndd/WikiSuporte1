@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from modules.database import get_connection
 from services.embedding_service import generate_embedding
+from services.vector_db import gerar_embedding_gemini
 
 try:
     from modules.processador_csv import gerar_hash_lgpd
@@ -422,11 +423,12 @@ def _salvar_anexos(id_atendimento: int, arquivos: List[Any]) -> List[Tuple[str, 
 
 
 def _registrar_embedding(conn: Any, id_atendimento: int, motivo: str, solucao: str) -> None:
+    """Registra embedding do atendimento (768 dim, Gemini) para busca semântica."""
     resumo = f"{(motivo or '').strip()} {(solucao or '').strip()}".strip()
     if not resumo:
         return
-    emb = generate_embedding(resumo[:4000])
-    if not emb:
+    emb = gerar_embedding_gemini(resumo[:4000])
+    if not emb or len(emb) != 768:
         return
     emb_sql = _emb_to_sql(emb)
     conn.execute(
@@ -736,6 +738,24 @@ def _montar_where_filtros(
     return " WHERE " + " AND ".join(where), params
 
 
+def _clausula_busca_texto(busca_semantica: str) -> Tuple[str, str, Dict[str, Any]]:
+    """Retorna (clausula_completa, condicoes_internas, params) para busca por texto em vários campos."""
+    termo = (busca_semantica or "").strip()
+    if not termo:
+        return "", "", {}
+    qtxt = f"%{termo}%"
+    inner = (
+        "a.motivo ILIKE :qtxt "
+        "OR COALESCE(a.solucao, '') ILIKE :qtxt "
+        "OR COALESCE(a.categoria, '') ILIKE :qtxt "
+        "OR COALESCE(a.setor, '') ILIKE :qtxt "
+        "OR COALESCE(a.canal, '') ILIKE :qtxt "
+        "OR c.razao_social ILIKE :qtxt"
+    )
+    full = " AND (" + inner + ")"
+    return full, inner, {"qtxt": qtxt}
+
+
 def consultar_atendimentos(
     usuario_id: Optional[int],
     perfil: str,
@@ -755,18 +775,27 @@ def consultar_atendimentos(
         usuario_id, perfil, data_ini, data_fim, cliente_id, setor, canal, analista_id
     )
 
-    emb = None
+    # Busca por texto: motivo, solucao, categoria, setor, canal, cliente
     busca_semantica = (busca_semantica or "").strip()
+    text_full, text_inner, text_params = _clausula_busca_texto(busca_semantica)
+    if text_params:
+        params.update(text_params)
+
+    # Busca vetorial (Gemini 768) quando há termo e API disponível
+    emb = None
     if busca_semantica:
         try:
-            emb = generate_embedding(busca_semantica[:3000])
+            emb = gerar_embedding_gemini(busca_semantica[:3000])
         except Exception:
+            emb = None
+        if emb is not None and len(emb) != 768:
             emb = None
 
     if emb:
         params["emb"] = _emb_to_sql(emb)
-        params["qtxt"] = f"%{busca_semantica}%"
         params["lim"] = limite
+        # Retorna todos que têm embedding OU que batem no texto
+        where_com_busca = where_sql + " AND (e.embedding IS NOT NULL OR " + text_inner + ")"
         sql = text(
             f"""
             SELECT
@@ -795,12 +824,7 @@ def consultar_atendimentos(
             LEFT JOIN clientes_telefones t ON t.{telefone_pk_col} = a.telefone_id
             LEFT JOIN usuarios u ON u.id = a.usuario_id
             LEFT JOIN atendimentos_embeddings e ON e.atendimento_id = a.id_atendimento
-            {where_sql}
-              AND (
-                e.embedding IS NOT NULL
-                OR a.motivo ILIKE :qtxt
-                OR COALESCE(a.solucao, '') ILIKE :qtxt
-              )
+            {where_com_busca}
             ORDER BY
               CASE WHEN e.embedding IS NULL THEN 1 ELSE 0 END,
               e.embedding <=> CAST(:emb AS vector),
@@ -809,9 +833,8 @@ def consultar_atendimentos(
             """
         )
     else:
-        if busca_semantica:
-            where_sql += " AND (a.motivo ILIKE :qtxt OR COALESCE(a.solucao, '') ILIKE :qtxt)"
-            params["qtxt"] = f"%{busca_semantica}%"
+        if text_full:
+            where_sql += text_full
         params["lim"] = limite
         sql = text(
             f"""
@@ -845,8 +868,49 @@ def consultar_atendimentos(
             LIMIT :lim
             """
         )
-    with engine.connect() as conn:
-        return pd.read_sql(sql, conn, params=params)
+    try:
+        with engine.connect() as conn:
+            return pd.read_sql(sql, conn, params=params)
+    except Exception:
+        if emb and text_full:
+            params.pop("emb", None)
+            where_sql_fb = where_sql + text_full
+            params["lim"] = limite
+            sql_fb = text(
+                f"""
+                SELECT
+                    a.id_atendimento,
+                    a.data_atendimento,
+                    COALESCE(u.nome, a.nome_analista, 'Sem nome') AS analista,
+                    c.razao_social AS cliente,
+                    c.cnpj,
+                    COALESCE(ct.nome_contato, '') AS contato,
+                    COALESCE(t.numero, '') AS telefone,
+                    a.setor,
+                    a.categoria,
+                    a.criticidade,
+                    a.canal,
+                    a.protocolo,
+                    a.duracao_min,
+                    a.motivo,
+                    a.solucao,
+                    a.resolvido,
+                    a.abriu_chamado,
+                    a.nr_chamado,
+                    NULL::float AS score_semantico
+                FROM atendimentos_registrados a
+                JOIN clientes_crm c ON c.id_cliente = a.cliente_id
+                LEFT JOIN clientes_contatos ct ON ct.id = a.contato_id
+                LEFT JOIN clientes_telefones t ON t.{telefone_pk_col} = a.telefone_id
+                LEFT JOIN usuarios u ON u.id = a.usuario_id
+                {where_sql_fb}
+                ORDER BY a.data_atendimento DESC
+                LIMIT :lim
+                """
+            )
+            with engine.connect() as conn:
+                return pd.read_sql(sql_fb, conn, params=params)
+        raise
 
 
 def listar_anexos_atendimento(id_atendimento: int) -> pd.DataFrame:
