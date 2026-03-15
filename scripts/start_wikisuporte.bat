@@ -1,8 +1,8 @@
 @echo off
 title Inicializador do WikiSuporte (Streamlit)
 
-:: 1. Navega até à pasta raiz do sistema
-cd /d "C:\WikiSuporte"
+:: 1. Navega até à pasta raiz do projeto (pasta pai do scripts)
+cd /d "%~dp0.."
 
 :: 2. Regista a data e hora exatas da tentativa de arranque 
 :: O operador ">" na primeira linha garante que o ficheiro antigo seja limpo

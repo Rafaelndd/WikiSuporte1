@@ -7,12 +7,12 @@ import psycopg2
 
 load_dotenv()
 
-# --- CONFIGURAÇÕES DO BANCO DE DADOS ---
-DB_USER = os.getenv("DB_USER", "postgres")   
-DB_PASS = os.getenv("DB_PASS") 
+# --- CONFIGURAÇÕES DO BANCO DE DADOS (alinhado a config.py para produção) ---
 DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5455")   
+DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "central_chamados")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASS = os.getenv("DB_PASS")
 
 # Monta a string de conexão no padrão exigido pelo SQLAlchemy
 connection_string = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
@@ -46,9 +46,6 @@ def carregar_dados_sql(query):
     except Exception as e:
         print(f"Erro ao ler dados do banco: {e}")
         return pd.DataFrame()  # Retorna um DataFrame vazio em caso de erro
-
-def get_connection():
-    return engine_global
 
 def get_engine():
     return engine_global

@@ -31,7 +31,7 @@ class Config:
     GOTO_CLIENT_SECRET = os.getenv("GOTO_CLIENT_SECRET", "")
 
     # --- CONFIGURAÇÕES DO SISTEMA ---
-    # Resolve o bug do booleano: Converte a string "True" ou "False" para o tipo Boolean real do Python
-    _headless_str = os.getenv("MODO_HEADLESS", "False").lower()
-    MODO_HEADLESS = _headless_str == "false"
+    # Converte a string "True" ou "False" do .env para boolean: True = navegador oculto (headless)
+    _headless_str = os.getenv("MODO_HEADLESS", "False").strip().lower()
+    MODO_HEADLESS = _headless_str in ("true", "1", "yes")
 # ... (outras configurações)
