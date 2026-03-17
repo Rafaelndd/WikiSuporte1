@@ -14,11 +14,11 @@ import tempfile
 import openmeteo_requests
 import requests_cache
 import numpy as np
+import streamlit.components.v1 as components
+
 from config import Config
 from datetime import datetime, timedelta
-
-
-
+from datetime import datetime
 from retry_requests import retry
 from datetime import datetime, timedelta
 from sqlalchemy import text
@@ -34,31 +34,34 @@ from services.ui_realtime import (
     show_gamification_upgrade_card,
 )
 
-
-
-
 #======================================================================================================================#
 
 #*** Carrega variáveis de ambiente (DB_HOST, DB_NAME, DB_USER, DB_PASS) ***#
 load_dotenv()
 
 #======================================================================================================================#
+import os
+import logging
 
-# Configura o registro de logs: define destino (arquivo), modo de escrita (anexo) e formato da mensagem
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+pasta_logs = os.path.join(BASE_DIR, "logs")
+# Garante que a pasta de logs existe
 pasta_logs = "logs"
-if not os.path.exists(pasta_logs):
-    os.makedirs(pasta_logs)
+os.makedirs(pasta_logs, exist_ok=True)
+
+# Define caminho do arquivo
 caminho_do_log = os.path.join(pasta_logs, "sistema.log")
 
+# Configura logging
 logging.basicConfig(
-    filename= caminho_do_log,
-    filemode='a',               
-    format='%(asctime)s - %(levelname)s - %(message)s', 
-    level=logging.INFO          
+    filename=caminho_do_log,
+    filemode="a",
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    force=True   # importante para Streamlit
 )
 
-logging.info("--- Aplicação iniciada e logs configurados  ---")
+logging.info("--- Aplicação iniciada e logs configurados ---")
 
 #======================================================================================================================#
 # Tenta importar a função de auditoria (Ajuste o caminho se necessário)
@@ -95,18 +98,18 @@ if not st.session_state['autenticado']:
 # ==========================================
 # 3. FUNÇÕES DE DADOS PARA A HOME (CACHED)
 # ==========================================
-@st.cache_data(ttl=300) 
+@st.cache_data(ttl=600, show_spinner=False) 
 def obter_alertas_usuario(usuario_id: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Busca alertas de plantão e validações pendentes para o usuário logado.
-    Refatorado para utilizar context manager na conexão, garantindo estabilidade no Pandas.
+    Totalmente otimizado com Connection Pooling e Cache Seguro (sem UI).
     """
     if not usuario_id:
         return pd.DataFrame(), pd.DataFrame()
 
     engine = get_connection()
     try:
-        # Uso do context manager para garantir que a conexão seja fechada corretamente
+        # Context manager: Garante que a conexão volta para o Pool imediatamente após o uso
         with engine.connect() as conn:
             query_plantao = text("""
                 SELECT data_hora_entrada, data_hora_saida 
@@ -129,39 +132,13 @@ def obter_alertas_usuario(usuario_id: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
             return df_plantao, df_release
             
     except Exception as e:
-        logging.error(f"Erro ao buscar alertas no banco de dados para o usuário {usuario_id}: {e}")
-        st.error(f"Erro ao buscar alertas no banco de dados. Contate o administrador.")
+        # Grava o erro silenciosamente nos logs do servidor para o Dev ver, 
+        # mas NÃO desenha nada na tela do usuário aqui dentro do cache!
+        logging.error(f"Erro ao buscar alertas no BD para o usuário {usuario_id}: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-# @st.cache_data(ttl=300)
-# def obter_kpis_home(usuario_id):
-#     """Busca os dados de gamificação do analista."""
-#     engine = get_connection()
-#     kpis = {
-#         "minhas_dicas": 0, "meu_xp": 0, "posicao_ranking": "-"
-#     }
-#     try:
-#         with engine.connect() as conn:
-#             query_dicas = text("SELECT COUNT(id) FROM base_conhecimento WHERE id_analista_autor = :uid AND status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE'")
-#             kpis["minhas_dicas"] = conn.execute(query_dicas, {"uid": usuario_id}).scalar() or 0
-#             kpis["meu_xp"] = kpis["minhas_dicas"] * 50
-            
-#             query_rank = text("""
-#                 WITH Ranking AS (
-#                     SELECT id_analista_autor, COUNT(id) as total,
-#                            RANK() OVER(ORDER BY COUNT(id) DESC) as posicao
-#                     FROM base_conhecimento WHERE status = 'APROVADO' AND origem = 'CONHECIMENTO_SUPORTE' GROUP BY id_analista_autor
-#                 )
-#                 SELECT posicao FROM Ranking WHERE id_analista_autor = :uid
-#             """)
-#             rank_result = conn.execute(query_rank, {"uid": usuario_id}).scalar()
-#             if rank_result: kpis["posicao_ranking"] = f"{rank_result}º Lugar"
-            
-#     except Exception as e:
-#         st.error(f"Erro ao carregar KPIs: {e}")
-#     return kpis
 
-#@st.cache_data(ttl=300)
+@st.cache_data(ttl=300)
 def obter_kpis_home(usuario_id):
     engine = get_connection()
     kpis = {
@@ -270,121 +247,121 @@ def verificar_login(username: str, senha_digitada: str) -> Tuple[bool, Optional[
 # O TTL=3600 significa que o sistema só vai na internet buscar o clima a cada 1 hora (3600 segundos).
 # Nos outros acessos, ele pega da memória RAM do servidor, ficando instantâneo!
 # --- 1. CONFIGURAÇÃO DO CLIENTE OPEN-METEO (GLOBAL) ---
-cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
-retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
-openmeteo = openmeteo_requests.Client(session=retry_session)
+#cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
+#retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+#openmeteo = openmeteo_requests.Client(session=retry_session)
 
 # --- MAPEAMENTO DOS CÓDIGOS DE CLIMA ---
-CODIGOS_CLIMA = {
-    0: {"texto": "Céu limpo", "icone": "☀️", "alerta": False},
-    1: {"texto": "Principalmente limpo", "icone": "🌤️", "alerta": False},
-    2: {"texto": "Parcialmente nublado", "icone": "⛅", "alerta": False},
-    3: {"texto": "Nublado", "icone": "☁️", "alerta": False},
-    45: {"texto": "Neblina", "icone": "🌫️", "alerta": False},
-    48: {"texto": "Neblina com geada", "icone": "🌫️❄️", "alerta": False},
-    51: {"texto": "Chuvisco leve", "icone": "🌦️", "alerta": False},
-    53: {"texto": "Chuvisco moderado", "icone": "🌦️", "alerta": False},
-    55: {"texto": "Chuvisco intenso", "icone": "🌧️", "alerta": True},
-    61: {"texto": "Chuva leve", "icone": "🌧️", "alerta": False},
-    63: {"texto": "Chuva moderada", "icone": "🌧️", "alerta": False},
-    65: {"texto": "Chuva pesada", "icone": "🌧️", "alerta": True},
-    71: {"texto": "Neve leve", "icone": "🌨️", "alerta": False},
-    73: {"texto": "Neve moderada", "icone": "🌨️", "alerta": False},
-    75: {"texto": "Neve pesada", "icone": "🌨️", "alerta": True},
-    80: {"texto": "Pancadas de chuva leves", "icone": "🌦️", "alerta": False},
-    81: {"texto": "Pancadas de chuva moderadas", "icone": "🌧️", "alerta": False},
-    82: {"texto": "Pancadas de chuva violentas", "icone": "🌧️", "alerta": True},
-    95: {"texto": "Tempestade", "icone": "⛈️", "alerta": True},
-    96: {"texto": "Tempestade com granizo leve", "icone": "⛈️🌨️", "alerta": True},
-    99: {"texto": "Tempestade com granizo pesado", "icone": "⛈️🌨️", "alerta": True},
-}
+#CODIGOS_CLIMA = {
+#    0: {"texto": "Céu limpo", "icone": "☀️", "alerta": False},
+#    1: {"texto": "Principalmente limpo", "icone": "🌤️", "alerta": False},
+#    2: {"texto": "Parcialmente nublado", "icone": "⛅", "alerta": False},
+#    3: {"texto": "Nublado", "icone": "☁️", "alerta": False},
+#    45: {"texto": "Neblina", "icone": "🌫️", "alerta": False},
+#    48: {"texto": "Neblina com geada", "icone": "🌫️❄️", "alerta": False},
+#    51: {"texto": "Chuvisco leve", "icone": "🌦️", "alerta": False},
+#    53: {"texto": "Chuvisco moderado", "icone": "🌦️", "alerta": False},
+#    55: {"texto": "Chuvisco intenso", "icone": "🌧️", "alerta": True},
+#    61: {"texto": "Chuva leve", "icone": "🌧️", "alerta": False},
+#    63: {"texto": "Chuva moderada", "icone": "🌧️", "alerta": False},
+#    65: {"texto": "Chuva pesada", "icone": "🌧️", "alerta": True},
+#    71: {"texto": "Neve leve", "icone": "🌨️", "alerta": False},
+#    73: {"texto": "Neve moderada", "icone": "🌨️", "alerta": False},
+ #   75: {"texto": "Neve pesada", "icone": "🌨️", "alerta": True},
+ #   80: {"texto": "Pancadas de chuva leves", "icone": "🌦️", "alerta": False},
+ #   81: {"texto": "Pancadas de chuva moderadas", "icone": "🌧️", "alerta": False},
+ #   82: {"texto": "Pancadas de chuva violentas", "icone": "🌧️", "alerta": True},
+  #  95: {"texto": "Tempestade", "icone": "⛈️", "alerta": True},
+  #  96: {"texto": "Tempestade com granizo leve", "icone": "⛈️🌨️", "alerta": True},
+   # 99: {"texto": "Tempestade com granizo pesado", "icone": "⛈️🌨️", "alerta": True},
+#}
 
 # --- FUNÇÃO DE CONSUMO À API (COM CACHE DO STREAMLIT) ---
-@st.cache_data(ttl=3600)   # <-- decorador agora aplicado corretamente
-def obter_previsao_tempo(lat="-28.935", lon="-49.486"):
-    """
-    Obtém dados meteorológicos atuais da API Open-Meteo usando o cliente global.
-    """
-    url = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": float(lat),
-        "longitude": float(lon),
-        "current": [
-            "weather_code", "cloud_cover", "precipitation", "rain",
-            "showers", "is_day", "apparent_temperature",
-            "relative_humidity_2m", "temperature_2m", "wind_speed_10m",
-            "wind_gusts_10m", "wind_direction_10m"
-        ],
-        "forecast_days": 1
-    }
-
-    try:
-        responses = openmeteo.weather_api(url, params=params)
-        response = responses[0]
-        current = response.Current()
-
-        # Extrai os valores na mesma ordem dos parâmetros
-        current_weather_code = current.Variables(0).Value()
-        current_cloud_cover = current.Variables(1).Value()
-        current_precipitation = current.Variables(2).Value()
-        current_rain = current.Variables(3).Value()
-        current_showers = current.Variables(4).Value()
-        current_is_day = current.Variables(5).Value()
-        current_apparent_temperature = current.Variables(6).Value()
-        current_relative_humidity_2m = current.Variables(7).Value()
-        current_temperature_2m = current.Variables(8).Value()
-        current_wind_speed_10m = current.Variables(9).Value()
-        current_wind_gusts_10m = current.Variables(10).Value()
-        current_wind_direction_10m = current.Variables(11).Value()
-
-        info_condicao = CODIGOS_CLIMA.get(int(current_weather_code), {"texto": "Desconhecido", "icone": "❓", "alerta": False})
-
-        alertas = [{"event": "Condição severa detectada", "description": info_condicao["texto"]}] if info_condicao["alerta"] else []
-
-        return {
-            "temperature": current_temperature_2m,
-            "windspeed": current_wind_speed_10m,
-            "condicao_texto": info_condicao["texto"],
-            "icone_url": info_condicao["icone"],
-            "alertas": alertas,
-            # campos extras (opcionais)
-            "weather_code": current_weather_code,
-            "cloud_cover": current_cloud_cover,
-            "precipitation": current_precipitation,
-            "rain": current_rain,
-            "showers": current_showers,
-            "is_day": current_is_day,
-            "apparent_temperature": current_apparent_temperature,
-            "relative_humidity": current_relative_humidity_2m,
-            "wind_gusts": current_wind_gusts_10m,
-            "wind_direction": current_wind_direction_10m,
-        }
-    except Exception as e:
-        st.error(f"Erro ao buscar dados do Open-Meteo: {e}")
-        return None
+#@st.cache_data(ttl=3600)   # <-- decorador agora aplicado corretamente
+#def obter_previsao_tempo(lat="-28.935", lon="-49.486"):
+#    """
+#    Obtém dados meteorológicos atuais da API Open-Meteo usando o cliente global.
+ #   """
+#   url = "https://api.open-meteo.com/v1/forecast"
+#    params = {
+#        "latitude": float(lat),
+ #       "longitude": float(lon),
+#        "current": [
+#            "weather_code", "cloud_cover", "precipitation", "rain",
+#            "showers", "is_day", "apparent_temperature",
+#            "relative_humidity_2m", "temperature_2m", "wind_speed_10m",
+#            "wind_gusts_10m", "wind_direction_10m"
+#        ],
+#        "forecast_days": 1
+#    }
+#
+#    try:
+#        responses = openmeteo.weather_api(url, params=params)
+#        response = responses[0]
+#        current = response.Current()
+#
+#        # Extrai os valores na mesma ordem dos parâmetros
+#        current_weather_code = current.Variables(0).Value()
+#        current_cloud_cover = current.Variables(1).Value()
+#        current_precipitation = current.Variables(2).Value()
+#        current_rain = current.Variables(3).Value()
+#        current_showers = current.Variables(4).Value()
+#        current_is_day = current.Variables(5).Value()
+#        current_apparent_temperature = current.Variables(6).Value()
+#        current_relative_humidity_2m = current.Variables(7).Value()
+#        current_temperature_2m = current.Variables(8).Value()
+#        current_wind_speed_10m = current.Variables(9).Value()
+#        current_wind_gusts_10m = current.Variables(10).Value()
+#        current_wind_direction_10m = current.Variables(11).Value()
+#
+#        info_condicao = CODIGOS_CLIMA.get(int(current_weather_code), {"texto": "Desconhecido", "icone": "❓", "alerta": False})
+#
+#        alertas = [{"event": "Condição severa detectada", "description": info_condicao["texto"]}] if info_condicao["alerta"] else []
+#
+#        return {
+#            "temperature": current_temperature_2m,
+#            "windspeed": current_wind_speed_10m,
+#            "condicao_texto": info_condicao["texto"],
+#            "icone_url": info_condicao["icone"],
+#            "alertas": alertas,
+#            # campos extras (opcionais)
+#            "weather_code": current_weather_code,
+#            "cloud_cover": current_cloud_cover,
+#            "precipitation": current_precipitation,
+#            "rain": current_rain,
+#            "showers": current_showers,
+#            "is_day": current_is_day,
+#            "apparent_temperature": current_apparent_temperature,
+#            "relative_humidity": current_relative_humidity_2m,
+#            "wind_gusts": current_wind_gusts_10m,
+#            "wind_direction": current_wind_direction_10m,
+#        }
+#    except Exception as e:
+#        st.error(f"Erro ao buscar dados do Open-Meteo: {e}")
+#        return None
 
 # INTERFACE DO WIDGET PARA A HOME (adaptada com cache)
-@st.cache_data(ttl=300)  # Cache de 5 minutos
-def exibir_widget_clima():
-    with st.container(border=True):
-        st.subheader("Temperatura atual - Araranguá - SC")
-        clima = obter_previsao_tempo()  # usa coordenadas padrão
-
-        if clima:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(clima["icone_url"])  # Emoji; se usar URL, trocar por st.image
-                st.metric(label="Temperatura", value=f"{clima['temperature']:.1f} °C")
-            with col2:
-                st.metric(label="Velocidade do Vento", value=f"{clima['windspeed']:.1f} km/h")
-                st.write(f"Condição: {clima['condicao_texto']}")
-
-            if clima["alertas"]:
-                with st.expander("Alertas Meteorológicos", expanded=True):
-                    for alerta in clima["alertas"]:
-                        st.warning(f"{alerta['event']}: {alerta['description']}")
-        else:
-            st.warning("Não foi possível carregar os dados do clima no momento.")
+#@st.cache_data(ttl=300)  # Cache de 5 minutos
+#def exibir_widget_clima():
+#    with st.container(border=True):
+#        st.subheader("Temperatura atual - Araranguá - SC")
+#        clima = obter_previsao_tempo()  # usa coordenadas padrão
+#
+#        if clima:
+#            col1, col2 = st.columns(2)
+#            with col1:
+#                st.write(clima["icone_url"])  # Emoji; se usar URL, trocar por st.image
+#                st.metric(label="Temperatura", value=f"{clima['temperature']:.1f} °C")
+#            with col2:
+#                st.metric(label="Velocidade do Vento", value=f"{clima['windspeed']:.1f} km/h")
+#                st.write(f"Condição: {clima['condicao_texto']}")
+#
+#           if clima["alertas"]:
+#               with st.expander("Alertas Meteorológicos", expanded=True):
+#                   for alerta in clima["alertas"]:
+#                       st.warning(f"{alerta['event']}: {alerta['description']}")
+#       else:
+#           st.warning("Não foi possível carregar os dados do clima no momento.")
 
 
 def obter_saudacao() -> str:
@@ -393,22 +370,22 @@ def obter_saudacao() -> str:
     elif 12 <= hora_atual < 18: return "Boa tarde"
     else: return "Boa noite"
 
-# # ==========================================#
-# # PROTEÇÃO CONTRA INATIVIDADE (TIMEOUT)
-# # ==========================================#
-# if st.session_state.get('autenticado'):   # <-- correção aqui
-#     agora = datetime.now()
-#     ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
+# ==========================================#
+# PROTEÇÃO CONTRA INATIVIDADE (TIMEOUT)
+# ==========================================#
+if st.session_state.get('autenticado'):   # <-- correção aqui
+    agora = datetime.now()
+    ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
     
-#     if agora - ultimo_acesso > timedelta(minutes=30):
-#         st.session_state.clear() 
-#         st.warning("⏱️ Sessão expirada por inatividade. Por favor, faça login novamente para continuar.")
-#         st.stop()
-#     else:
-#         st.session_state['ultimo_acesso'] = agora
+    if agora - ultimo_acesso > timedelta(minutes=50):
+        st.session_state.clear() 
+        st.warning("⏱️ Sessão expirada por inatividade (50 min). Por favor, faça login novamente para continuar.")
+        st.stop()
+    else:
+        st.session_state['ultimo_acesso'] = agora
 
 # ==========================================
-# 6. TELAS (VIEWS) DO SISTEMA
+# 6. TELA DE LOGIN E HOME PRINCIPAL
 # ==========================================
 def tela_login() -> None:
     st.markdown("""
@@ -505,17 +482,16 @@ def tela_login() -> None:
 
 
 def tela_home() -> None:
-    """Nova Home principal que consolida a antiga Page 0 no App.py"""
+
     render_global_notifications_listener()
+    
+    # --- DADOS DO USUÁRIO ---
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
     perfil_usuario = str(st.session_state.get('perfil', 'analista')).lower()
     usuario_id = st.session_state.get('usuario_id', 0)
-    
-    # --- PREPARAÇÃO DA DATA E DIA DA SEMANA ---
-    dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
-    hoje = datetime.now()
-    dia_semana_str = dias_semana[hoje.weekday()]
-    data_atual = f"{dia_semana_str}, {hoje.strftime('%d/%m/%Y')}"
+
+    # Busca alertas de plantão e correções logo no início
+    df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
     
     # --- CONSTRUÇÃO DA BARRA LATERAL (PÓS-LOGIN) ---
     st.sidebar.markdown(f"## 👤 {nome_usuario}")
@@ -523,33 +499,67 @@ def tela_home() -> None:
     st.sidebar.caption(f"🛡️ Perfil: **{perfil_usuario.title()}**")
     st.sidebar.divider()
 
-    with st.sidebar.expander("🤔 Mini-FAQ — Dúvidas frequentes"):
-        st.markdown(
-            """
-**Por onde começo?**  
-Comece pela **Home**: aqui você vê seus alertas do dia (plantão, validações pendentes) e seus indicadores. Se precisar enviar relatórios ou planilhas, use o menu **Importação**. Para analisar atendimentos e chamados, os **Dashboards** estão à sua disposição.
+    # Aviso de Plantão
+    if not df_plantao.empty:
+        st.sidebar.error("🚨 Você tem Plantão hoje!")
+        st.sidebar.divider()
 
-**Como faço para sair do sistema?**  
-Use o botão **Sair do Sistema** aqui embaixo na barra lateral.
+    # --- CONTROLE DE PONTO (SEMPRE VISÍVEL) ---
+    st.sidebar.markdown("### 🕒 Ponto Eletrônico")
+    
+    agora = datetime.now()
+    em_dia_util = agora.weekday() < 5  # 0 a 4 = Segunda a Sexta
+    hora_min_atual = agora.hour * 60 + agora.minute
+    
+    # Lista de horários convertidos em minutos
+    horarios_ponto = [480, 720, 810, 1100]  # 08:00, 12:00, 13:30, 18:20
+    
+    if em_dia_util:
+        # Pega o primeiro horário da lista que seja maior que a hora atual
+        proximo_ponto = next((h for h in horarios_ponto if h > hora_min_atual), None)
+        
+        if proximo_ponto is not None:
+            # Cálculo de horas e minutos restantes
+            diff = proximo_ponto - hora_min_atual
+            horas_restantes = diff // 60
+            minutos_restantes = diff % 60
+            
+            # Formatação limpa
+            tempo_str = f"{horas_restantes:02d}h {minutos_restantes:02d}m"
+            
+            # Faltando 5 minutos ou menos, muda a cor do aviso para alertar o usuário
+            if diff <= 5:
+                st.sidebar.warning(f"⏰ Atenção! Faltam apenas **{minutos_restantes} min** para o ponto.")
+            else:
+                st.sidebar.info(f"⏳ Próximo ponto em: **{tempo_str}**")
+        else:
+            st.sidebar.success("✅ Todos os pontos de hoje foram concluídos!")
+    else:
+        st.sidebar.info("☕ Fim de semana (Sem ponto obrigatório)")
 
-**Não consigo ver alguma página ou menu.**  
-Algumas telas são restritas a **Coordenação**. Se achar que deveria ter acesso a alguma área, converse com seu gestor.
+    # Botão de Ponto (Agora independente, sempre fixo na tela)
+    st.sidebar.link_button(
+        "📍 Bater ponto no VR",
+        "https://app2.pontomais.com.br/registrar-ponto",
+        use_container_width=True
+    )
 
-**Onde fica a documentação do sistema?**  
-Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A documentação em PDF fica na pasta **Documentação do sistema**, na raiz do projeto.
-            """
-        )
     st.sidebar.divider()
-    if st.sidebar.button("🚪 Sair do Sistema", use_container_width='stretch'):
+
+    # --- BOTÃO DE SAIR (SEMPRE POR ÚLTIMO NA SIDEBAR) ---
+    if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True, type="secondary"):
         registrar_log_auditoria(usuario_id, "LOGOUT", "Usuário saiu do sistema.")
         st.session_state.clear()
         st.rerun()
 
-# --- AJUSTE VISUAL PROFISSIONAL ---
-    # Mata o espaço em branco inútil do topo do Streamlit
+    # ==========================================
+    # --- ÁREA PRINCIPAL DA TELA (CONTEÚDO) ---
+    # ==========================================
+    
+    # Ajuste visual: Mata o espaço em branco inútil do topo do Streamlit
     st.markdown("<style>.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }</style>", unsafe_allow_html=True)
 
-    # --- LOGO DA EPSY SISTEMAS (responsiva e sem interferir no layout) ---
+    # Logo centralizada
     _, col_logo, _ = st.columns([2, 1, 2])
     with col_logo:
         try:
@@ -557,58 +567,59 @@ Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A docum
         except Exception:
             pass
 
-    st.divider() # Linha para separar a logo do seu painel
+    st.divider()  # Linha para separar a logo do seu painel
 
     # SAUDAÇÃO E CLIMA USANDO COMPONENTES NATIVOS
-    col_texto, col_clima = st.columns([2.5, 1])
+    col_texto = st.container()
 
     with col_texto:
-        # Determina o ícone da saudação baseado no período do dia
+        # --- 1. Definição segura e local da data (Sem o import aqui dentro!) ---
+        hoje = datetime.now()
+        dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+        data_atual = f"{dias_semana[hoje.weekday()]}, {hoje.strftime('%d/%m/%Y')}"
+
+        # --- 2. OTIMIZAÇÃO: Saudação à prova de bugs de formatação ---
         saudacao = obter_saudacao()
-        if "Boa noite" in saudacao:
+        saudacao_lower = saudacao.lower() 
+        
+        if "noite" in saudacao_lower:
             icone_saudacao = "🌕 💻"
-        elif "Boa tarde" in saudacao:
+        elif "tarde" in saudacao_lower:
             icone_saudacao = "🌤️ 💻"
         else:
             icone_saudacao = "☀️ 💻"
         
-# Cabeçalho com saudação personalizada
+        # --- 3. UI: Cabeçalho e Descrição ---
         st.header(f"{saudacao}, {nome_usuario}! {icone_saudacao}", anchor=False)
-        
-        # Descrição do painel
         st.markdown(
             "Este é o seu painel de controle central do **WikiSuporte**. "
             "Acompanhe os seus indicadores e os alertas do dia."
         )
+        
         with st.expander("🤔 Como usar esta página?"):
             st.markdown(
-                "**Alertas** incluem plantão, validações de release e avisos  **importantes para o dia a dia ** (release + cobrança 7 em 7 dias). "
-                "**Clima** é informativo. Use o **lateral** para ter acesso as funcionalidades do sistema. "
-                "Dúvidas: Em todas as rotinas o sistema mostrará a seguinte mensagem  ****"
+                "**Alertas** incluem plantão, validações de release e avisos **importantes para o dia a dia** "
+                "(release + cobrança 7 em 7 dias).\n\n"
+                "Dúvidas: em todas as rotinas o sistema mostrará a seguinte mensagem ****"
             )
-        # --- AJUSTE CIRÚRGICO: CÁLCULO REAL DE ALERTAS ---
-        # 1. Desempacotamos a tupla nos dois DataFrames correspondentes
-        df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
-        
-        # 2. Contamos quantas linhas (registros reais) existem em cada um
+
+        # --- 4. EXIBIÇÃO: Alertas dinâmicos ---
         total_alertas_reais = len(df_plantao) + len(df_correcoes)
         
-        # Exibição da data e dos alertas (se houver) em uma linha horizontal
         if total_alertas_reais > 0:
-            st.write(f"📅 {data_atual}   |   ⚡ **{total_alertas_reais}** alerta(s) no sistema")
+            st.markdown(f"**📅 {data_atual}** &nbsp;|&nbsp; ⚡ **{total_alertas_reais}** alerta(s) no sistema")
         else:
-            st.write(f"📅 {data_atual}")
-       
+            st.markdown(f"**📅 {data_atual}**")
+        
         st.write("")
-
-    with col_clima:
-        obter_previsao_tempo()
-        exibir_widget_clima()
-    
-    st.divider()
+#    with col_clima:
+#        obter_previsao_tempo()
+#        exibir_widget_clima()
+#    
+#    st.divider()
 
     # 1. Primeiro recuperamos o ID e os dados (KPIs)
-    usuario_id = st.session_state.get('usuario_id') 
+    usuario_id = st.session_state.get('usuario_id')
 
     if usuario_id:
         # BUSCA DOS DADOS (Aqui a variável kpis ganha vida)
@@ -621,7 +632,6 @@ Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A docum
                 f"Parabéns! Você alcançou: <b>{medalha_atual}</b>",
             )
         st.session_state["ws_last_medalha"] = medalha_atual
-        df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
 
         # 2. RENDERIZAÇÃO DOS TROFÉUS (Logo após o divisor, antes das notificações)
         if kpis:
@@ -629,15 +639,22 @@ Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A docum
         else:
             st.warning("Não foi possível carregar seus indicadores de desempenho.")
         
-        st.divider() # Divisor entre o Ranking e as Notificações
+        st.divider()  # Divisor entre o Ranking e as Notificações
 
         # 1. Padronização dos Alertas em uma Lista de Dicionários
-        notificacoes_atuais = []
+        notificacoes_atuais: list[dict] = []
 
         try:
-            from services.notificacoes_representante import rodar_sincronizacao_completa, listar_notificacoes_usuario
-
-            rodar_sincronizacao_completa()
+            from services.notificacoes_representante import (
+                rodar_sincronizacao_completa,
+                listar_notificacoes_usuario,
+            )
+            agora = datetime.now()
+            ultima_sync = st.session_state.get("ws_last_notif_sync")
+            # Executa a sincronização no máximo a cada 5 minutos nesta sessão
+            if not ultima_sync or (agora - ultima_sync).total_seconds() > 300:
+                rodar_sincronizacao_completa()
+                st.session_state["ws_last_notif_sync"] = agora
             for n in listar_notificacoes_usuario(usuario_id, apenas_nao_lidas=True):
                 notificacoes_atuais.append(
                     {
@@ -652,26 +669,36 @@ Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A docum
         except Exception:
             pass
 
+        # Notificação de plantão (se houver)
         if not df_plantao.empty:
             entrada_raw = df_plantao.iloc[0]['data_hora_entrada']
             saida_raw = df_plantao.iloc[0]['data_hora_saida']
             entrada = entrada_raw.strftime('%H:%M') if isinstance(entrada_raw, datetime) else str(entrada_raw)[:5]
             saida = saida_raw.strftime('%H:%M') if isinstance(saida_raw, datetime) else str(saida_raw)[:5]
-            
+                
             notificacoes_atuais.append({
                 'id': f"plantao_{datetime.now().strftime('%Y%m%d')}",
                 'icone': '🚨',
                 'titulo': 'Alerta de Escala: Plantão Hoje',
-                'detalhe': f"Você está de plantão hoje, das {entrada} às {saida}. Mantenha-se atento e saia no Horário."
+                'detalhe': (
+                    f"Você está de plantão hoje, das {entrada} às {saida}. "
+                    f"Mantenha-se atento, saia no horário e não esqueça de bater o ponto no VR."
+                ),
+                'url_botao': "https://app2.pontomais.com.br/registrar-ponto",
+                'label_botao': "🕒 Bater ponto no VR",
             })
 
+        # Notificações de correções pendentes (releases)
         if not df_correcoes.empty:
             for _, row in df_correcoes.iterrows():
                 notificacoes_atuais.append({
                     'id': f"chamado_{row['nr_chamado']}",
                     'icone': '⚠️',
                     'titulo': f"Validação Pendente: Chamado {row['nr_chamado']}",
-                    'detalhe': f"A release {row['versao']} requer a sua validação para o chamado {row['nr_chamado']}. Por favor, realize a conferência técnica."
+                    'detalhe': (
+                        f"A release {row['versao']} requer a sua validação para o chamado {row['nr_chamado']}. "
+                        f"Por favor, realize a conferência técnica."
+                    )
                 })
 
         # 2. Separação Lógica (Lidas vs Não Lidas)
@@ -689,6 +716,16 @@ Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A docum
                     for notif in nao_lidas:
                         with st.expander(f"{notif['icone']} {notif['titulo']}", expanded=False):
                             st.write(notif['detalhe'])
+
+                            # Se quiser, aqui também pode usar o URL da notificação de plantão,
+                            # por exemplo exibindo um botão dentro do expander:
+                            if notif.get("url_botao"):
+                                st.link_button(
+                                    notif.get("label_botao", "🕒 Bater ponto no VR"),
+                                    notif["url_botao"],
+                                    use_container_width=True,
+                                )
+
                             # Botão para mover para o histórico
                             if st.button("Marcar como lida", key=f"btn_read_{notif['id']}"):
                                 st.session_state['notificacoes_lidas'].append(notif['id'])
@@ -698,7 +735,7 @@ Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A docum
                                         marcar_lida(int(notif["db_id"]), usuario_id)
                                     except Exception:
                                         pass
-                                st.rerun() # Atualiza a tela imediatamente
+                                st.rerun()  # Atualiza a tela imediatamente
                 else:
                     st.info("✅ Tudo limpo! Você não possui notificações pendentes no momento.")
                     
@@ -717,7 +754,6 @@ Na pasta do projeto você encontra o **Manual_WikiSuporte_Suporte.pdf**. A docum
             st.info("Você não possui alertas no momento.")
     else:
         st.error("Erro de contexto: Sessão inválida. Por favor, faça login novamente.", icon="🛑")
-
 #===============================================================================================================================================================#
 def renderizar_dashboard_conquistas(kpis):
     # 1. CABEÇALHO DE NÍVEL E PROGRESSO (UX Gamificada)

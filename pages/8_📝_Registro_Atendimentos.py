@@ -342,7 +342,7 @@ with tab_lancar:
         motivo = st.text_area("Motivo / Assunto *", height=120, key=f"p8_motivo_{p8n}")
         solucao = st.text_area("Solução", height=120, key=f"p8_solucao_{p8n}")
         d1, d2, d3 = st.columns(3)
-        resolvido = d1.checkbox("Resolvido?", key=f"p8_resolvido_{p8n}")
+        resolvido = d1.checkbox("Resolvido", key=f"p8_resolvido_{p8n}")
         abriu_chamado = d2.checkbox("Precisou abrir chamado?", key=f"p8_abriu_chamado_{p8n}")
         nr_chamado = d3.text_input("Nº do chamado (quando houver)", key=f"p8_nr_chamado_{p8n}")
         data_atendimento = st.date_input("Data do atendimento", value=date.today(), key=f"p8_data_atendimento_{p8n}")

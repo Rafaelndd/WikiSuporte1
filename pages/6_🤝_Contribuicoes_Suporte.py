@@ -2,7 +2,7 @@
 Essa page foi renomeada para 6_🤝_Contribuicoes_Suporte.py para refletir melhor o conteúdo e evitar confusão com a page de dashboard de tickets. O código da antiga page 5_📊_Dashboard_Tickets_EPSY.py foi mantido aqui para referência, mas a nova page 6 terá foco total em contribuições, avaliações e fila de revisão, enquanto a antiga page 5 continuará sendo o dashboard analítico dos tickets EPSY.
 
 """
-
+import zipfile
 import streamlit as st
 import pandas as pd
 from sqlalchemy import text
@@ -122,21 +122,73 @@ def _notificar_email_obsoleto(email_autor: str, nome_autor: str, titulo: str, qu
 # ===============================================================================================================================================================
 @st.cache_data(ttl=3600)
 def carregar_wikis():
-    try: 
+    try:
         engine = get_connection()
-        query = "SELECT * FROM base_conhecimento WHERE origem = 'WIKI_HELPDESK' ORDER BY criado_em DESC"
+        # Só as colunas usadas na tela + campos normalizados para busca
+        query = """
+            SELECT
+                id,
+                titulo,
+                categoria,
+                conteudo,
+                caminho_anexo,
+                criado_em
+            FROM base_conhecimento
+            WHERE origem = 'WIKI_HELPDESK'
+            ORDER BY criado_em DESC
+        """
         df = pd.read_sql(query, engine)
+
+        if df.empty:
+            return df, None
+
+        # Normalização de texto feita UMA vez, reaproveitada nas buscas
+        import unicodedata, re
+
+        def _norm_text(t):
+            txt = unicodedata.normalize('NFKD', str(t)).encode('ASCII', 'ignore').decode('utf-8')
+            return re.sub(r'[^a-z0-9\s]', '', txt.lower()).strip()
+
+        df["titulo_norm"] = df["titulo"].fillna("").map(_norm_text)
+        df["categoria_norm"] = df["categoria"].fillna("").map(_norm_text)
+        df["conteudo_norm"] = df["conteudo"].fillna("").map(_norm_text)
+
         return df, None
-    except Exception as e: 
+    except Exception as e:
         return pd.DataFrame(), str(e)
+
 
 @st.cache_data(ttl=3600)
 def carregar_manuais():
     try:
         engine = get_connection()
-        # Apontando para a tabela correta e filtrando pela origem exata
-        query = "SELECT * FROM base_conhecimento WHERE origem = 'MANUAL_HELPDESK' ORDER BY criado_em DESC"
+        query = """
+            SELECT
+                id,
+                titulo,
+                categoria,
+                conteudo,
+                caminho_anexo,
+                criado_em
+            FROM base_conhecimento
+            WHERE origem = 'MANUAL_HELPDESK'
+            ORDER BY criado_em DESC
+        """
         df = pd.read_sql(query, engine)
+
+        if df.empty:
+            return df, None
+
+        import unicodedata, re
+
+        def _norm_text(t):
+            txt = unicodedata.normalize('NFKD', str(t)).encode('ASCII', 'ignore').decode('utf-8')
+            return re.sub(r'[^a-z0-9\s]', '', txt.lower()).strip()
+
+        df["titulo_norm"] = df["titulo"].fillna("").map(_norm_text)
+        df["categoria_norm"] = df["categoria"].fillna("").map(_norm_text)
+        df["conteudo_norm"] = df["conteudo"].fillna("").map(_norm_text)
+
         return df, None
     except Exception as e:
         return pd.DataFrame(), str(e)
@@ -359,71 +411,142 @@ with aba_gemini:
                                 resultados_puros.append({"titulo": r[0], "origem": r[1], "conteudo": r[2], "anexo": r[3], "score": r[4]})
                     
                     texto_contexto = "\n\n---\n\n".join(contextos_db)
-                    acesso_ia_liberado = perfil_logado in ['coordenador', 'dev']
-                    
+                    # --- LIBERA IA PARA TODOS OS PERFIS ---
+                    # Antes: acesso_ia_liberado = perfil_logado in ['coordenador', 'dev']
+                    acesso_ia_liberado = True
                     if acesso_ia_liberado:
-                        from google import genai
-                        from dotenv import load_dotenv
-                        try:
-                            load_dotenv()
-                            api_key = os.getenv("GEMINI_API_KEY")
-                            if not api_key:
-                                raise RuntimeError("GEMINI_API_KEY não configurada.")
-                            client = genai.Client(api_key=api_key)
-                            prompt = (
-                                f"Responda diretamente. DÚVIDA: {pergunta}\n\nCONTEXTO:\n{texto_contexto}"
-                                if texto_contexto
-                                else f"Diga que não achou manuais para: {', '.join(fatias_nova)}."
-                            )
-                            resposta_ia = client.models.generate_content(
-                                model="gemini-2.5-flash",
-                                contents=prompt,
-                            )
-                            usage = getattr(resposta_ia, "usage_metadata", None)
-                            t_prompt = getattr(usage, "input_tokens", None) if usage else None
-                            t_resp = getattr(usage, "output_tokens", None) if usage else None
-                            t_total = getattr(usage, "total_tokens", None) if usage else None
+                            from google import genai
+                            import requests
 
-                            st.success("⚡ Resposta gerada!")
-                            st.markdown(resposta_ia.text)
-                            if t_total is not None:
-                                st.caption(f"🔋 Tokens: {t_total}")
+                            from dotenv import load_dotenv
+                            load_dotenv()
+
+                            api_key_gemini = os.getenv("GEMINI_API_KEY")
+                            api_key_deepseek = os.getenv("DEEPSEEK_API_KEY")
+
+                            resposta_texto = None
+                            erro_ia = None
+
+                            # 1ª TENTATIVA: GEMINI
                             try:
-                                if _busca_sem_ok and registrar_busca_com_topico:
-                                    registrar_busca_com_topico(
-                                        engine,
-                                        usuario_logado_id,
-                                        pergunta.strip(),
-                                        resposta_ia.text or "",
-                                        "ASSISTENTE",
-                                        t_prompt or 0,
-                                        t_resp or 0,
-                                        t_total or 0,
+                                if not api_key_gemini:
+                                    raise RuntimeError("GEMINI_API_KEY não configurada.")
+
+                                client = genai.Client(api_key=api_key_gemini)
+                                prompt = (
+                                    f"Responda diretamente. DÚVIDA: {pergunta}\n\nCONTEXTO:\n{texto_contexto}"
+                                    if texto_contexto
+                                    else f"Diga que não achou manuais para: {', '.join(fatias_nova)}."
+                                )
+                                resposta_ia = client.models.generate_content(
+                                    model="gemini-2.5-flash",
+                                    contents=prompt,
+                                )
+                                usage = getattr(resposta_ia, "usage_metadata", None)
+                                t_prompt = getattr(usage, "input_tokens", None) if usage else None
+                                t_resp = getattr(usage, "output_tokens", None) if usage else None
+                                t_total = getattr(usage, "total_tokens", None) if usage else None
+
+                                resposta_texto = resposta_ia.text
+
+                            except Exception as e_gemini:
+                                erro_ia = e_gemini
+
+                                # 2ª TENTATIVA: DEEPSEEK (se chave existir)
+                                try:
+                                    if not api_key_deepseek:
+                                        raise RuntimeError("DEEPSEEK_API_KEY não configurada.")
+
+                                    headers = {
+                                        "Content-Type": "application/json",
+                                        "Authorization": f"Bearer {api_key_deepseek}",
+                                    }
+                                    prompt = (
+                                        f"Responda diretamente. DÚVIDA: {pergunta}\n\nCONTEXTO:\n{texto_contexto}"
+                                        if texto_contexto
+                                        else f"Diga que não achou manuais para: {', '.join(fatias_nova)}."
                                     )
-                                else:
-                                    with engine.begin() as conn_log:
-                                        conn_log.execute(
-                                            text(
-                                                "INSERT INTO historico_buscas_psy "
-                                                "(usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) "
-                                                "VALUES (:u, :p, :r, :tp, :tr, :tt)"
-                                            ),
-                                            {
-                                                "u": usuario_logado_id,
-                                                "p": pergunta.strip(),
-                                                "r": resposta_ia.text,
-                                                "tp": t_prompt or 0,
-                                                "tr": t_resp or 0,
-                                                "tt": t_total or 0,
-                                            },
+                                    payload = {
+                                        "model": "deepseek-chat",
+                                        "messages": [
+                                            {"role": "system", "content": "Você é um assistente técnico do WikiSuporte."},
+                                            {"role": "user", "content": prompt},
+                                        ],
+                                    }
+                                    resp = requests.post(
+                                        "https://api.deepseek.com/v1/chat/completions",
+                                        headers=headers,
+                                        data=json.dumps(payload),
+                                        timeout=30,
+                                    )
+                                    resp.raise_for_status()
+                                    data = resp.json()
+                                    resposta_texto = data["choices"][0]["message"]["content"]
+                                    # DeepSeek não retorna tokens no mesmo formato; usamos zeros por compatibilidade
+                                    t_prompt = t_resp = t_total = 0
+
+                                except Exception as e_deepseek:
+                                    erro_ia = e_deepseek
+                                    resposta_texto = None  # força fallback sem IA
+
+                            # --- SE CONSEGUIU RESPOSTA POR GEMINI OU DEEPSEEK ---
+                            if resposta_texto:
+                                st.success("⚡ Resposta gerada!")
+                                st.markdown(resposta_texto)
+                                if t_total is not None:
+                                    st.caption(f"🔋 Tokens: {t_total}")
+
+                                try:
+                                    if _busca_sem_ok and registrar_busca_com_topico:
+                                        registrar_busca_com_topico(
+                                            engine,
+                                            usuario_logado_id,
+                                            pergunta.strip(),
+                                            resposta_texto or "",
+                                            "ASSISTENTE",
+                                            t_prompt or 0,
+                                            t_resp or 0,
+                                            t_total or 0,
                                         )
-                            except Exception as db_e:
-                                st.error(f"Erro BD: {db_e}")
-                        except Exception as e:
-                            st.error(f"❌ Erro IA: {e}")
+                                    else:
+                                        with engine.begin() as conn_log:
+                                            conn_log.execute(
+                                                text(
+                                                    "INSERT INTO historico_buscas_psy "
+                                                    "(usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) "
+                                                    "VALUES (:u, :p, :r, :tp, :tr, :tt)"
+                                                ),
+                                                {
+                                                    "u": usuario_logado_id,
+                                                    "p": pergunta.strip(),
+                                                    "r": resposta_texto,
+                                                    "tp": t_prompt or 0,
+                                                    "tr": t_resp or 0,
+                                                    "tt": t_total or 0,
+                                                },
+                                            )
+                                except Exception as db_e:
+                                    st.error(f"Erro BD: {db_e}")
+
+                            else:
+                                # FALHA NAS CHAMADAS DE IA (limite diário ou erro): FALLBACK PARA BUSCA NO BANCO
+                                if erro_ia:
+                                    st.warning(
+                                        "O motor de IA atingiu o limite diário ou apresentou erro. "
+                                        "Usando apenas a busca semântica direta na base de conhecimento."
+                                    )
+
+                                if resultados_puros:
+                                    st.markdown("### Sugestões encontradas na base de conhecimento")
+                                    for doc in resultados_puros:
+                                        with st.expander(f"📄 {doc['titulo']} - Score: {doc['score']}"):
+                                            st.write(doc['conteudo'])
+                                else:
+                                            st.info("Nenhum documento relevante foi encontrado na base para esta dúvida.")
                     else:
-                        st.info("⚡ Motor a Combustão: IA desativada para este perfil. Veja manuais abaixo:")
-                    
+                                # NUNCA deve cair aqui, pois acesso_ia_liberado = True, mas mantemos por segurança
+                                st.info("⚡ Motor a Combustão: IA desativada para este perfil. Veja manuais abaixo:")
+                        
                     if resultados_puros:
                         for doc in resultados_puros:
                             with st.expander(f"📄 {doc['titulo']} - Score: {doc['score']}"): st.write(doc['conteudo'])
@@ -487,7 +610,6 @@ with aba_acervo:
         else:
             df_w = df_wikis.copy()
 
-            # Lógica Intacta
             if btn_buscar_wiki and termo_busca_wiki.strip():
                 try:
                     if _busca_sem_ok and registrar_busca_com_topico:
@@ -511,22 +633,31 @@ with aba_acervo:
                     st.error(f"Erro ao registrar métrica de busca: {e}")
 
                 import unicodedata, re
-                def norm_text(t):
-                    return re.sub(r'[^a-z0-9\s]', '', unicodedata.normalize('NFKD', str(t)).encode('ASCII', 'ignore').decode('utf-8').lower()).strip()
-                
-                stopwords = {'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'no', 'na', 'em', 'para', 'com', 'como'}
-                fatias = [p for p in norm_text(termo_busca_wiki).split() if p not in stopwords and len(p) > 2]
+
+                def norm_text_query(t: str) -> str:
+                    txt = unicodedata.normalize('NFKD', str(t)).encode('ASCII', 'ignore').decode('utf-8')
+                    return re.sub(r'[^a-z0-9\s]', '', txt.lower()).strip()
+
+                stopwords = {
+                    'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das',
+                    'no', 'na', 'em', 'para', 'com', 'como'
+                }
+                termo_norm = norm_text_query(termo_busca_wiki)
+                fatias = [p for p in termo_norm.split() if p not in stopwords and len(p) > 2]
 
                 if fatias:
                     def calcular_score(row):
                         score = 0
-                        tit = norm_text(row.get('titulo', ''))
-                        cat = norm_text(row.get('categoria', ''))
-                        cont = norm_text(row.get('conteudo', ''))
+                        tit = row.get('titulo_norm', '')
+                        cat = row.get('categoria_norm', '')
+                        cont = row.get('conteudo_norm', '')
                         for f in fatias:
-                            if f in tit: score += 3
-                            if f in cat: score += 2
-                            if f in cont: score += 1
+                            if f in tit:
+                                score += 3
+                            if f in cat:
+                                score += 2
+                            if f in cont:
+                                score += 1
                         return score
 
                     df_w['score'] = df_w.apply(calcular_score, axis=1)
@@ -607,9 +738,10 @@ with aba_acervo:
         else:
             df_m = df_manuais.copy()
 
-            # Lógica Intacta
+            # --- CORREÇÃO 1: Usando as variáveis de estado do MANUAL ---
             if btn_buscar_manual and termo_busca_manual.strip():
                 try:
+                    # CORREÇÃO 2: Registro de métricas gravando como [MANUAL] no banco de dados
                     if _busca_sem_ok and registrar_busca_com_topico:
                         registrar_busca_com_topico(
                             engine,
@@ -631,30 +763,47 @@ with aba_acervo:
                     st.error(f"Erro ao registrar métrica de busca: {e}")
 
                 import unicodedata, re
-                def norm_text(t):
-                    return re.sub(r'[^a-z0-9\s]', '', unicodedata.normalize('NFKD', str(t)).encode('ASCII', 'ignore').decode('utf-8').lower()).strip()
+
+                def norm_text_query(t: str) -> str:
+                    txt = unicodedata.normalize('NFKD', str(t)).encode('ASCII', 'ignore').decode('utf-8')
+                    return re.sub(r'[^a-z0-9\s]', '', txt.lower()).strip()
+
+                stopwords = {
+                    'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das',
+                    'no', 'na', 'em', 'para', 'com', 'como'
+                }
                 
-                stopwords = {'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'no', 'na', 'em', 'para', 'com', 'como'}
-                fatias = [p for p in norm_text(termo_busca_manual).split() if p not in stopwords and len(p) > 2]
+                # CORREÇÃO 3: Lendo a variável de busca do Manual
+                termo_norm = norm_text_query(termo_busca_manual)
+                fatias = [p for p in termo_norm.split() if p not in stopwords and len(p) > 2]
+
+                # Criamos a coluna de score zerada por padrão (Programação Defensiva)
+                df_m['score'] = 0
 
                 if fatias:
-                    def calcular_score_m(row):
+                    def calcular_score(row):
                         score = 0
-                        tit = norm_text(row.get('titulo', ''))
-                        cat = norm_text(row.get('categoria', ''))
-                        cont = norm_text(row.get('conteudo', ''))
+                        # Cast para string (str) garantindo que nulos do banco não quebrem o in
+                        tit = str(row.get('titulo_norm', ''))
+                        cat = str(row.get('categoria_norm', ''))
+                        cont = str(row.get('conteudo_norm', ''))
+                        
                         for f in fatias:
-                            if f in tit: score += 3
-                            if f in cat: score += 2
-                            if f in cont: score += 1
+                            if f in tit:
+                                score += 3
+                            if f in cat:
+                                score += 2
+                            if f in cont:
+                                score += 1
                         return score
 
-                    df_m['score'] = df_m.apply(calcular_score_m, axis=1)
+                    # CORREÇÃO 4: Aplicando a matemática no DataFrame correto (df_m)
+                    df_m['score'] = df_m.apply(calcular_score, axis=1)
                     df_m = df_m[df_m['score'] > 0].sort_values(by='score', ascending=False)
 
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Exibição
+            # --- EXIBIÇÃO DO RANKING/PESQUISA ---
             if btn_buscar_manual and termo_busca_manual.strip() and df_m.empty:
                 st.warning(f"Nenhum manual encontrado para as palavras-chave: **'{termo_busca_manual}'**.")
             elif btn_buscar_manual and termo_busca_manual.strip():
@@ -663,7 +812,10 @@ with aba_acervo:
                     titulo = row.get('titulo', 'Sem Título')
                     conteudo = row.get('conteudo', 'Nenhum conteúdo disponível.')
                     anexo = row.get('caminho_anexo', '')
-                    tag_score = f"⭐ Score: {row['score']}"
+                    
+                    # CORREÇÃO 5: Programação Defensiva, se o score não existir, usa 0.
+                    valor_score = row.get('score', 0)
+                    tag_score = f"⭐ Score: {valor_score}"
                     
                     with st.expander(f"📖 {titulo} {tag_score}"):
                         st.markdown(conteudo)
@@ -680,6 +832,20 @@ with aba_acervo:
                     ["Selecione uma categoria..."] + list(sorted(categorias)),
                     key="filtro_cat_manual_ux"
                 )
+                
+                if cat_selecionada != "Selecione uma categoria...":
+                    df_cat = df_m[df_m['categoria'] == cat_selecionada]
+                    st.caption(f"A mostrar {len(df_cat)} manuais da categoria: **{cat_selecionada}**")
+                    
+                    for _, row in df_cat.iterrows():
+                        titulo = row.get('titulo', 'Sem Título')
+                        with st.expander(f"📖 {titulo}"):
+                            st.markdown(row.get('conteudo', ''))
+                            anexo = row.get('caminho_anexo', '')
+                            if pd.notna(anexo) and str(anexo).strip() and os.path.exists(str(anexo)):
+                                with open(anexo, "rb") as f:
+                                    st.download_button("📎 Baixar Anexo", f, file_name=os.path.basename(str(anexo)), key=f"dl_man_def_{row.get('id', titulo)}")
+
                 
                 if cat_selecionada != "Selecione uma categoria...":
                     df_cat = df_m[df_m['categoria'] == cat_selecionada]
@@ -816,9 +982,10 @@ with aba_nova:
         st.markdown("📎 **Anexar Evidências**")
         
         arquivo_anexo = st.file_uploader(
-            "Formatos aceitos: PDF, TXT, SQL, Imagens, Vídeos...", 
-            type=["pdf", "txt", "csv", "xlsx", "xls", "xml", "sql", "png", "jpg", "jpeg", "pgz", "fr3", "mp3", "mp4"]
-        )
+        "Formatos aceitos: PDF, TXT, SQL, Imagens, Vídeos...", 
+        type=["pdf", "txt", "csv", "xlsx", "xls", "xml", "sql", "png", "jpg", "jpeg", "pgz", "fr3", "mp3", "mp4"],
+        accept_multiple_files=True
+    )
         
         btn_salvar = st.form_submit_button("💾 Salvar Contribuição", type="primary")
         
@@ -829,29 +996,42 @@ with aba_nova:
                 # Processamento de anexo (Mantive sua lógica original)
                 texto_extraido = ""
                 caminho_anexo_db = None
-                
                 if arquivo_anexo:
-                    with st.spinner("Processando anexo..."):
-                        nome_seguro = f"{int(time.time())}_{arquivo_anexo.name.replace(' ', '_')}"
-                        caminho_fisico = os.path.join(UPLOAD_DIR, nome_seguro)
-                        
-                        with open(caminho_fisico, "wb") as f:
-                            f.write(arquivo_anexo.getbuffer())
-                        caminho_anexo_db = caminho_fisico
-                        
-                        ext = arquivo_anexo.name.split('.')[-1].lower()
-                        try:
-                            if ext in ['txt', 'sql', 'xml', 'csv']:
-                                texto_extraido = arquivo_anexo.getvalue().decode('utf-8', errors='ignore')
-                            elif ext == 'pdf':
-                                import pypdf
-                                pdf_reader = pypdf.PdfReader(arquivo_anexo)
-                                texto_extraido = " ".join([p.extract_text() for p in pdf_reader.pages if p.extract_text()])
-                            elif ext in ['xlsx', 'xls']:
-                                import pandas as pd
-                                texto_extraido = pd.read_excel(arquivo_anexo).to_string()
-                        except Exception as e:
-                            st.warning(f"Texto não extraído: {e}")
+                    with st.spinner("Processando anexos..."):
+                        timestamp = int(time.time())
+                        # pasta dedicada para os arquivos desta contribuição
+                        safe_base = re.sub(r'[^a-zA-Z0-9_-]', '_', (titulo or 'contribuicao'))
+                        pasta_contrib = os.path.join(UPLOAD_DIR, f"{timestamp}_{safe_base}")
+                        os.makedirs(pasta_contrib, exist_ok=True)
+                        arquivos_salvos = []
+                        for idx, arquivo in enumerate(arquivo_anexo, start=1):
+                            nome_seguro = f"{idx}_{arquivo.name.replace(' ', '_')}"
+                            caminho_fisico = os.path.join(pasta_contrib, nome_seguro)
+                            with open(caminho_fisico, "wb") as f:
+                                f.write(arquivo.getbuffer())
+                            arquivos_salvos.append((caminho_fisico, arquivo))
+                            # Extração de texto (quando aplicável) para enriquecer o conteúdo
+                            ext = arquivo.name.split('.')[-1].lower()
+                            try:
+                                if ext in ['txt', 'sql', 'xml', 'csv']:
+                                    texto_extraido += arquivo.getvalue().decode('utf-8', errors='ignore') + "\n\n"
+                                elif ext == 'pdf':
+                                    import pypdf
+                                    pdf_reader = pypdf.PdfReader(arquivo)
+                                    texto_extraido += " ".join(
+                                        [p.extract_text() for p in pdf_reader.pages if p.extract_text()]
+                                    ) + "\n\n"
+                                elif ext in ['xlsx', 'xls']:
+                                    import pandas as pd
+                                    texto_extraido += pd.read_excel(arquivo).to_string() + "\n\n"
+                            except Exception as e:
+                                st.warning(f"Texto não extraído de {arquivo.name}: {e}")
+                        # Empacota todos os anexos em um único ZIP para manter compatibilidade com o campo caminho_anexo
+                        zip_path = os.path.join(UPLOAD_DIR, f"{timestamp}_{safe_base}.zip")
+                        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                            for caminho_fisico, arquivo in arquivos_salvos:
+                                zf.write(caminho_fisico, arcname=os.path.basename(caminho_fisico))
+                        caminho_anexo_db = zip_path
 
                 conteudo_final = conteudo.strip()
                 if texto_extraido:

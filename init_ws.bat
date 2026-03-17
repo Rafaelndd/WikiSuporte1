@@ -1,10 +1,10 @@
 @echo off
-title WikiSuporte - Inicializador
+title WikiSuporte - Inicializador de Producao
 
 cd /d %~dp0
 
 echo ========================================
-echo   INICIANDO WIKISUPORTE
+echo   INICIANDO WIKISUPORTE (MODO SERVICO)
 echo ========================================
 
 REM Ambiente virtual
@@ -15,22 +15,24 @@ if exist venv\Scripts\activate.bat (
     call venv\Scripts\activate
 )
 
-python -m pip install --upgrade pip
-
-if exist requirements.txt (
-    pip install -r requirements.txt
-)
+if not exist logs mkdir logs
 
 echo.
-echo Iniciando Motor de Extracao...
+echo Iniciando Motor de Extracao em background...
 echo.
 
-start "Motor Extracao WikiSuporte" cmd /k python motor_extracao.py
+start "" /B python motor_extracao.py >> logs\motor_extracao.log 2>&1
 
 echo.
-echo Iniciando Streamlit...
+echo Iniciando Streamlit em modo headless...
 echo.
 
-start http://localhost:8501
+start "" /B python -m streamlit run app.py ^
+    --server.headless=true ^
+    --server.address=0.0.0.0 ^
+    --server.port=8501 ^
+    >> logs\streamlit.log 2>&1
 
-streamlit run app.py
+echo.
+echo Servicos iniciados. Fechando janela...
+exit

@@ -5,7 +5,11 @@ __pycache__/
 
 # C extensions
 *.so
-
+PostgreSQL/
+dump_wikisuporte.backup
+uploads/
+uploads_wiki/
+documentacoes_sistema/
 # Distribution / packaging
 .Python
 build/
