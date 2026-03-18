@@ -847,18 +847,7 @@ with aba_acervo:
                                     st.download_button("📎 Baixar Anexo", f, file_name=os.path.basename(str(anexo)), key=f"dl_man_def_{row.get('id', titulo)}")
 
                 
-                if cat_selecionada != "Selecione uma categoria...":
-                    df_cat = df_m[df_m['categoria'] == cat_selecionada]
-                    st.caption(f"A mostrar {len(df_cat)} manuais da categoria: **{cat_selecionada}**")
-                    
-                    for _, row in df_cat.iterrows():
-                        titulo = row.get('titulo', 'Sem Título')
-                        with st.expander(f"📖 {titulo}"):
-                            st.markdown(row.get('conteudo', ''))
-                            anexo = row.get('caminho_anexo', '')
-                            if pd.notna(anexo) and str(anexo).strip() and os.path.exists(str(anexo)):
-                                with open(anexo, "rb") as f:
-                                    st.download_button("📎 Baixar Anexo", f, file_name=os.path.basename(str(anexo)), key=f"dl_man_def_{row.get('id', titulo)}")
+               
 # ==========================================
 # ABA 5: HISTÓRICO E RANKING DA EQUIPE
 # ==========================================
@@ -1075,9 +1064,6 @@ with aba_nova:
                     try:
                         registrar_log_auditoria(usuario_logado_id, "NOVA_CONTRIBUICAO", f"Submeteu: {titulo[:30]}")
                     except NameError: pass
-                        
-                    time.sleep(1.5)
-                    st.rerun()
                     
                 except Exception as e:
                     st.error(f"❌ Erro ao salvar: {str(e)}")
@@ -1188,8 +1174,7 @@ with aba_minhas:
                                         },
                                     )
                                 st.success("Enviado à fila de avaliação.")
-                                time.sleep(1)
-                                st.rerun()
+                               
                             except Exception as e:
                                 st.error(f"Erro ao salvar: {e}")
                         if excluir:
@@ -1203,8 +1188,8 @@ with aba_minhas:
                                         {"id": int(row["id"]), "a": usuario_logado_id},
                                     )
                                 st.success("Contribuição excluída.")
-                                time.sleep(1)
-                                st.rerun()
+                                
+                               
                             except Exception as e:
                                 st.error(f"Erro ao excluir: {e}")
                 else:
@@ -1260,7 +1245,7 @@ if perfil_logado in ['coordenador', 'dev']:
                                 with engine.begin() as conn_apr: 
                                     conn_apr.execute(text("UPDATE base_conhecimento SET status = 'APROVADO' WHERE id = :id"), {"id": row['id']})
                                 registrar_log_auditoria(usuario_logado_id, "APROVOU_CONTRIBUICAO", f"Aprovou ID: {row['id']}")
-                                st.success("Documento homologado e publicado na Base!"); time.sleep(1); st.rerun()
+                                st.success("Documento homologado e publicado na Base!")
                             except Exception as e:
                                 st.error(f"Erro ao aprovar: {e}")
                     with c2:
@@ -1273,7 +1258,7 @@ if perfil_logado in ['coordenador', 'dev']:
                                     with engine.begin() as conn_rej: 
                                         conn_rej.execute(text("UPDATE base_conhecimento SET status = 'REJEITADO', motivo_rejeicao = :m WHERE id = :id"), {"m": motivo.strip(), "id": row['id']})
                                     registrar_log_auditoria(usuario_logado_id, "REJEITOU_CONTRIBUICAO", f"Rejeitou ID: {row['id']}")
-                                    st.success("Devolvido ao autor para correções!"); time.sleep(1); st.rerun()
+                                    st.success("Devolvido ao autor para correções!")
                                 except Exception as e:
                                     st.error(f"Erro ao rejeitar: {e}")
         else: 
@@ -1441,8 +1426,8 @@ with aba_explorar:
                                             except Exception:
                                                 pass
                                             st.success("Marcada como obsoleta. O autor foi avisado (e-mail, se configurado).")
-                                            time.sleep(1)
-                                            st.rerun()
+                                        
+                                            
                                         except Exception as e:
                                             st.error(f"Erro: {e}")
 

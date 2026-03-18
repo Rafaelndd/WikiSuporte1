@@ -169,9 +169,9 @@ def is_plantao_normal(dt):
     if wd in [5, 6]: 
         return True
         
-    # 0=Segunda-feira: Plantão do FDS encerra às 07:00. O novo começa às 18:20.
+    # 0=Segunda-feira: Plantão do FDS encerra às 07:30. O novo começa às 18:20.
     if wd == 0: 
-        if time_val <= datetime.time(7, 0): return True
+        if time_val <= datetime.time(7, 30): return True
         if time_val >= datetime.time(18, 20): return True
         return False
         
@@ -627,7 +627,7 @@ with aba3:
                     df_plantao_filtrado = pd.DataFrame()
                     
                     if regime == "Normal (Seg-Sex e Fim de Semana Padrão)":
-                        st.caption("Ciclo Automático: Seg a Qui (18:20 às 07:30). FDS Contínuo: Sexta 18:20 até Segunda às 07:00.")
+                        st.caption("Ciclo Automático: Seg a Qui (18:20 às 07:30). FDS Contínuo: Sexta 18:20 até Segunda às 07:30.")
                         mascara = df_goto['data_chamada'].apply(is_plantao_normal)
                         df_plantao_filtrado = df_goto[mascara].sort_values('data_chamada')
                         
