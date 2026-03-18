@@ -18,7 +18,6 @@ charset-normalizer
 click
 colorama
 cryptography
-ecdsa
 fastapi
 flatbuffers
 git-filter-repo
@@ -74,7 +73,6 @@ pydantic
 pydantic-settings
 pydantic_core
 pydeck
-pylance
 pyparsing
 pypdf>=4.0.0
 PySocks
