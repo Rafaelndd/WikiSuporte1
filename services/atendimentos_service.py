@@ -32,6 +32,30 @@ except Exception:
 UPLOAD_DIR = "uploads/atendimentos"
 CANAIS_PADRAO = ["Chat Multi360", "Via Ligação GoTo", "E-mail", "WhatsApp", "Outros"]
 CRITICIDADES = ["Baixa", "Média", "Alta", "Crítica"]
+CATEGORIAS_INICIAIS = [
+    "Erro PostoGestor",
+    "Erro Automação/Bombas",
+    "Erro na Conciliação de Cartões(Man/Aut)",
+    "Erro no Banco de Dados",
+    "Erros em Geral",
+    "Atualização / Retorno de versão do sistema",
+    "SPED Fiscal",
+    "SPED Contribuições",
+    "Ajustes/Alterações no Mapa de Pista",
+    "Conciliação Geral",
+    "TEF",
+    "Integrações PostoGestor",
+    "Documentos em Contingência",
+    "Cartões não Configurados",
+    "Criação/Manutenção de Relatórios Personalizados",
+    "Gerencial Geral",
+    "Atendimento para Caixa em Geral",
+    "PDV Móvel",
+    "PG Coletor",
+    "PG Mobile",
+    "Financeiro Geral",
+    "Configurações do PostoGestor em Geral",
+]
 
 
 def _num(txt: Optional[str]) -> str:
@@ -115,6 +139,15 @@ def ensure_schema() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_crm_cnpj_not_null ON clientes_crm(cnpj) WHERE cnpj IS NOT NULL AND cnpj <> ''",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_cliente_telefone ON clientes_telefones(id_cliente, numero) WHERE numero IS NOT NULL AND numero <> ''",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_alias_cliente_nome ON clientes_alias(cliente_id, lower(nome_variacao))",
+        """
+        CREATE TABLE IF NOT EXISTS atendimento_categorias (
+            id_categoria SERIAL PRIMARY KEY,
+            nome_categoria VARCHAR(255) NOT NULL,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_atendimento_categorias_nome_lower ON atendimento_categorias((lower(nome_categoria)))",
         # Registro de atendimento manual
         """
         CREATE TABLE IF NOT EXISTS atendimentos_registrados (
@@ -178,6 +211,79 @@ def ensure_schema() -> None:
                 # Algumas alterações podem falhar em bases antigas (tipos/constraints);
                 # o fluxo principal de registro deve continuar operacional.
                 continue
+        for nome in CATEGORIAS_INICIAIS:
+            try:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO atendimento_categorias (nome_categoria, ativo)
+                        SELECT :nome, TRUE
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM atendimento_categorias
+                            WHERE LOWER(TRIM(nome_categoria)) = LOWER(TRIM(:nome))
+                        )
+                        """
+                    ),
+                    {"nome": nome.strip()},
+                )
+            except Exception:
+                continue
+
+
+def listar_categorias_atendimento() -> List[str]:
+    engine = get_connection()
+    q = text(
+        """
+        SELECT nome_categoria
+        FROM atendimento_categorias
+        WHERE ativo = TRUE
+        ORDER BY nome_categoria
+        """
+    )
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(q).fetchall()
+        return [str(r[0]).strip() for r in rows if str(r[0] or "").strip()]
+    except Exception:
+        # Fallback para manter operação caso tabela ainda não exista.
+        return list(CATEGORIAS_INICIAIS)
+
+
+def adicionar_categoria_atendimento(nome_categoria: str, perfil: str) -> Tuple[bool, str]:
+    if perfil != "dev":
+        return False, "Somente usuários com perfil DEV podem adicionar categorias."
+    nome = str(nome_categoria or "").strip()
+    if not nome:
+        return False, "Informe o nome da categoria."
+    engine = get_connection()
+    try:
+        with engine.begin() as conn:
+            existe = conn.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM atendimento_categorias
+                    WHERE LOWER(TRIM(nome_categoria)) = LOWER(TRIM(:nome))
+                    LIMIT 1
+                    """
+                ),
+                {"nome": nome},
+            ).fetchone()
+            if existe:
+                return False, "Categoria já cadastrada."
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO atendimento_categorias (nome_categoria, ativo)
+                    VALUES (:nome, TRUE)
+                    """
+                ),
+                {"nome": nome[:255]},
+            )
+        return True, "Categoria adicionada com sucesso."
+    except Exception as e:
+        return False, f"Erro ao adicionar categoria: {e}"
 
 
 def listar_clientes(termo: str = "", limite: int = 30) -> pd.DataFrame:
@@ -272,6 +378,31 @@ def obter_cliente_por_id(id_cliente: int) -> Optional[Dict[str, Any]]:
     return {"id_cliente": int(row[0]), "razao_social": row[1], "cnpj": row[2]}
 
 
+def buscar_cliente_por_cnpj(cnpj: str) -> Optional[Dict[str, Any]]:
+    cnpj_limpo = _num(cnpj)
+    if not cnpj_limpo:
+        return None
+    engine = get_connection()
+    q = text(
+        """
+        SELECT id_cliente, razao_social, cnpj
+        FROM clientes_crm
+        WHERE cnpj = :cnpj
+          AND COALESCE(ativo, TRUE) = TRUE
+        LIMIT 1
+        """
+    )
+    with engine.connect() as conn:
+        row = conn.execute(q, {"cnpj": cnpj_limpo}).fetchone()
+    if not row:
+        return None
+    return {
+        "id_cliente": int(row[0]),
+        "razao_social": str(row[1] or ""),
+        "cnpj": str(row[2] or ""),
+    }
+
+
 def _upsert_contato(conn: Any, id_cliente: int, contato_nome: str, telefone: str, email: str) -> Optional[int]:
     contato_nome = (contato_nome or "").strip()
     telefone = _num(telefone)
@@ -327,27 +458,35 @@ def _upsert_contato(conn: Any, id_cliente: int, contato_nome: str, telefone: str
     return int(novo[0]) if novo else None
 
 
-def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str = "MANUAL") -> Optional[int]:
+def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str = "MANUAL") -> Tuple[Optional[int], str, Optional[str]]:
     numero = _num(telefone_raw)
     if not numero:
-        return None
+        return None, "sem_numero", None
     tel_hash = gerar_hash_lgpd(numero)
     pk_col = _coluna_pk_telefone(conn)
 
     row = conn.execute(
         text(
             f"""
-            SELECT {pk_col}
-            FROM clientes_telefones
-            WHERE id_cliente = :idc
-              AND numero = :num
+            SELECT t.{pk_col}, t.id_cliente, c.razao_social
+            FROM clientes_telefones t
+            JOIN clientes_crm c ON c.id_cliente = t.id_cliente
+            WHERE t.numero = :num
+              AND COALESCE(t.ativo, TRUE) = TRUE
+              AND COALESCE(c.ativo, TRUE) = TRUE
+            ORDER BY CASE WHEN t.id_cliente = :idc THEN 0 ELSE 1 END, t.{pk_col}
             LIMIT 1
             """
         ),
         {"idc": id_cliente, "num": numero},
     ).fetchone()
     if row:
-        return int(row[0])
+        id_telefone = int(row[0])
+        id_cliente_existente = int(row[1])
+        nome_cliente_existente = str(row[2] or "")
+        if id_cliente_existente == int(id_cliente):
+            return id_telefone, "mesmo_cliente", nome_cliente_existente
+        return None, "outro_cliente", nome_cliente_existente
 
     try:
         novo = conn.execute(
@@ -360,7 +499,7 @@ def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str 
             ),
             {"idc": id_cliente, "origem": origem, "num": numero, "h": tel_hash},
         ).fetchone()
-        return int(novo[0]) if novo else None
+        return (int(novo[0]), "inserido", None) if novo else (None, "erro", None)
     except Exception:
         # Fallback para estruturas mais antigas
         novo = conn.execute(
@@ -373,7 +512,7 @@ def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str 
             ),
             {"idc": id_cliente, "origem": origem, "num": numero},
         ).fetchone()
-        return int(novo[0]) if novo else None
+        return (int(novo[0]), "inserido", None) if novo else (None, "erro", None)
 
 
 def _salvar_anexos(id_atendimento: int, arquivos: List[Any]) -> List[Tuple[str, str, int]]:
@@ -477,6 +616,7 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
 
     engine = get_connection()
     try:
+        msg_telefone = ""
         with engine.begin() as conn:
             if not id_cliente:
                 if cnpj_limpo:
@@ -493,7 +633,33 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
                     ).fetchone()
                     if row_cnpj:
                         id_cliente = int(row_cnpj[0])
-                if not id_cliente and tel_limpo:
+                if cnpj_limpo and not id_cliente:
+                    if not razao_social:
+                        return False, "CNPJ não encontrado. Informe a Razão Social para criar o cliente.", None
+                    try:
+                        novo_cli = conn.execute(
+                            text(
+                                """
+                                INSERT INTO clientes_crm (razao_social, cnpj, ativo)
+                                VALUES (:nome, :cnpj, TRUE)
+                                RETURNING id_cliente
+                                """
+                            ),
+                            {"nome": razao_social, "cnpj": cnpj_limpo},
+                        ).fetchone()
+                    except Exception:
+                        novo_cli = conn.execute(
+                            text(
+                                """
+                                INSERT INTO clientes_crm (razao_social, cnpj)
+                                VALUES (:nome, :cnpj)
+                                RETURNING id_cliente
+                                """
+                            ),
+                            {"nome": razao_social, "cnpj": cnpj_limpo},
+                        ).fetchone()
+                    id_cliente = int(novo_cli[0]) if novo_cli else None
+                if not cnpj_limpo and not id_cliente and tel_limpo:
                     row_tel = conn.execute(
                         text(
                             """
@@ -508,7 +674,7 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
                     ).fetchone()
                     if row_tel:
                         id_cliente = int(row_tel[0])
-                if not id_cliente and razao_social:
+                if not cnpj_limpo and not id_cliente and razao_social:
                     row_nome = conn.execute(
                         text(
                             """
@@ -573,12 +739,21 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
                 tel_limpo,
                 str(payload.get("email_contato") or ""),
             )
-            telefone_id = _upsert_telefone(
+            telefone_id, status_telefone, cliente_dono_telefone = _upsert_telefone(
                 conn,
                 int(id_cliente),
                 tel_limpo,
                 origem=str(payload.get("origem_registro") or "MANUAL"),
             )
+            if status_telefone == "outro_cliente":
+                return (
+                    False,
+                    f"Telefone já vinculado a outro cliente ({cliente_dono_telefone or 'não identificado'}). "
+                    "Use outro número para este cadastro.",
+                    None,
+                )
+            if status_telefone == "mesmo_cliente":
+                msg_telefone = " Número já estava vinculado a este cliente e foi reutilizado."
 
             row = conn.execute(
                 text(
@@ -625,7 +800,7 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
             _registrar_embedding(conn, id_atendimento, motivo, str(payload.get("solucao") or ""))
 
         _salvar_anexos(id_atendimento, anexos or [])
-        return True, "Atendimento registrado com sucesso.", id_atendimento
+        return True, f"Atendimento registrado com sucesso.{msg_telefone}", id_atendimento
     except Exception as e:
         return False, f"Erro ao salvar atendimento: {e}", None
 
@@ -650,9 +825,9 @@ def atualizar_atendimento(id_atendimento: int, usuario_id: int, payload: Dict[st
     if len(motivo) < 10:
         return False, "Motivo deve ter no mínimo 10 caracteres."
 
-    where_extra = ""
     params: Dict[str, Any] = {
         "id": id_atendimento,
+        "uid": usuario_id,
         "setor": setor,
         "categoria": categoria[:255],
         "criticidade": criticidade,
@@ -665,9 +840,6 @@ def atualizar_atendimento(id_atendimento: int, usuario_id: int, payload: Dict[st
         "abriu_chamado": bool(payload.get("abriu_chamado", False)),
         "nr_chamado": (payload.get("nr_chamado") or "")[:50] or None,
     }
-    if perfil == "analista":
-        where_extra = " AND usuario_id = :uid "
-        params["uid"] = usuario_id
     try:
         with engine.begin() as conn:
             up = conn.execute(
@@ -688,17 +860,41 @@ def atualizar_atendimento(id_atendimento: int, usuario_id: int, payload: Dict[st
                       nr_chamado = :nr_chamado,
                       atualizado_em = CURRENT_TIMESTAMP
                     WHERE id_atendimento = :id
-                    {where_extra}
+                      AND usuario_id = :uid
                     """
                 ),
                 params,
             )
             if not up.rowcount:
-                return False, "Atendimento não encontrado ou sem permissão para editar."
+                return False, "Atendimento não encontrado ou você não é o autor."
             _registrar_embedding(conn, id_atendimento, motivo, str(payload.get("solucao") or ""))
         return True, "Atendimento atualizado com sucesso."
     except Exception as e:
         return False, f"Erro ao atualizar atendimento: {e}"
+
+
+def excluir_atendimento(id_atendimento: int, usuario_id: int) -> Tuple[bool, str]:
+    engine = get_connection()
+    try:
+        with engine.begin() as conn:
+            up = conn.execute(
+                text(
+                    """
+                    UPDATE atendimentos_registrados
+                    SET ativo = FALSE,
+                        atualizado_em = CURRENT_TIMESTAMP
+                    WHERE id_atendimento = :id
+                      AND usuario_id = :uid
+                      AND ativo = TRUE
+                    """
+                ),
+                {"id": int(id_atendimento), "uid": int(usuario_id)},
+            )
+            if not up.rowcount:
+                return False, "Atendimento não encontrado ou você não é o autor."
+        return True, "Atendimento excluído com sucesso."
+    except Exception as e:
+        return False, f"Erro ao excluir atendimento: {e}"
 
 
 def _montar_where_filtros(
@@ -709,14 +905,12 @@ def _montar_where_filtros(
     cliente_id: Optional[int],
     setor: str,
     canal: str,
+    protocolo: str,
     analista_id: Optional[int],
 ) -> Tuple[str, Dict[str, Any]]:
     where = ["a.ativo = TRUE"]
     params: Dict[str, Any] = {}
-    if perfil == "analista" and usuario_id:
-        where.append("a.usuario_id = :uid")
-        params["uid"] = usuario_id
-    elif analista_id:
+    if analista_id:
         where.append("a.usuario_id = :aid")
         params["aid"] = analista_id
 
@@ -735,6 +929,10 @@ def _montar_where_filtros(
     if canal and canal != "Todos":
         where.append("a.canal = :canal")
         params["canal"] = canal
+    protocolo_like = str(protocolo or "").strip()
+    if protocolo_like:
+        where.append("COALESCE(a.protocolo, '') ILIKE :protocolo")
+        params["protocolo"] = f"%{protocolo_like}%"
     return " WHERE " + " AND ".join(where), params
 
 
@@ -764,6 +962,7 @@ def consultar_atendimentos(
     cliente_id: Optional[int],
     setor: str = "Todos",
     canal: str = "Todos",
+    protocolo: str = "",
     analista_id: Optional[int] = None,
     busca_semantica: str = "",
     limite: int = 300,
@@ -772,7 +971,7 @@ def consultar_atendimentos(
     with engine.connect() as conn_meta:
         telefone_pk_col = _coluna_pk_telefone(conn_meta)
     where_sql, params = _montar_where_filtros(
-        usuario_id, perfil, data_ini, data_fim, cliente_id, setor, canal, analista_id
+        usuario_id, perfil, data_ini, data_fim, cliente_id, setor, canal, protocolo, analista_id
     )
 
     # Busca por texto: motivo, solucao, categoria, setor, canal, cliente
@@ -800,6 +999,7 @@ def consultar_atendimentos(
             f"""
             SELECT
                 a.id_atendimento,
+                a.usuario_id,
                 a.data_atendimento,
                 COALESCE(u.nome, a.nome_analista, 'Sem nome') AS analista,
                 c.razao_social AS cliente,
@@ -840,6 +1040,7 @@ def consultar_atendimentos(
             f"""
             SELECT
                 a.id_atendimento,
+                a.usuario_id,
                 a.data_atendimento,
                 COALESCE(u.nome, a.nome_analista, 'Sem nome') AS analista,
                 c.razao_social AS cliente,
@@ -880,6 +1081,7 @@ def consultar_atendimentos(
                 f"""
                 SELECT
                     a.id_atendimento,
+                    a.usuario_id,
                     a.data_atendimento,
                     COALESCE(u.nome, a.nome_analista, 'Sem nome') AS analista,
                     c.razao_social AS cliente,

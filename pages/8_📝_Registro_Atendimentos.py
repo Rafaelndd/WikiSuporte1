@@ -13,10 +13,15 @@ from modules.database import get_connection
 from services.atendimentos_service import (
     CANAIS_PADRAO,
     CRITICIDADES,
+    CATEGORIAS_INICIAIS,
+    adicionar_categoria_atendimento,
     atualizar_atendimento,
+    buscar_cliente_por_cnpj,
     buscar_correspondencias_cliente,
     consultar_atendimentos,
     ensure_schema,
+    excluir_atendimento,
+    listar_categorias_atendimento,
     listar_anexos_atendimento,
     listar_clientes,
     metricas_resumo,
@@ -100,6 +105,25 @@ def _formatar_telefone(numero: Any) -> str:
     if len(s) == 10:
         return f"({s[:2]}) {s[2:6]}-{s[6:]}"
     return str(numero or "")
+
+
+def _formatar_telefone_input_br(numero: Any) -> str:
+    s = "".join(ch for ch in str(numero or "") if ch.isdigit())[:11]
+    if not s:
+        return ""
+    if len(s) <= 2:
+        return f"({s}"
+    ddd = s[:2]
+    resto = s[2:]
+    if len(resto) <= 4:
+        return f"({ddd}) {resto}"
+    if len(resto) <= 8:
+        return f"({ddd}) {resto[:4]}-{resto[4:]}"
+    return f"({ddd}) {resto[0]} {resto[1:5]}-{resto[5:9]}"
+
+
+def _mascarar_telefone_campo(campo_key: str) -> None:
+    st.session_state[campo_key] = _formatar_telefone_input_br(st.session_state.get(campo_key, ""))
 
 
 def _fmt_bool(valor: Any, positivo: str = "Sim", negativo: str = "Não") -> str:
@@ -284,23 +308,60 @@ with tab_lancar:
         st.session_state["p8_reset_pending"] = False
     p8n = st.session_state["p8_form_nonce"]
     if st.session_state.get("p8_last_saved_id"):
+        msg_saved = str(st.session_state.get("p8_last_saved_msg") or "Atendimento registrado com sucesso.")
         st.toast("✅ Atendimento registrado com sucesso!", icon="✅")
-        st.success(f"Atendimento #{st.session_state['p8_last_saved_id']} registrado com sucesso.")
+        st.success(f"Atendimento #{st.session_state['p8_last_saved_id']}: {msg_saved}")
         st.balloons()
         st.session_state.pop("p8_last_saved_id", None)
+        st.session_state.pop("p8_last_saved_msg", None)
 
     def _reset_form_p8() -> None:
         st.session_state["p8_reset_pending"] = True
 
-    st.caption("Digite Razão Social/CNPJ/Telefone. O sistema sugere correspondências exatas em tempo real.")
+    categorias = listar_categorias_atendimento() or list(CATEGORIAS_INICIAIS)
+    if perfil == "dev":
+        with st.expander("⚙️ Gerenciar categorias de atendimento (DEV)"):
+            nova_categoria = st.text_input("Nova categoria", key="p8_nova_categoria_dev")
+            if st.button("Adicionar categoria", key="p8_add_categoria_dev", use_container_width=True):
+                ok_cat, msg_cat = adicionar_categoria_atendimento(nova_categoria, perfil)
+                if ok_cat:
+                    st.success(msg_cat)
+                    st.rerun()
+                else:
+                    st.error(msg_cat)
+
+    st.caption("Digite CNPJ e Telefone. Se o CNPJ existir, o cliente será identificado automaticamente.")
+    razao_key = f"p8_razao_social_{p8n}"
+    cnpj_key = f"p8_cnpj_{p8n}"
+    telefone_key = f"p8_telefone_{p8n}"
+    cliente_por_cnpj = buscar_cliente_por_cnpj(st.session_state.get(cnpj_key, ""))
+    if cliente_por_cnpj:
+        st.session_state[razao_key] = str(cliente_por_cnpj.get("razao_social") or "")
     c_ident1, c_ident2, c_ident3 = st.columns(3)
-    razao_social = c_ident1.text_input("Razão Social *", key=f"p8_razao_social_{p8n}", placeholder="Ex.: Posto Mahl")
-    cnpj_in = c_ident2.text_input("CNPJ", key=f"p8_cnpj_{p8n}", placeholder="00.000.000/0000-00")
-    telefone = c_ident3.text_input("Telefone/Celular", key=f"p8_telefone_{p8n}", placeholder="(xx) xxxxx-xxxx")
+    razao_social = c_ident1.text_input(
+        "Razão Social *",
+        key=razao_key,
+        placeholder="Ex.: Posto Mahl",
+        disabled=bool(cliente_por_cnpj),
+    )
+    cnpj_in = c_ident2.text_input("CNPJ", key=cnpj_key, placeholder="00.000.000/0000-00")
+    telefone = c_ident3.text_input(
+        "Telefone/Celular",
+        key=telefone_key,
+        placeholder="(48) 9 9999-8888",
+        help="Formato brasileiro. Ex.: (48) 9 9999-8888",
+        on_change=_mascarar_telefone_campo,
+        args=(telefone_key,),
+    )
 
     df_matches = buscar_correspondencias_cliente(cnpj=cnpj_in, telefone=telefone, limite=8)
     cliente_id_escolhido = None
-    if not df_matches.empty:
+    razao_social_payload = razao_social
+    if cliente_por_cnpj:
+        cliente_id_escolhido = int(cliente_por_cnpj["id_cliente"])
+        razao_social_payload = str(cliente_por_cnpj["razao_social"] or "")
+        st.success(f"Cliente identificado automaticamente pelo CNPJ: {razao_social_payload}")
+    if not cliente_por_cnpj and not df_matches.empty:
         st.markdown("**Correspondências exatas encontradas:**")
         opcoes_match = {
             f"{r['razao_social']} | CNPJ: {r['cnpj'] or 'não informado'} | TEL: {r['telefone'] or '-'} | via {r['origem_match']}": int(r["id_cliente"])
@@ -313,8 +374,12 @@ with tab_lancar:
         )
         if escolha_match != "-- Cadastrar novo cliente/informação --":
             cliente_id_escolhido = opcoes_match[escolha_match]
+            if not cliente_por_cnpj:
+                escolhido = next((r for _, r in df_matches.iterrows() if int(r["id_cliente"]) == cliente_id_escolhido), None)
+                if escolhido is not None:
+                    razao_social_payload = str(escolhido["razao_social"] or razao_social_payload)
             st.success("Cadastro existente selecionado. Os dados novos (telefone/CNPJ ausentes) serão incorporados se necessário.")
-    else:
+    elif not cliente_por_cnpj:
         if cnpj_in.strip() or telefone.strip():
             st.info("Nenhuma correspondência exata. Ao salvar, o cadastro será criado/atualizado automaticamente.")
 
@@ -327,13 +392,17 @@ with tab_lancar:
         st.markdown("#### 🗂️ Tipificação")
         t1, t2, t3 = st.columns(3)
         setor = t1.selectbox("Setor *", ["Suporte Geral", "TEF"], key=f"p8_setor_{p8n}")
-        categoria = t2.text_input("Categoria *", placeholder="Ex.: Instalação, Dúvida Fiscal, Lentidão...", key=f"p8_categoria_{p8n}")
+        categoria = t2.selectbox("Categoria *", categorias, key=f"p8_categoria_{p8n}")
         criticidade = t3.selectbox("Criticidade *", CRITICIDADES, key=f"p8_criticidade_{p8n}")
 
         st.markdown("#### 📞 Canal")
         cc1, cc2, cc3 = st.columns(3)
         canal = cc1.selectbox("Canal *", CANAIS_PADRAO, key=f"p8_canal_{p8n}")
-        protocolo = cc2.text_input("Protocolo", key=f"p8_protocolo_{p8n}")
+        protocolo = cc2.text_input(
+            "Protocolo",
+            key=f"p8_protocolo_{p8n}",
+            help="Obrigatório somente quando o canal for Chat Multi360.",
+        )
         duracao_min = cc3.number_input("Duração (min)", min_value=0, step=1, value=0, key=f"p8_duracao_min_{p8n}")
         if canal == "Chat Multi360":
             st.caption("Para canal Multi360, o protocolo é obrigatório.")
@@ -342,7 +411,7 @@ with tab_lancar:
         motivo = st.text_area("Motivo / Assunto *", height=120, key=f"p8_motivo_{p8n}")
         solucao = st.text_area("Solução", height=120, key=f"p8_solucao_{p8n}")
         d1, d2, d3 = st.columns(3)
-        resolvido = d1.checkbox("Resolvido", key=f"p8_resolvido_{p8n}")
+        resolvido = d1.checkbox("Resolvido?", key=f"p8_resolvido_{p8n}")
         abriu_chamado = d2.checkbox("Precisou abrir chamado?", key=f"p8_abriu_chamado_{p8n}")
         nr_chamado = d3.text_input("Nº do chamado (quando houver)", key=f"p8_nr_chamado_{p8n}")
         data_atendimento = st.date_input("Data do atendimento", value=date.today(), key=f"p8_data_atendimento_{p8n}")
@@ -360,7 +429,7 @@ with tab_lancar:
                 "usuario_id": usuario_id,
                 "nome_analista": nome_usuario,
                 "cliente_id": cliente_id_escolhido,
-                "razao_social": razao_social,
+                "razao_social": razao_social_payload,
                 "cnpj": cnpj_in,
                 "contato_nome": contato_nome,
                 "telefone": telefone,
@@ -384,6 +453,7 @@ with tab_lancar:
                 status.update(label="Finalizado." if ok else "Falha no registro.", state="complete" if ok else "error")
             if ok:
                 st.session_state["p8_last_saved_id"] = novo_id
+                st.session_state["p8_last_saved_msg"] = msg
                 _reset_form_p8()
                 st.rerun()
             else:
@@ -396,11 +466,12 @@ with tab_consulta:
 
     with st.container(border=True):
         with st.form("filtro_consulta_atendimentos", clear_on_submit=False):
-            f1, f2, f3, f4 = st.columns([1, 1, 1.2, 1.2])
+            f1, f2, f3, f4, f5 = st.columns([1, 1, 1.2, 1.2, 1.1])
             data_ini = f1.date_input("Data inicial", value=ini_default, key="f_data_ini")
             data_fim = f2.date_input("Data final", value=hoje, key="f_data_fim")
             setor_f = f3.selectbox("Setor", ["Todos", "Suporte Geral", "TEF"], key="f_setor")
             canal_f = f4.selectbox("Canal", ["Todos"] + CANAIS_PADRAO, key="f_canal")
+            protocolo_f = f5.text_input("Nº protocolo", key="f_protocolo")
 
             busca_sem = st.text_input(
                 "Busca semântica por assunto/motivo/solução",
@@ -436,6 +507,7 @@ with tab_consulta:
             "f_data_fim",
             "f_setor",
             "f_canal",
+            "f_protocolo",
             "f_semantica",
             "f_cli_termo",
             "f_cliente",
@@ -459,6 +531,7 @@ with tab_consulta:
                 cliente_id=cliente_id,
                 setor=setor_f,
                 canal=canal_f,
+                protocolo=(protocolo_f or "").strip(),
                 analista_id=analista_id,
                 busca_semantica=(busca_sem or "").strip(),
                 limite=1000,
@@ -537,54 +610,83 @@ with tab_consulta:
         escolha = st.selectbox("Selecione o atendimento", choices, key="ed_sel")
         id_editar = id_por_label[escolha]
         row = df_result[df_result["id_atendimento"] == id_editar].iloc[0]
-
-        with st.form("form_editar_atendimento"):
-            e1, e2, e3 = st.columns(3)
-            setor_e = e1.selectbox("Setor", ["Suporte Geral", "TEF"], index=0 if row["setor"] == "Suporte Geral" else 1)
-            categoria_e = e2.text_input("Categoria", value=str(row["categoria"] or ""))
-            criticidade_e = e3.selectbox(
-                "Criticidade",
-                CRITICIDADES,
-                index=CRITICIDADES.index(str(row["criticidade"])) if str(row["criticidade"]) in CRITICIDADES else 1,
-            )
-            ec1, ec2, ec3 = st.columns(3)
-            canal_e = ec1.selectbox("Canal", CANAIS_PADRAO, index=CANAIS_PADRAO.index(str(row["canal"])) if str(row["canal"]) in CANAIS_PADRAO else 0)
-            protocolo_e = ec2.text_input("Protocolo", value=str(row["protocolo"] or ""))
-            duracao_base = _safe_int(row["duracao_min"], 0) if "duracao_min" in row.index else 0
-            duracao_e = ec3.number_input("Duração (min)", min_value=0, step=1, value=duracao_base)
-            motivo_e = st.text_area("Motivo", value=str(row["motivo"] or ""), height=100)
-            solucao_e = st.text_area("Solução", value=str(row["solucao"] or ""), height=100)
-            eb1, eb2, eb3 = st.columns(3)
-            resolvido_e = eb1.checkbox("Resolvido?", value=bool(row["resolvido"]))
-            abriu_chamado_e = eb2.checkbox("Abriu chamado?", value=bool(row["abriu_chamado"]))
-            nr_chamado_e = eb3.text_input("Nº chamado", value=str(row["nr_chamado"] or ""))
-
-            salvar_ed = st.form_submit_button("Salvar edição", type="primary", use_container_width=True)
-            if salvar_ed:
-                ok, msg = atualizar_atendimento(
-                    id_atendimento=id_editar,
-                    usuario_id=int(usuario_id or 0),
-                    perfil=perfil,
-                    payload={
-                        "setor": setor_e,
-                        "categoria": categoria_e,
-                        "criticidade": criticidade_e,
-                        "canal": canal_e,
-                        "protocolo": protocolo_e,
-                        "duracao_min": _safe_int(duracao_e, 0),
-                        "motivo": motivo_e,
-                        "solucao": solucao_e,
-                        "resolvido": resolvido_e,
-                        "abriu_chamado": abriu_chamado_e,
-                        "nr_chamado": nr_chamado_e,
-                    },
+        autor_id = _safe_int(row.get("usuario_id"), 0)
+        usuario_logado_id = _safe_int(usuario_id, 0)
+        pode_alterar = autor_id != 0 and autor_id == usuario_logado_id
+        if not pode_alterar:
+            st.info("Apenas o autor do atendimento pode alterar ou excluir este registro.")
+        else:
+            categorias_edicao = listar_categorias_atendimento() or list(CATEGORIAS_INICIAIS)
+            categoria_atual = str(row["categoria"] or "").strip()
+            if categoria_atual and categoria_atual not in categorias_edicao:
+                categorias_edicao = [categoria_atual] + categorias_edicao
+            with st.form("form_editar_atendimento"):
+                e1, e2, e3 = st.columns(3)
+                setor_e = e1.selectbox("Setor", ["Suporte Geral", "TEF"], index=0 if row["setor"] == "Suporte Geral" else 1)
+                categoria_e = e2.selectbox(
+                    "Categoria",
+                    categorias_edicao,
+                    index=categorias_edicao.index(categoria_atual) if categoria_atual in categorias_edicao else 0,
                 )
-                if ok:
-                    st.success(msg)
+                criticidade_e = e3.selectbox(
+                    "Criticidade",
+                    CRITICIDADES,
+                    index=CRITICIDADES.index(str(row["criticidade"])) if str(row["criticidade"]) in CRITICIDADES else 1,
+                )
+                ec1, ec2, ec3 = st.columns(3)
+                canal_e = ec1.selectbox("Canal", CANAIS_PADRAO, index=CANAIS_PADRAO.index(str(row["canal"])) if str(row["canal"]) in CANAIS_PADRAO else 0)
+                protocolo_e = ec2.text_input("Protocolo", value=str(row["protocolo"] or ""))
+                duracao_base = _safe_int(row["duracao_min"], 0) if "duracao_min" in row.index else 0
+                duracao_e = ec3.number_input("Duração (min)", min_value=0, step=1, value=duracao_base)
+                motivo_e = st.text_area("Motivo", value=str(row["motivo"] or ""), height=100)
+                solucao_e = st.text_area("Solução", value=str(row["solucao"] or ""), height=100)
+                eb1, eb2, eb3 = st.columns(3)
+                resolvido_e = eb1.checkbox("Resolvido", value=bool(row["resolvido"]))
+                abriu_chamado_e = eb2.checkbox("Abriu chamado?", value=bool(row["abriu_chamado"]))
+                nr_chamado_e = eb3.text_input("Nº chamado", value=str(row["nr_chamado"] or ""))
+
+                salvar_ed = st.form_submit_button("Salvar edição", type="primary", use_container_width=True)
+                if salvar_ed:
+                    ok, msg = atualizar_atendimento(
+                        id_atendimento=id_editar,
+                        usuario_id=int(usuario_id or 0),
+                        perfil=perfil,
+                        payload={
+                            "setor": setor_e,
+                            "categoria": categoria_e,
+                            "criticidade": criticidade_e,
+                            "canal": canal_e,
+                            "protocolo": protocolo_e,
+                            "duracao_min": _safe_int(duracao_e, 0),
+                            "motivo": motivo_e,
+                            "solucao": solucao_e,
+                            "resolvido": resolvido_e,
+                            "abriu_chamado": abriu_chamado_e,
+                            "nr_chamado": nr_chamado_e,
+                        },
+                    )
+                    if ok:
+                        st.success(msg)
+                        st.session_state.pop("df_consulta_atend", None)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+            col_exc1, col_exc2 = st.columns([1, 2])
+            confirma_exc = col_exc1.checkbox("Confirmo exclusão", key=f"p8_conf_excluir_{id_editar}")
+            if col_exc2.button(
+                "🗑️ Excluir atendimento",
+                key=f"p8_btn_excluir_{id_editar}",
+                use_container_width=True,
+                disabled=not confirma_exc,
+            ):
+                ok_exc, msg_exc = excluir_atendimento(id_editar, usuario_logado_id)
+                if ok_exc:
+                    st.success(msg_exc)
                     st.session_state.pop("df_consulta_atend", None)
                     st.rerun()
                 else:
-                    st.error(msg)
+                    st.error(msg_exc)
 
         anexos_df = listar_anexos_atendimento(id_editar)
         if not anexos_df.empty:
