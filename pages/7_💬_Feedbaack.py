@@ -1,4 +1,6 @@
 import streamlit as st
+import dotenv
+dotenv.load_dotenv()  # Carrega as variáveis de ambiente do arquivo .env
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime
@@ -73,27 +75,42 @@ with st.container(border=True):
 
         enviado = st.form_submit_button("Enviar feedback", use_container_width='strech')
 
-        # --- 4. PROCESSAMENTO DO FORMULÁRIO ---
+# --- 4. PROCESSAMENTO DO FORMULÁRIO ---
         if enviado:
             if not mensagem.strip() or not assunto.strip():
                 st.warning("Por favor, preencha pelo menos **Assunto** e **Descrição detalhada**.")
             else:
+                import os # Importar no topo do seu arquivo principal
+                
                 id_usuario = st.session_state.get("usuario_id", "ID_DESCONHECIDO")
                 nome_usuario = st.session_state.get("usuario_nome", "NOME_DESCONHECIDO")
                 data_atual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-                try:
-                    # Buscando credenciais de e-mail já configuradas em st.secrets
-                    smtp_server = st.secrets["email"]["smtp_server"]
-                    smtp_port = st.secrets["email"]["smtp_port"]
-                    email_remetente = st.secrets["email"]["remetente"]
-                    senha_remetente = st.secrets["email"]["senha"]
-                    email_destinatario = st.secrets["email"]["destinatario"]
+                # Resgate seguro de variáveis de ambiente
+                smtp_server = os.getenv("EMAIL_SUPORTE_HOST")
+                smtp_port = int(os.getenv("EMAIL_SUPORTE_PORT", 465))
+                email_conta = os.getenv("EMAIL_SUPORTE_USER")
+                senha_smtp = os.getenv("EMAIL_SUPORTE_PASS")
+                nome_remetente = os.getenv("EMAIL_SUPORTE_NAME", "Suporte Epsy")
 
+                # Validação de segurança básica antes de tentar a conexão
+                if not senha_smtp or not smtp_server:
+                    st.error("Erro interno: Credenciais de envio não configuradas no ambiente.")
+                    st.stop()
+
+                try:
                     msg = EmailMessage()
                     msg["Subject"] = f"WikiSuporte - Novo Feedback ({tipo_feedback})"
-                    msg["From"] = email_remetente
-                    msg["To"] = email_destinatario
+                    
+                    # Formatação profissional: Exibe o nome amigável e oculta o e-mail bruto na interface do usuário
+                    msg["From"] = f"{nome_remetente} <{email_conta}>"
+                    msg["To"] = email_conta # O sistema envia para a própria caixa de suporte
+                    
+                    # Fluxo operacional otimizado: Permite responder direto ao usuário
+                    if email_contato.strip():
+                        msg["Reply-To"] = email_contato
+                    else:
+                        msg["Reply-To"] = email_conta
 
                     corpo_email = f"""
 Novo feedback recebido através do sistema WikiSuporte.
@@ -112,20 +129,23 @@ Assunto...........: {assunto}
 {mensagem}
 
 -------------------------
-Observação: responda para o e-mail informado acima para notificar o usuário.
+Observação: Se o usuário informou um e-mail, basta clicar em 'Responder' no seu cliente de e-mail para contatá-lo.
 """
-
                     msg.set_content(corpo_email)
 
-                    with smtplib.SMTP(smtp_server, smtp_port) as server:
-                        server.starttls()
-                        server.login(email_remetente, senha_remetente)
+                    # CONEXÃO ATUALIZADA: Uso obrigatório de SMTP_SSL para a porta 465
+                    with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+                        server.login(email_conta, senha_smtp)
                         server.send_message(msg)
 
                     st.success(
-                        "Seu feedback foi registrado e encaminhado para análise. "
-                        "Caso tenha informado um e-mail de contato, você poderá receber um retorno por esse canal."
+                        "Seu feedback foi registrado e encaminhado para nossa equipe. "
+                        "Agradecemos sua contribuição para a melhoria do sistema!"
                     )
 
+                except smtplib.SMTPAuthenticationError:
+                    st.error("Falha na autenticação. Verifique o usuário e senha configurados no servidor.")
+                    print("[ERRO SMTP] Falha de autenticação - Senha ou Usuário incorretos.")
                 except Exception as e:
-                    st.error(f"Erro ao processar o envio do e-mail de feedback: {e}")
+                    st.error("Não foi possível processar o envio no momento. Tente novamente mais tarde.")
+                    print(f"[ERRO SMTP] Falha geral no envio de feedback: {e}")

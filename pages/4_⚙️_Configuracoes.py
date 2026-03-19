@@ -371,18 +371,26 @@ with aba_clientes:
 
 if aba_notificacoes:
     with aba_notificacoes:
-        st.subheader("📣 Painel Administrativo de Notificações")
+        st.subheader("📣 Painel do Suporte para Notificações")
         st.caption("Dispare comunicados em tempo real para usuários ativos. Tipos: comunicado, aviso, erro crítico e bloqueio de versão.")
 
         with st.form("form_notificacao_admin"):
             c1, c2, c3 = st.columns(3)
             tipo = c1.selectbox(
                 "Tipo *",
-                ["comunicado", "aviso", "erro_critico", "versao_bloqueada"],
+                ["Comunicado", "Aviso", "Erro Crítico", "Versão Bloqueada"],
                 help="Erro crítico e versão bloqueada aparecem com destaque no topo.",
             )
-            target_role = c2.selectbox("Público-alvo", ["todos", "tecnico", "supervisor", "coordenador", "dev"])
-            horas_expira = c3.number_input("Expira em (horas, 0 = sem expiração)", min_value=0, max_value=720, value=0, step=1)
+            target_role = c2.selectbox("Público-alvo", ["Todos", "Analistas", "Supervisores", "Coordenadores", "Desenvolvedores"])
+            horas_expira = c3.number_input("Expira em (horas)", min_value=0, max_value=720, value=0, step=1)
+            minutos_expira = st.number_input(
+                "Expira em (minutos)",
+                min_value=0,
+                max_value=59,
+                value=0,
+                step=1,
+                help="Use horas e minutos. Ex.: 1 hora e 30 minutos.",
+            )
             titulo = st.text_input("Título")
             mensagem = st.text_area("Mensagem *", height=120)
             cmod1, cmod2 = st.columns(2)
@@ -397,8 +405,9 @@ if aba_notificacoes:
                 else:
                     with st.status("Publicando comunicado...", expanded=False) as status:
                         exp = None
-                        if int(horas_expira or 0) > 0:
-                            exp = datetime.now() + pd.Timedelta(hours=int(horas_expira))
+                        total_minutos_exp = (int(horas_expira or 0) * 60) + int(minutos_expira or 0)
+                        if total_minutos_exp > 0:
+                            exp = datetime.now() + pd.Timedelta(minutes=total_minutos_exp)
                         ok, msg = criar_notificacao(
                             tipo=tipo,
                             mensagem=mensagem,
@@ -406,6 +415,7 @@ if aba_notificacoes:
                             titulo=titulo,
                             target_role=target_role,
                             data_expiracao=exp,
+                            dedupe_seconds=120,
                         )
                         if ok and tipo == "versao_bloqueada" and modulo_nome.strip() and versao_prob.strip():
                             okb, _ = registrar_bloqueio_versao(modulo_nome.strip(), versao_prob.strip(), motivo_bloqueio.strip())

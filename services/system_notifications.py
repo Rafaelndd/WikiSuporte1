@@ -60,6 +60,7 @@ def criar_notificacao(
     titulo: str = "",
     target_role: str = "todos",
     data_expiracao: Optional[datetime] = None,
+    dedupe_seconds: int = 120,
 ) -> tuple[bool, str]:
     ensure_schema()
     t = (tipo or "").strip().lower()
@@ -67,9 +68,46 @@ def criar_notificacao(
         return False, "Tipo inválido de notificação."
     if not (mensagem or "").strip():
         return False, "Mensagem é obrigatória."
+    titulo_norm = (titulo or "").strip()[:100]
+    mensagem_norm = (mensagem or "").strip()
+    autor_norm = (autor or "").strip()[:50]
+    role_norm = (target_role or "todos").strip()[:20]
     engine = get_connection()
     try:
         with engine.begin() as conn:
+            # Evita publicação duplicada em janelas curtas (duplo clique/reload).
+            lock_key = f"{t}|{titulo_norm.lower()}|{mensagem_norm.lower()}|{autor_norm.lower()}|{role_norm.lower()}"
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": lock_key})
+
+            janela = max(5, int(dedupe_seconds or 120))
+            dup = conn.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM notificacoes_sistema
+                    WHERE tipo = :tipo
+                      AND COALESCE(TRIM(titulo), '') = :titulo
+                      AND TRIM(mensagem) = :mensagem
+                      AND COALESCE(TRIM(autor), '') = :autor
+                      AND COALESCE(TRIM(target_role), 'todos') = :role
+                      AND ativo = TRUE
+                      AND data_criacao >= (CURRENT_TIMESTAMP - (:janela * INTERVAL '1 second'))
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "tipo": t,
+                    "titulo": titulo_norm,
+                    "mensagem": mensagem_norm,
+                    "autor": autor_norm,
+                    "role": role_norm,
+                    "janela": janela,
+                },
+            ).fetchone()
+            if dup:
+                return True, f"Notificação já publicada recentemente (ID {int(dup[0])})."
+
             conn.execute(
                 text(
                     """
@@ -80,11 +118,11 @@ def criar_notificacao(
                 ),
                 {
                     "tipo": t,
-                    "titulo": (titulo or "")[:100] or None,
-                    "mensagem": mensagem.strip(),
-                    "autor": (autor or "")[:50] or None,
+                    "titulo": titulo_norm or None,
+                    "mensagem": mensagem_norm,
+                    "autor": autor_norm or None,
                     "exp": data_expiracao,
-                    "role": (target_role or "todos")[:20],
+                    "role": role_norm,
                 },
             )
         return True, "Notificação publicada."
