@@ -3,52 +3,6 @@ import dotenv
 dotenv.load_dotenv()  # Carrega as variáveis de ambiente do arquivo .env
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime
-from services.ui_realtime import render_global_notifications_listener
-
-# --- 1. CONFIGURAÇÃO INICIAL E SEGURANÇA ---
-st.set_page_config(page_title="WikiSuporte - Feedback", page_icon="💬", layout="wide")
-if not st.session_state.get("autenticado"):
-    st.warning("⚠️ Acesso negado. Por favor, faça o login.")
-    st.stop()
-render_global_notifications_listener()
-
-# --- 2. ESTILO DISCRETO (SEM GIFS / MASCOTES) ---
-st.markdown(
-    """
-    <style>
-        div[data-testid="stButton"] button {
-            transition: all 0.2s ease-in-out;
-            border-radius: 6px;
-        }
-        div[data-testid="stButton"] button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0px 3px 8px rgba(0, 0, 0, 0.15);
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.title("Canal de Feedback")
-st.markdown(
-    "Use este espaço para registrar **experiências com o sistema**, "
-    "**críticas**, **relatos de bug**, **sugestões de melhoria** ou **elogios**. "
-    "Todas as mensagens são encaminhadas diretamente ao responsável técnico."
-)
-with st.expander("🤔 Como usar esta página?"):
-    st.markdown(
-        "Preencha **Assunto** e **Descrição** (obrigatórios). Escolha o **tipo** (sugestão, bug, etc.). "
-        "O e-mail de retorno é opcional mas ajuda a responder. O envio usa **SMTP** configurado em `secrets.toml` (email). "
-        "Após enviar, aguarde confirmação na tela."
-    )
-
-import streamlit as st
-import dotenv
-dotenv.load_dotenv()  # Carrega as variáveis de ambiente do arquivo .env
-import smtplib
-from email.message import EmailMessage
-from datetime import datetime
 from services.ui_realtime import render_global_notifications_listener
 
 # --- 1. CONFIGURAÇÃO INICIAL E SEGURANÇA ---
@@ -118,7 +72,7 @@ with st.container(border=True):
             ),
         )
 
-        enviado = st.form_submit_button("Enviar feedback", use_container_width='strech')
+        enviado = st.form_submit_button("Enviar feedback", use_container_width=True)
 
 ## --- 4. PROCESSAMENTO DO FORMULÁRIO ---
         if enviado:
@@ -139,6 +93,10 @@ with st.container(border=True):
                 senha_smtp = os.getenv("EMAIL_SUPORTE_PASS")
                 nome_remetente = os.getenv("EMAIL_SUPORTE_NAME", "Suporte Epsy")
 
+                if not email_conta or not senha_smtp:
+                    st.error("🚨 ERRO CRÍTICO: usuário/senha SMTP não configurados no arquivo .env.")
+                    st.stop()
+
                 try:
                     # [ ... Todo o bloco de montagem do corpo do email se mantém igual ... ]
                     msg = EmailMessage()
@@ -152,7 +110,14 @@ with st.container(border=True):
                     else:
                         msg["Reply-To"] = email_conta
 
-                    msg.set_content(mensagem) # Simplificado para o teste
+                    email_contato_str = str(email_contato).strip() if email_contato else ""
+                    corpo = (
+                        f"Tipo de feedback: {tipo_feedback}\n"
+                        f"Assunto: {assunto}\n\n"
+                        f"Descrição:\n{mensagem}\n\n"
+                        f"E-mail para retorno: {email_contato_str if email_contato_str else '(não informado)'}\n"
+                    )
+                    msg.set_content(corpo)
 
                     # DIAGNÓSTICO 2: Adição do timeout=10 para evitar congelamento
                     with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10) as server:

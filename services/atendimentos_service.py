@@ -486,7 +486,32 @@ def _upsert_telefone(conn: Any, id_cliente: int, telefone_raw: str, origem: str 
         nome_cliente_existente = str(row[2] or "")
         if id_cliente_existente == int(id_cliente):
             return id_telefone, "mesmo_cliente", nome_cliente_existente
-        return None, "outro_cliente", nome_cliente_existente
+        # Permite o mesmo número existir em clientes diferentes (CNPJs diferentes).
+        # A unicidade relevante é (id_cliente, numero), garantida pelo índice ux_cliente_telefone.
+        try:
+            novo = conn.execute(
+                text(
+                    f"""
+                    INSERT INTO clientes_telefones (id_cliente, origem_dado, numero, telefone_hash, ativo)
+                    VALUES (:idc, :origem, :num, :h, TRUE)
+                    RETURNING {pk_col}
+                    """
+                ),
+                {"idc": id_cliente, "origem": origem, "num": numero, "h": tel_hash},
+            ).fetchone()
+            return (int(novo[0]), "duplicado_outro_cliente", nome_cliente_existente) if novo else (None, "erro", None)
+        except Exception:
+            novo = conn.execute(
+                text(
+                    f"""
+                    INSERT INTO clientes_telefones (id_cliente, origem_dado, numero)
+                    VALUES (:idc, :origem, :num)
+                    RETURNING {pk_col}
+                    """
+                ),
+                {"idc": id_cliente, "origem": origem, "num": numero},
+            ).fetchone()
+            return (int(novo[0]), "duplicado_outro_cliente", nome_cliente_existente) if novo else (None, "erro", None)
 
     try:
         novo = conn.execute(
@@ -745,15 +770,13 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
                 tel_limpo,
                 origem=str(payload.get("origem_registro") or "MANUAL"),
             )
-            if status_telefone == "outro_cliente":
-                return (
-                    False,
-                    f"Telefone já vinculado a outro cliente ({cliente_dono_telefone or 'não identificado'}). "
-                    "Use outro número para este cadastro.",
-                    None,
-                )
             if status_telefone == "mesmo_cliente":
                 msg_telefone = " Número já estava vinculado a este cliente e foi reutilizado."
+            if status_telefone == "duplicado_outro_cliente":
+                msg_telefone = (
+                    " Número já existia em outro cliente"
+                    f" ({cliente_dono_telefone or 'não identificado'}) e foi vinculado também a este CNPJ."
+                )
 
             row = conn.execute(
                 text(
