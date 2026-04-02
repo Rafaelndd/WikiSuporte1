@@ -6,15 +6,54 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 from sqlalchemy import text
 
 from modules.database import get_connection
+from modules.html_texto import limpar_html_bruto
 
 # Pasta para salvar arquivos de releases (relativa à raiz do projeto)
 PASTA_RELEASES = "releases_tecnuv"
+
+
+def _emb_to_sql(emb: List[float]) -> str:
+    return "[" + ",".join(str(round(x, 8)) for x in emb) + "]"
+
+
+def _assunto_release_sem_html(linha_bruta: str) -> str:
+    """Texto plano para assunto / linha de release (não persiste tags HTML)."""
+    s = limpar_html_bruto((linha_bruta or "").strip())
+    if not s:
+        s = re.sub(r"<[^>]+>", " ", str(linha_bruta or ""))
+        s = re.sub(r"\s+", " ", s).strip()
+    return s[:8000]
+
+
+def _try_set_embedding_release_item_conn(conn, id_item: int, texto_plano: str) -> None:
+    """Preenche coluna embedding quando API e dimensão coincidem com o banco."""
+    t = (texto_plano or "").strip()
+    if not t:
+        return
+    try:
+        from services.embedding_service import generate_embedding, get_embedding_dim
+    except Exception:
+        return
+    emb = generate_embedding(t[:4000])
+    if not emb:
+        return
+    if len(emb) != get_embedding_dim():
+        return
+    try:
+        conn.execute(
+            text(
+                "UPDATE release_itens SET embedding = CAST(:e AS vector) WHERE id_item = :id"
+            ),
+            {"e": _emb_to_sql(emb), "id": id_item},
+        )
+    except Exception:
+        pass
 
 
 def _sanitizar_nome_arquivo(nome: str) -> str:
@@ -161,7 +200,8 @@ def processar_release_completo(
         if not clean or clean.startswith("#"):
             continue
         for match in re.findall(r"\((\d{4,6})\)", clean):
-            linhas_por_chamado.append((match, clean[:4000]))
+            linha_limpa = _assunto_release_sem_html(clean[:4000])
+            linhas_por_chamado.append((match, linha_limpa))
 
     modulos_conhecidos = (
         "POSTOGESTOR", "COMERCIAL", "VENDAS", "FISCAL", "PDV", "FINANCEIRO",
@@ -188,13 +228,14 @@ def processar_release_completo(
         if tem_itens:
             try:
                 with engine.begin() as conn:
-                    conn.execute(
+                    result = conn.execute(
                         text(
                             """
                             INSERT INTO release_itens
                             (id_release, nr_chamado, linha_nota, versao, titulo_release, autor, origem)
                             VALUES (:idr, :nr, :linha, :ver, :tit, :autor, :orig)
                             ON CONFLICT (id_release, nr_chamado, linha_nota) DO NOTHING
+                            RETURNING id_item
                             """
                         ),
                         {
@@ -207,6 +248,9 @@ def processar_release_completo(
                             "orig": (origem or "manual")[:32],
                         },
                     )
+                    row_ins = result.fetchone()
+                    if row_ins and row_ins[0]:
+                        _try_set_embedding_release_item_conn(conn, int(row_ins[0]), linha)
             except Exception:
                 pass
         modulo = None
@@ -422,3 +466,149 @@ def get_metricas_homologacao(
         "vulnerabilidade_modulo": df_modulo,
         "gargalo_homologacao": gargalo,
     }
+
+
+def buscar_release_itens_semantico(
+    consulta: str,
+    nr_chamado: Optional[int] = None,
+    limite: int = 40,
+) -> pd.DataFrame:
+    """
+    Busca em release_itens por similaridade (pgvector + embedding da consulta) ou ILIKE.
+    Filtro opcional por número do chamado. Exige migração `migracao_release_itens_embedding.sql`
+    para ranking semântico; sem coluna embedding ou sem API, usa texto.
+    """
+    engine = get_connection()
+    consulta = (consulta or "").strip()
+    params: dict = {"lim": int(limite)}
+    nr_filter: Optional[int] = None
+    if nr_chamado is not None:
+        try:
+            nr_filter = int(nr_chamado)
+        except (TypeError, ValueError):
+            nr_filter = None
+
+    sql_nr_ri = ""
+    if nr_filter is not None:
+        params["nr"] = nr_filter
+        sql_nr_ri = " AND ri.nr_chamado = :nr "
+
+    if consulta:
+        try:
+            from services.embedding_service import generate_embedding, get_embedding_dim
+
+            emb = generate_embedding(consulta[:3000])
+            dim = get_embedding_dim()
+            if emb and len(emb) == dim:
+                params_vec = dict(params)
+                params_vec["emb"] = _emb_to_sql(emb)
+                q = f"""
+                SELECT
+                    ri.id_item,
+                    ri.nr_chamado,
+                    ri.linha_nota,
+                    r.versao_release,
+                    r.data_liberacao,
+                    (1 - (ri.embedding <=> CAST(:emb AS vector))) AS score_semantico
+                FROM release_itens ri
+                JOIN releases r ON r.id_release = ri.id_release
+                WHERE ri.embedding IS NOT NULL
+                {sql_nr_ri}
+                ORDER BY ri.embedding <=> CAST(:emb AS vector)
+                LIMIT :lim
+                """
+                df_vec = pd.read_sql(text(q), engine, params=params_vec)
+                if not df_vec.empty:
+                    return df_vec
+        except Exception:
+            pass
+
+        params = dict(params)
+        params["pat"] = f"%{consulta[:500]}%"
+        q = f"""
+        SELECT
+            ri.id_item,
+            ri.nr_chamado,
+            ri.linha_nota,
+            r.versao_release,
+            r.data_liberacao,
+            NULL::DOUBLE PRECISION AS score_semantico
+        FROM release_itens ri
+        JOIN releases r ON r.id_release = ri.id_release
+        WHERE ri.linha_nota ILIKE :pat
+        {sql_nr_ri}
+        ORDER BY r.data_liberacao DESC NULLS LAST, ri.id_item DESC
+        LIMIT :lim
+        """
+        return pd.read_sql(text(q), engine, params=params)
+
+    if nr_filter is not None:
+        q = """
+        SELECT
+            ri.id_item,
+            ri.nr_chamado,
+            ri.linha_nota,
+            r.versao_release,
+            r.data_liberacao,
+            NULL::DOUBLE PRECISION AS score_semantico
+        FROM release_itens ri
+        JOIN releases r ON r.id_release = ri.id_release
+        WHERE ri.nr_chamado = :nr
+        ORDER BY r.data_liberacao DESC NULLS LAST, ri.id_item DESC
+        LIMIT :lim
+        """
+        return pd.read_sql(text(q), engine, params=params)
+
+    return pd.DataFrame()
+
+
+def backfill_embeddings_release_itens(limite: int = 200) -> int:
+    """Preenche embedding em linhas antigas (sem vetor). Retorna quantos registros atualizados."""
+    try:
+        from services.embedding_service import generate_embedding, get_embedding_dim
+    except Exception:
+        return 0
+
+    dim = get_embedding_dim()
+    engine = get_connection()
+    try:
+        with engine.connect() as c:
+            rows = c.execute(
+                text(
+                    """
+                    SELECT id_item, linha_nota FROM release_itens
+                    WHERE embedding IS NULL
+                      AND linha_nota IS NOT NULL
+                      AND TRIM(linha_nota) <> ''
+                    ORDER BY id_item DESC
+                    LIMIT :lim
+                    """
+                ),
+                {"lim": int(limite)},
+            ).fetchall()
+    except Exception:
+        return 0
+
+    atualizados = 0
+    for id_item, linha in rows:
+        texto = (linha or "")[:4000]
+        emb = generate_embedding(texto)
+        if not emb or len(emb) != dim:
+            continue
+        try:
+            with engine.begin() as conn:
+                res = conn.execute(
+                    text(
+                        """
+                        UPDATE release_itens
+                        SET embedding = CAST(:e AS vector)
+                        WHERE id_item = :id AND embedding IS NULL
+                        """
+                    ),
+                    {"e": _emb_to_sql(emb), "id": int(id_item)},
+                )
+                if res.rowcount:
+                    atualizados += int(res.rowcount)
+        except Exception:
+            continue
+    return atualizados

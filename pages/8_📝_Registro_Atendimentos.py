@@ -334,15 +334,21 @@ with tab_lancar:
     razao_key = f"p8_razao_social_{p8n}"
     cnpj_key = f"p8_cnpj_{p8n}"
     telefone_key = f"p8_telefone_{p8n}"
-    cliente_por_cnpj = buscar_cliente_por_cnpj(st.session_state.get(cnpj_key, ""))
+    sync_cnpj_key = f"p8_last_cnpj_autofill_{p8n}"
+    cnpj_raw = st.session_state.get(cnpj_key, "")
+    cnpj_digits_cur = "".join(ch for ch in str(cnpj_raw) if ch.isdigit())
+    cliente_por_cnpj = buscar_cliente_por_cnpj(cnpj_raw)
     if cliente_por_cnpj:
-        st.session_state[razao_key] = str(cliente_por_cnpj.get("razao_social") or "")
+        if st.session_state.get(sync_cnpj_key) != cnpj_digits_cur:
+            st.session_state[razao_key] = str(cliente_por_cnpj.get("razao_social") or "")
+            st.session_state[sync_cnpj_key] = cnpj_digits_cur
+    else:
+        st.session_state[sync_cnpj_key] = ""
     c_ident1, c_ident2, c_ident3 = st.columns(3)
     razao_social = c_ident1.text_input(
-        "Razão Social *",
+        "Nome *",
         key=razao_key,
-        placeholder="Ex.: Posto Mahl",
-        disabled=bool(cliente_por_cnpj),
+        placeholder="Ex.: Posto Mahle",
     )
     cnpj_in = c_ident2.text_input("CNPJ", key=cnpj_key, placeholder="00.000.000/0000-00")
     telefone = c_ident3.text_input(
@@ -356,10 +362,12 @@ with tab_lancar:
 
     df_matches = buscar_correspondencias_cliente(cnpj=cnpj_in, telefone=telefone, limite=8)
     cliente_id_escolhido = None
-    razao_social_payload = razao_social
+    razao_social_typed = (razao_social or "").strip()
+    razao_social_payload = razao_social_typed
     if cliente_por_cnpj:
         cliente_id_escolhido = int(cliente_por_cnpj["id_cliente"])
-        razao_social_payload = str(cliente_por_cnpj["razao_social"] or "")
+        if not razao_social_payload:
+            razao_social_payload = str(cliente_por_cnpj["razao_social"] or "")
         st.success(f"Cliente identificado automaticamente pelo CNPJ: {razao_social_payload}")
     if not cliente_por_cnpj and not df_matches.empty:
         st.markdown("**Correspondências exatas encontradas:**")
@@ -376,8 +384,8 @@ with tab_lancar:
             cliente_id_escolhido = opcoes_match[escolha_match]
             if not cliente_por_cnpj:
                 escolhido = next((r for _, r in df_matches.iterrows() if int(r["id_cliente"]) == cliente_id_escolhido), None)
-                if escolhido is not None:
-                    razao_social_payload = str(escolhido["razao_social"] or razao_social_payload)
+                if escolhido is not None and not razao_social_payload:
+                    razao_social_payload = str(escolhido["razao_social"] or "")
             st.success("Cadastro existente selecionado. Os dados novos (telefone/CNPJ ausentes) serão incorporados se necessário.")
     elif not cliente_por_cnpj:
         if cnpj_in.strip() or telefone.strip():

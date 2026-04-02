@@ -767,7 +767,54 @@ with aba3:
                             
                             st.markdown("#### 📥 Baixar Relatórios")
                             c_txt, c_xls, c_csv = st.columns(3)
-                            nome_arq = f"Plantao{datetime.datetime.now().strftime('%d%m%Y')}"
+
+                            def _sanitize_filename_component(value: str) -> str:
+                                # Windows: <>:"/\|?* são inválidos em nomes de arquivo
+                                v = re.sub(r'[<>:"/\\|?*]+', " ", str(value or "")).strip()
+                                v = re.sub(r"\s+", " ", v)
+                                return v or "Sem nome"
+
+                            def _truncate_filename(value: str, max_len: int = 180) -> str:
+                                v = str(value or "").strip()
+                                if len(v) <= max_len:
+                                    return v
+                                return v[: max_len - 1].rstrip() + "…"
+
+                            def _format_date_ptbr_for_filename(dt: pd.Timestamp | datetime.datetime) -> str:
+                                d = pd.to_datetime(dt, errors="coerce")
+                                if pd.isna(d):
+                                    return datetime.datetime.now().strftime("%d-%m-%Y")
+                                # "dd/mm/aaaa" é o formato brasileiro, mas "/" não pode no Windows; usamos "-"
+                                return d.strftime("%d-%m-%Y")
+
+                            # Regra de nome do arquivo do Plantão:
+                            # - Se plantão abranger sábado+domingo: "Plantão Fim de semana <data-do-sábado>"
+                            # - Caso contrário: "Plantão <Nome do Plantonista> <data de entrada>"
+                            data_inicio_plantao = df_limpo["Data_Real"].min()
+                            atendentes_unicos = [a for a in df_limpo["Atendente"].dropna().unique().tolist() if str(a).strip()]
+
+                            dias_semana_presentes = set(pd.to_datetime(df_limpo["Data_Real"]).dt.weekday.dropna().tolist())
+                            eh_fim_de_semana = (5 in dias_semana_presentes) and (6 in dias_semana_presentes)
+                            if eh_fim_de_semana:
+                                # garante que a data usada é a do sábado
+                                datas_sabado = pd.to_datetime(df_limpo["Data_Real"]).loc[
+                                    pd.to_datetime(df_limpo["Data_Real"]).dt.weekday == 5
+                                ]
+                                data_base = datas_sabado.min() if not datas_sabado.empty else data_inicio_plantao
+                                nome_arq = f"Plantão Fim de semana {_format_date_ptbr_for_filename(data_base)}"
+                            else:
+                                data_base = data_inicio_plantao
+                                if len(atendentes_unicos) == 1:
+                                    nome_base = _sanitize_filename_component(atendentes_unicos[0])
+                                else:
+                                    # Lista todos os plantonistas presentes no arquivo (nomes únicos)
+                                    nomes = [_sanitize_filename_component(n) for n in atendentes_unicos]
+                                    nomes = [n for n in nomes if n and n != "Sem nome"]
+                                    nomes = sorted(set(nomes), key=str.casefold)
+                                    nome_base = " + ".join(nomes) if nomes else "Sem nome"
+                                nome_arq = f"Plantão {nome_base} {_format_date_ptbr_for_filename(data_base)}"
+                            nome_arq = _sanitize_filename_component(nome_arq)
+                            nome_arq = _truncate_filename(nome_arq, max_len=180)
                             c_txt.download_button("📄 Exportar TXT Formatado", txt_content, f"{nome_arq}.txt", "text/plain", width='stretch')
                             c_xls.download_button("📊 Exportar Excel (.xlsx)", excel_content, f"{nome_arq}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width='stretch')
                             c_csv.download_button("📑 Exportar CSV", csv_content, f"{nome_arq}.csv", "text/csv", width='stretch')

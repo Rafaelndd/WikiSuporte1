@@ -1,18 +1,13 @@
 import streamlit as st
-import dotenv
-dotenv.load_dotenv()  # Carrega as variáveis de ambiente do arquivo .env
-import smtplib
-from email.message import EmailMessage
-from services.ui_realtime import render_global_notifications_listener
 
-# --- 1. CONFIGURAÇÃO INICIAL E SEGURANÇA ---
+from services.auth_guard import require_login
+from services.feedback_mailer import resolve_smtp_config, send_feedback_email
+from services.feedback_storage import PASTA_FEEDBACKS, save_feedback_to_disk
+
 st.set_page_config(page_title="WikiSuporte - Feedback", page_icon="💬", layout="wide")
-if not st.session_state.get("autenticado"):
-    st.warning("⚠️ Acesso negado. Por favor, faça o login.")
-    st.stop()
-render_global_notifications_listener()
 
-# --- 2. ESTILO DISCRETO (SEM GIFS / MASCOTES) ---
+require_login()
+
 st.markdown(
     """
     <style>
@@ -31,18 +26,42 @@ st.markdown(
 
 st.title("Canal de Feedback")
 st.markdown(
-    "Use este espaço para registrar **experiências com o sistema**, "
-    "**críticas**, **relatos de bug**, **sugestões de melhoria** ou **elogios**. "
-    "Todas as mensagens são encaminhadas diretamente ao responsável técnico."
+    "Use este espaço para registrar **experiências com o sistema**, **críticas**, "
+    "**relatos de bug**, **sugestões de melhoria** ou **elogios**. "
+    f"Cada envio é **gravado na pasta `{PASTA_FEEDBACKS}/`** do projeto (data, tipo e assunto no nome da subpasta). "
+    "Se o e-mail estiver configurado, uma cópia também é enviada por SMTP."
 )
-with st.expander("🤔 Como usar esta página?"):
+
+with st.expander("Como usar esta página?"):
     st.markdown(
-        "Preencha **Assunto** e **Descrição** (obrigatórios). Escolha o **tipo** (sugestão, bug, etc.). "
-        "O e-mail de retorno é opcional mas ajuda a responder. O envio usa **SMTP** configurado em `secrets.toml` (email). "
-        "Após enviar, aguarde confirmação na tela."
+        "- Preencha **Assunto** e **Descrição** (obrigatórios) e escolha o **tipo**.\n"
+        "- O **e-mail para retorno** é opcional.\n"
+        f"- **Arquivos**: em `{PASTA_FEEDBACKS}/` será criada uma pasta por envio, com `feedback.json` e `feedback.txt`.\n"
+        "- **E-mail (opcional)**: configure `EMAIL_SUPORTE_*` no `.env` ou `[email]` no `secrets.toml`. "
+        "Use `FEEDBACK_TO_EMAIL` se o destino for diferente da conta SMTP.\n"
+        "- **SSL**: `pip install -U certifi`; se necessário, `EMAIL_SMTP_SSL_INSECURE=1` no `.env`.\n"
+        f"- A pasta `{PASTA_FEEDBACKS}/` está no `.gitignore` para não versionar dados de usuários."
+    )
+    st.code(
+        "# .streamlit/secrets.toml (exemplo — e-mail opcional)\n"
+        "[email]\n"
+        'smtp_server = "smtp.gmail.com"\n'
+        "smtp_port = 465\n"
+        'smtp_user = "sua.conta@gmail.com"\n'
+        'smtp_password = "senha-de-app"\n'
+        'from_name = "WikiSuporte"\n'
+        'feedback_to = "caixa.que.recebe@gmail.com"\n',
+        language="toml",
     )
 
-# --- 3. FORMULÁRIO PROFISSIONAL DE FEEDBACK ---
+cfg_preview = resolve_smtp_config()
+if cfg_preview:
+    st.caption("Envio por e-mail **ativado** (além do registro em disco).")
+else:
+    st.info(
+        f"Envio por e-mail **não configurado** — o feedback será apenas salvo em **`{PASTA_FEEDBACKS}/`**."
+    )
+
 with st.container(border=True):
     st.subheader("Registrar novo feedback")
 
@@ -55,81 +74,61 @@ with st.container(border=True):
 
         assunto = st.text_input(
             "Assunto",
-            placeholder="Resumo curto do tema (ex.: 'Lentidão ao abrir tela de chamados')",
+            placeholder="Resumo curto do tema (ex.: lentidão ao abrir tela de chamados)",
         )
 
         email_contato = st.text_input(
             "E-mail para retorno",
-            placeholder="Seu e-mail para resposta (opcional, mas recomendado)",
+            placeholder="Opcional — para você receber resposta direta",
         )
 
         mensagem = st.text_area(
             "Descrição detalhada",
             height=180,
             placeholder=(
-                "Descreva o contexto, o que você esperava que acontecesse, o que aconteceu de fato, "
-                "passos para reproduzir (no caso de bug) e qualquer informação adicional relevante."
+                "Contexto, o que você esperava, o que ocorreu, passos para reproduzir (bugs) e qualquer detalhe útil."
             ),
         )
 
-        enviado = st.form_submit_button("Enviar feedback", use_container_width=True)
+        enviado = st.form_submit_button("Enviar feedback", type="primary", use_container_width=True)
 
-## --- 4. PROCESSAMENTO DO FORMULÁRIO ---
         if enviado:
-            if not mensagem.strip() or not assunto.strip():
-                st.warning("Por favor, preencha pelo menos **Assunto** e **Descrição detalhada**.")
+            if not (mensagem or "").strip() or not (assunto or "").strip():
+                st.warning("Preencha **Assunto** e **Descrição detalhada**.")
             else:
-                import os
-                
-                # DIAGNÓSTICO 1: Validar se as variáveis estão sendo lidas
-                smtp_server = os.getenv("EMAIL_SUPORTE_HOST")
-                
-                if not smtp_server:
-                    st.error("🚨 ERRO CRÍTICO: O arquivo .env não foi carregado corretamente. O host está vazio.")
-                    st.stop() # Para a execução aqui mesmo
+                nome_usuario = str(st.session_state.get("usuario_nome") or "")
+                uid = st.session_state.get("usuario_id")
+                uid_int = int(uid) if uid is not None else None
 
-                smtp_port = int(os.getenv("EMAIL_SUPORTE_PORT", 465))
-                email_conta = os.getenv("EMAIL_SUPORTE_USER")
-                senha_smtp = os.getenv("EMAIL_SUPORTE_PASS")
-                nome_remetente = os.getenv("EMAIL_SUPORTE_NAME", "Suporte Epsy")
+                ok_disk, msg_disk, pasta = save_feedback_to_disk(
+                    tipo_feedback=tipo_feedback,
+                    assunto=(assunto or "").strip(),
+                    mensagem=(mensagem or "").strip(),
+                    email_retorno=(email_contato or "").strip(),
+                    usuario_nome=nome_usuario,
+                    usuario_id=uid_int,
+                )
 
-                if not email_conta or not senha_smtp:
-                    st.error("🚨 ERRO CRÍTICO: usuário/senha SMTP não configurados no arquivo .env.")
-                    st.stop()
+                if not ok_disk:
+                    st.error(msg_disk)
+                else:
+                    st.success(msg_disk)
 
-                try:
-                    # [ ... Todo o bloco de montagem do corpo do email se mantém igual ... ]
-                    msg = EmailMessage()
-                    msg["Subject"] = f"WikiSuporte - Novo Feedback ({tipo_feedback})"
-                    msg["From"] = f"{nome_remetente} <{email_conta}>"
-                    msg["To"] = email_conta
-                    
-                    email_contato_str = str(email_contato).strip() if email_contato else ""
-                    if email_contato_str:
-                        msg["Reply-To"] = email_contato_str
-                    else:
-                        msg["Reply-To"] = email_conta
-
-                    email_contato_str = str(email_contato).strip() if email_contato else ""
-                    corpo = (
-                        f"Tipo de feedback: {tipo_feedback}\n"
-                        f"Assunto: {assunto}\n\n"
-                        f"Descrição:\n{mensagem}\n\n"
-                        f"E-mail para retorno: {email_contato_str if email_contato_str else '(não informado)'}\n"
-                    )
-                    msg.set_content(corpo)
-
-                    # DIAGNÓSTICO 2: Adição do timeout=10 para evitar congelamento
-                    with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10) as server:
-                        server.login(email_conta, senha_smtp)
-                        server.send_message(msg)
-
-                    st.success("✅ SUCESSO! O e-mail foi disparado e aceito pelo servidor.")
-
-                except TimeoutError:
-                    st.error("⏱️ ERRO: O servidor mail.epsy.com.br demorou muito para responder (Timeout na porta 465). Isso geralmente indica um bloqueio de rede ou firewall.")
-                except smtplib.SMTPAuthenticationError as auth_err:
-                    st.error(f"🔐 ERRO DE LOGIN: Usuário ou senha rejeitados pelo servidor. Detalhe: {auth_err}")
-                except Exception as e:
-                    # DIAGNÓSTICO 3: Expondo o erro real na interface
-                    st.error(f"🛑 ERRO DESCONHECIDO: {type(e).__name__} - {str(e)}")
+                    cfg = resolve_smtp_config()
+                    if cfg:
+                        mail_ok, mail_detail = send_feedback_email(
+                            cfg,
+                            tipo_feedback=tipo_feedback,
+                            assunto=(assunto or "").strip(),
+                            mensagem=(mensagem or "").strip(),
+                            reply_to=(email_contato or "").strip() or None,
+                            usuario_nome=nome_usuario or None,
+                            usuario_id=uid_int,
+                        )
+                        if mail_ok:
+                            st.caption(f"E-mail: {mail_detail}")
+                        else:
+                            st.warning(
+                                "O feedback foi salvo em disco, mas o e-mail não foi enviado: "
+                                f"{mail_detail}"
+                            )

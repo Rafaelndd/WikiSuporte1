@@ -660,7 +660,7 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
                         id_cliente = int(row_cnpj[0])
                 if cnpj_limpo and not id_cliente:
                     if not razao_social:
-                        return False, "CNPJ não encontrado. Informe a Razão Social para criar o cliente.", None
+                        return False, "CNPJ não encontrado. Informe o Nome para criar o cliente.", None
                     try:
                         novo_cli = conn.execute(
                             text(
@@ -714,7 +714,7 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
                     if row_nome:
                         id_cliente = int(row_nome[0])
                 if not id_cliente and not razao_social:
-                    return False, "Informe a Razão Social quando não houver correspondência automática.", None
+                    return False, "Informe o Nome quando não houver correspondência automática.", None
                 if not id_cliente:
                     try:
                         novo_cli = conn.execute(
@@ -742,13 +742,25 @@ def registrar_atendimento(payload: Dict[str, Any], anexos: Optional[List[Any]] =
             if not id_cliente:
                 return False, "Não foi possível identificar/criar cliente.", None
 
-            if cnpj_limpo:
+            if razao_social:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE clientes_crm
+                        SET razao_social = :nome
+                        WHERE id_cliente = :id
+                        """
+                    ),
+                    {"id": int(id_cliente), "nome": razao_social[:255]},
+                )
+
+            if len(cnpj_limpo) == 14:
                 try:
                     conn.execute(
                         text(
                             """
                             UPDATE clientes_crm
-                            SET cnpj = COALESCE(NULLIF(cnpj, ''), :cnpj)
+                            SET cnpj = :cnpj
                             WHERE id_cliente = :id
                             """
                         ),

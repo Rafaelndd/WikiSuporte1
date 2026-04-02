@@ -48,6 +48,7 @@ ramais_config.json
 oraculo_engine.log
 
 # Data files (Prevent committing customer data)
+WikiFeedbacks/
 *.csv
 *.xlsx
 *.xls
