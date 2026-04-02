@@ -11,8 +11,7 @@ from sqlalchemy import text
 
 from modules.database import get_connection
 
-
-TIPOS_VALIDOS = {"comunicado", "aviso", "erro_critico", "versao_bloqueada"}
+from services.notificacao_tipos import TIPOS_VALIDOS, normalizar_tipo_notificacao
 
 
 def ensure_schema() -> None:
@@ -63,8 +62,8 @@ def criar_notificacao(
     dedupe_seconds: int = 120,
 ) -> tuple[bool, str]:
     ensure_schema()
-    t = (tipo or "").strip().lower()
-    if t not in TIPOS_VALIDOS:
+    t = normalizar_tipo_notificacao(tipo or "")
+    if not t:
         return False, "Tipo inválido de notificação."
     if not (mensagem or "").strip():
         return False, "Mensagem é obrigatória."

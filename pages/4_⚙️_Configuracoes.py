@@ -23,13 +23,14 @@ except ImportError:
 from modules.database import get_connection
 from modules.utils import ler_estado_robo, salvar_estado_robo
 from services.system_notifications import (
+    bloqueios_versao_ativos,
     criar_notificacao,
     desativar_notificacao,
     ensure_schema as ensure_notifications_schema,
     listar_notificacoes_admin,
+    normalizar_tipo_notificacao,
     registrar_bloqueio_versao,
     resolver_bloqueio_versao,
-    bloqueios_versao_ativos,
 )
 from services.ui_realtime import render_global_notifications_listener
 
@@ -182,7 +183,7 @@ with aba_robo:
     cols = st.columns(4)
     for i, (tipo, info) in enumerate(raspagens_ui.items()):
         with cols[i % 4]:
-            if st.button(f"{info['icon']} {info['label']}", key=f"btn_{tipo}", use_container_width='strech', disabled=em_andamento):
+            if st.button(f"{info['icon']} {info['label']}", key=f"btn_{tipo}", use_container_width="stretch", disabled=em_andamento):
                 if BOT_CONTROL_DISPONIVEL:
                     ok, msg = solicitar_raspagem(tipo)
                     st.toast(msg, icon="✅" if ok else "⚠️")
@@ -246,7 +247,7 @@ with aba_ramais:
     with col_r2:
         if ramais:
             df_r = pd.DataFrame(list(ramais.items()), columns=["Analista", "Ramal"]).sort_values("Analista")
-            st.dataframe(df_r, hide_index=True, use_container_width='strech')
+            st.dataframe(df_r, hide_index=True, use_container_width="stretch")
             remover = st.selectbox("Remover", [""] + list(ramais.keys()))
             if st.button("Remover") and remover:
                 del ramais[remover]
@@ -365,7 +366,7 @@ with aba_clientes:
             ORDER BY c.razao_social
         """, get_connection())
         if not df_cli.empty:
-            st.dataframe(df_cli, hide_index=True, use_container_width='strech')
+            st.dataframe(df_cli, hide_index=True, use_container_width="stretch")
     except Exception as e:
         st.caption(f"Listagem indisponível: {e}")
 
@@ -403,32 +404,38 @@ if aba_notificacoes:
                 if not mensagem.strip():
                     st.error("Mensagem é obrigatória.")
                 else:
-                    with st.status("Publicando comunicado...", expanded=False) as status:
-                        exp = None
-                        total_minutos_exp = (int(horas_expira or 0) * 60) + int(minutos_expira or 0)
-                        if total_minutos_exp > 0:
-                            exp = datetime.now() + pd.Timedelta(minutes=total_minutos_exp)
-                        ok, msg = criar_notificacao(
-                            tipo=tipo,
-                            mensagem=mensagem,
-                            autor=nome_usuario,
-                            titulo=titulo,
-                            target_role=target_role,
-                            data_expiracao=exp,
-                            dedupe_seconds=120,
-                        )
-                        if ok and tipo == "versao_bloqueada" and modulo_nome.strip() and versao_prob.strip():
-                            okb, _ = registrar_bloqueio_versao(modulo_nome.strip(), versao_prob.strip(), motivo_bloqueio.strip())
-                            if not okb:
-                                st.warning("Notificação publicada, mas falhou ao gravar em bloqueio_versoes.")
-                        if ok:
-                            status.update(label="Notificação publicada com sucesso.", state="complete")
-                            st.toast("✅ Comunicado publicado em tempo real.", icon="✅")
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            status.update(label="Falha ao publicar.", state="error")
-                            st.error(msg)
+                    tipo_norm = normalizar_tipo_notificacao(tipo)
+                    if not tipo_norm:
+                        st.error("Tipo de notificação inválido.")
+                    else:
+                        with st.status("Publicando comunicado...", expanded=False) as status:
+                            exp = None
+                            total_minutos_exp = (int(horas_expira or 0) * 60) + int(minutos_expira or 0)
+                            if total_minutos_exp > 0:
+                                exp = datetime.now() + pd.Timedelta(minutes=total_minutos_exp)
+                            ok, msg = criar_notificacao(
+                                tipo=tipo_norm,
+                                mensagem=mensagem,
+                                autor=nome_usuario,
+                                titulo=titulo,
+                                target_role=target_role,
+                                data_expiracao=exp,
+                                dedupe_seconds=120,
+                            )
+                            if ok and tipo_norm == "versao_bloqueada" and modulo_nome.strip() and versao_prob.strip():
+                                okb, _ = registrar_bloqueio_versao(
+                                    modulo_nome.strip(), versao_prob.strip(), motivo_bloqueio.strip()
+                                )
+                                if not okb:
+                                    st.warning("Notificação publicada, mas falhou ao gravar em bloqueio_versoes.")
+                            if ok:
+                                status.update(label="Notificação publicada com sucesso.", state="complete")
+                                st.toast("✅ Comunicado publicado em tempo real.", icon="✅")
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                status.update(label="Falha ao publicar.", state="error")
+                                st.error(msg)
 
         st.markdown("### Notificações recentes")
         df_not = listar_notificacoes_admin(120)

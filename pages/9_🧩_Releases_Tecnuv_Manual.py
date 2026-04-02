@@ -5,7 +5,7 @@ o ciclo de vida completo dos chamados através de múltiplas releases.
 """
 import io
 import re
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
@@ -66,7 +66,7 @@ else:
 
         colb1, colb2 = st.columns([1, 3])
         with colb1:
-            salvar = st.form_submit_button("Processar e salvar", type="primary", use_container_width='strech')
+            salvar = st.form_submit_button("Processar e salvar", type="primary", use_container_width="stretch")
         with colb2:
             st.caption(
                 "Será criado o release, o arquivo será anexado em `releases_tecnuv/` e "
@@ -134,6 +134,7 @@ else:
                             nome_arquivo=nome_arquivo,
                             caminho_arquivo=caminho,
                             origem="manual",
+                            data_liberacao=datetime.combine(data_release, datetime.min.time()),
                         )
 
                         st.success(
@@ -154,7 +155,7 @@ else:
                                 "Chamado": list(chamados_assunto.keys()),
                                 "Assunto": [str(v)[:150] for v in chamados_assunto.values()],
                             })
-                            st.dataframe(df_prev, hide_index=True, use_container_width='strech')
+                            st.dataframe(df_prev, hide_index=True, use_container_width="stretch")
                 except Exception as e:
                     st.error(f"Erro ao processar release: {e}")
 

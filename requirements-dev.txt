@@ -1,0 +1,4 @@
+# Desenvolvimento / gate de qualidade (não é necessário em produção).
+# pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8.0.0

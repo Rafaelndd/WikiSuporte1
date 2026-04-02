@@ -68,6 +68,7 @@ def ensure_release(
     nome_arquivo: Optional[str] = None,
     texto_completo: Optional[str] = None,
     caminho_arquivo: Optional[str] = None,
+    data_liberacao: Optional[datetime] = None,
 ) -> int:
     """
     Garante que a versão existe em releases. Cria ou atualiza com dados opcionais.
@@ -78,10 +79,10 @@ def ensure_release(
         result = conn.execute(
             text(
                 """
-                INSERT INTO releases (versao_release, autor, nome_arquivo, texto_completo, caminho_arquivo)
-                VALUES (:versao, :autor, :nome_arquivo, :texto_completo, :caminho)
+                INSERT INTO releases (versao_release, autor, nome_arquivo, texto_completo, caminho_arquivo, data_liberacao)
+                VALUES (:versao, :autor, :nome_arquivo, :texto_completo, :caminho, COALESCE(CAST(:data_lib AS TIMESTAMP WITH TIME ZONE), CURRENT_TIMESTAMP))
                 ON CONFLICT (versao_release) DO UPDATE SET
-                    data_liberacao = CURRENT_TIMESTAMP,
+                    data_liberacao = COALESCE(CAST(:data_lib AS TIMESTAMP WITH TIME ZONE), CURRENT_TIMESTAMP),
                     autor = COALESCE(EXCLUDED.autor, releases.autor),
                     nome_arquivo = COALESCE(EXCLUDED.nome_arquivo, releases.nome_arquivo),
                     texto_completo = COALESCE(EXCLUDED.texto_completo, releases.texto_completo),
@@ -95,6 +96,7 @@ def ensure_release(
                 "nome_arquivo": (nome_arquivo or "").strip()[:255] or None,
                 "texto_completo": (texto_completo or "").strip()[:100000] or None,
                 "caminho": (caminho_arquivo or "").strip()[:512] or None,
+                "data_lib": data_liberacao,
             },
         )
         return result.scalar_one()
@@ -176,6 +178,7 @@ def processar_release_completo(
     nome_arquivo: Optional[str] = None,
     caminho_arquivo: Optional[str] = None,
     origem: str = "manual",
+    data_liberacao: Optional[datetime] = None,
 ) -> tuple[int, int]:
     """
     Processa release: grava um registro em release_itens por linha com (nr_chamado);
@@ -191,6 +194,7 @@ def processar_release_completo(
         texto_completo=texto_completo[:100000],
         nome_arquivo=(nome_arquivo or "").strip()[:255] or None,
         caminho_arquivo=(caminho_arquivo or "").strip()[:512] or None,
+        data_liberacao=data_liberacao,
     )
 
     # Uma entrada por linha que contém (nnnnn) — mesmo chamado pode ter linhas diferentes em releases distintos

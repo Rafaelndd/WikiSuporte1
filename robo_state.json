@@ -1,10 +1,10 @@
 {
-  "ultima_execucao": "2026-03-14T21:04:33.779342",
+  "ultima_execucao": "2026-04-02T15:38:38.357840",
   "em_andamento": false,
   "auto_ativo": false,
   "intervalo": 30,
   "etapa_atual": null,
-  "tarefa_solicitada": "chamados",
+  "tarefa_solicitada": null,
   "raspagens_por_hora": 0,
   "ultima_raspagem_hora": null,
   "min_intervalo": 30,
