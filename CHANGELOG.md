@@ -7,10 +7,6 @@ e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
-### Adicionado
-
-### Corrigido
-
 ## [1.0.0] - 2026-04-03
 
 Primeira release formal com fluxo de qualidade no GitHub e documentação de arranque para quem clona o repositório.
