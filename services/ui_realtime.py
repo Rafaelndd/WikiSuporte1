@@ -9,6 +9,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+from services.release_notes_banner import render_release_notes_banner
 from services.system_notifications import (
     bloqueios_versao_ativos,
     dias_sem_contribuicao,
@@ -221,11 +222,13 @@ def _render_inatividade_sidebar(usuario_id: Optional[int]) -> None:
         st.sidebar.warning("📌 Você está há mais de 5 dias sem contribuição na base. Registre uma nova contribuição.")
 
 
-def render_global_notifications_listener() -> None:
+def render_global_notifications_listener(*, show_release_banner: bool = True) -> None:
     """
     Executa no início das páginas para escutar notificações ativas e lembretes.
     """
     inject_modern_css()
+    if show_release_banner:
+        render_release_notes_banner()
     role = str(st.session_state.get("perfil", "analista")).strip().lower()
     if role in ("desenvolvedor",):
         role = "dev"
