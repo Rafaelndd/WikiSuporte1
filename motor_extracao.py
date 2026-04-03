@@ -85,6 +85,12 @@ class MotorExtracao:
 
     def fazer_login(self):
         print("🔐 Autenticando no PostoGestor HelpDesk...")
+        if not Config.TECNUV_USER or not Config.TECNUV_PASS:
+            print(
+                "❌ TECNUV_USER / TECNUV_PASS não definidos no .env. "
+                "Configure antes de usar o motor de extração no Helpdesk."
+            )
+            return False
         self.driver.get(URL_LOGIN)
         
         try:

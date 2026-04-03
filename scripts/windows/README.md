@@ -26,7 +26,7 @@ $NSSM = "D:\Tools\nssm-2.24-103-gdee49fc\win64\nssm.exe"
 & $NSSM set WikiSuporteStreamlit AppParameters "/c `"$REPO\scripts\windows\run-streamlit.cmd`""
 & $NSSM set WikiSuporteStreamlit AppDirectory $REPO
 & $NSSM set WikiSuporteStreamlit DisplayName "WikiSuporte — Streamlit"
-& $NSSM set WikiSuporteStreamlit Description "Streamlit WikiSuporte headless :8501"
+& $NSSM set WikiSuporteStreamlit Description "Streamlit WikiSuporte headless :8502"
 & $NSSM set WikiSuporteStreamlit Start SERVICE_AUTO_START
 & $NSSM set WikiSuporteStreamlit AppStdout "$REPO\logs\streamlit-service.out.log"
 & $NSSM set WikiSuporteStreamlit AppStderr "$REPO\logs\streamlit-service.err.log"
@@ -132,4 +132,24 @@ Depois, se usarem Alembic, corram `alembic upgrade head` no `venv` antes ou edit
 
 ## 5. Firewall
 
-Confirmar regra de entrada **TCP 8501** se o acesso for de outras máquinas.
+Confirmar regra de entrada **TCP 8502** se o acesso for de outras máquinas.
+
+## 6. NSSM ajuda, mas estes pontos quebram o login / o browser
+
+O NSSM **não corrige** `.env`, PostgreSQL nem código: só **arranca** o processo. Se o serviço cair ao iniciar ou usar o Python errado, o browser mostra **connection refused** na porta **8502** (igual a “erro de login” na prática).
+
+1. **AppDirectory** no NSSM tem de ser a **raiz do repositório** (a pasta que contém `app.py` e o `.env`), igual ao `$REPO` dos comandos acima.
+2. **Logs:** ver `logs\streamlit-service.err.log` e `logs\streamlit-service.out.log` — o traceback real aparece aí (venv em falta, import, DB, etc.).
+3. **venv:** o `run-streamlit.cmd` usa `venv\Scripts\python.exe` ou `.venv\Scripts\python.exe`. Se o ambiente virtual tiver outro nome, ajuste o script ou crie `venv` com esse nome.
+4. **Não correr dois Streamlit na mesma porta:** pare o serviço antes de `streamlit run` manual (ou use outra porta).
+5. **Conta do serviço:** “Local System” lê disco local; se o Postgres só aceita rede por utilizador específico, pode ser preciso definir **Log on** no serviço ou `DB_HOST` acessível a essa conta.
+
+### Erro `ImportError: cannot import name '__version__' from 'urllib3'`
+
+O Streamlit em modo **headless** chama `requests` ao mostrar a URL externa; um `urllib3` errado (ex.: *urllib3-future*) quebra o arranque.
+
+Na raiz do repo, com venv ativo, ou execute:
+
+`scripts\windows\reparar-urllib3-requests.cmd`
+
+Ou manualmente: `pip uninstall -y urllib3-future` e `pip install --force-reinstall "urllib3>=2.2.2,<2.6" "requests>=2.31.0,<3"`.

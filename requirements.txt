@@ -39,8 +39,8 @@ jh2
 Jinja2
 jsonschema
 jsonschema-specifications
-lance-namespace
-lance-namespace-urllib3-client
+# lance-namespace / lance-namespace-urllib3-client removidos: não são usados no código e
+# podem instalar cliente HTTP alternativo que quebra `urllib3` usado por requests/streamlit.
 Mako
 MarkupSafe
 narwhals
@@ -80,7 +80,7 @@ PyYAML
 qh3
 referencing
 reportlab>=4.0.0
-requests>=2.28.0
+requests>=2.31.0,<3
 requests-cache>=1.0.0
 retry-requests>=2.0.0
 rpds-py
@@ -106,8 +106,8 @@ tzdata
 tzlocal
 uritemplate
 url-normalize
-# urllib3 canonico para requests/streamlit — NAO usar urllib3-future no mesmo venv (quebra import de __version__).
-urllib3>=2.0.0,<3
+# urllib3 canônico para requests/streamlit — não misturar com urllib3-future no mesmo venv.
+urllib3>=2.2.2,<2.6
 uvicorn
 wassima
 watchdog

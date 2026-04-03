@@ -81,4 +81,4 @@ if (-not $SkipPip) {
 
 Write-Host "Se usa Alembic: ative o venv e rode alembic upgrade head (comando da equipe)."
 Start-WikiServices
-Write-Host "Concluido. Teste http://localhost:8501 e a pasta logs\"
+Write-Host "Concluido. Teste http://localhost:8502 e a pasta logs\"

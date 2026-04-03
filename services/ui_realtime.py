@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from services.release_notes_banner import render_release_notes_banner
+from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.system_notifications import (
     bloqueios_versao_ativos,
     dias_sem_contribuicao,
@@ -229,11 +230,7 @@ def render_global_notifications_listener(*, show_release_banner: bool = True) ->
     inject_modern_css()
     if show_release_banner:
         render_release_notes_banner()
-    role = str(st.session_state.get("perfil", "analista")).strip().lower()
-    if role in ("desenvolvedor",):
-        role = "dev"
-    elif role in ("coordenação",):
-        role = "coordenador"
+    role = normalizar_perfil_para_sessao(st.session_state.get("perfil", "analista"))
     usuario_id = st.session_state.get("usuario_id")
 
     _emit_ponto_eletronico_toasts()

@@ -3,7 +3,18 @@
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(_BASE_DIR)
+
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Antes de importar `modules.database` (que monta o engine com DB_*).
+load_dotenv(Path(_BASE_DIR) / ".env")
+load_dotenv()
+
 import random
 import streamlit as st
 import pandas as pd
@@ -16,7 +27,6 @@ import requests_cache
 import numpy as np
 import streamlit.components.v1 as components
 
-from config import Config
 from datetime import datetime, timedelta
 from datetime import datetime
 from retry_requests import retry
@@ -24,7 +34,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from typing import Tuple, Optional
 from modules.database import get_connection
-from dotenv import load_dotenv
 from modules.auditoria import registrar_log_auditoria
 from typing import Union
 from typing import Optional, Dict, Union  
@@ -36,15 +45,13 @@ from services.ui_realtime import (
 from services.wiki_authenticator import (
     ensure_stauth_cookie_restored,
     get_wiki_authenticator,
+    load_credentials_for_stauth,
     sync_wiki_session_from_stauth,
     wiki_force_logout,
 )
 
 #======================================================================================================================#
-
-#*** Carrega variáveis de ambiente (DB_HOST, DB_NAME, DB_USER, DB_PASS) ***#
-load_dotenv()
-
+# Variáveis de ambiente: carregadas no topo (antes de database / wiki_authenticator).
 #======================================================================================================================#
 import os
 import logging
@@ -453,6 +460,8 @@ def tela_login() -> None:
 
             if btn_login:
                 if usuario and senha:
+                    # Evita credenciais em cache (TTL 120s) após cadastro/alteração no banco
+                    load_credentials_for_stauth.clear()
                     auth = st.session_state.get("_wiki_authenticator_ref") or get_wiki_authenticator()
                     st.session_state["_wiki_authenticator_ref"] = auth
                     login_ok = auth.authentication_controller.login(

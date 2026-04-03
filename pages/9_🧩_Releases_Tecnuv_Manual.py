@@ -24,7 +24,7 @@ from services.db_homologacao import (
 st.set_page_config(page_title="Releases Tecnuv (Manual)", page_icon="🧩", layout="wide")
 
 perfil = require_login()
-pode_gerenciar_release = perfil in ("dev", "coordenador")
+pode_gerenciar_release = perfil == "admin"
 
 
 st.title("🧩 Cadastro Manual de Releases Tecnuv")
@@ -41,7 +41,7 @@ with st.expander("🤔 Como usar esta página?"):
 
 if not pode_gerenciar_release:
     st.error("⛔ Acesso Negado")
-    st.warning("Esta página é exclusiva para perfis de coordenador e desenvolvedor.")
+    st.warning("Esta página é exclusiva para utilizadores com perfil **admin**.")
 else:
     # -----------------------------
     # 1. Formulário de cadastro

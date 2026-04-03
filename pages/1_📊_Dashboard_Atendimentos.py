@@ -15,6 +15,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import text
 from datetime import datetime, timedelta, time
 from modules.database import get_connection
+from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.ui_realtime import render_global_notifications_listener
 from config_ramais import (
     RAMAIS_EXCLUIR,
@@ -74,16 +75,9 @@ if not st.session_state.get("autenticado", False):
     st.switch_page("app.py")
 render_global_notifications_listener()
 
-perfil_logado_raw = str(st.session_state.get("perfil", "analista")).strip().lower()
-# Aceita tanto nomenclatura nova quanto antiga, se existir
-if perfil_logado_raw in ("desenvolvedor", "dev"):
-    perfil_logado = "dev"
-elif perfil_logado_raw in ("coordenação", "coordenador"):
-    perfil_logado = "coordenador"
-else:
-    perfil_logado = perfil_logado_raw
+perfil_logado = normalizar_perfil_para_sessao(st.session_state.get("perfil", "analista"))
 
-if perfil_logado not in ["dev", "coordenador"]:
+if perfil_logado != "admin":
     st.error("⛔ Acesso Negado.")
     st.stop()
 

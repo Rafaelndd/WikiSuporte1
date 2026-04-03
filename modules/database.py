@@ -1,10 +1,13 @@
 import os
+from pathlib import Path
+
 import pandas as pd
-from sqlalchemy import create_engine
 from dotenv import load_dotenv
-import psycopg2
+from sqlalchemy import create_engine
 
-
+# Sempre carrega `.env` da raiz do repositório (não depende do cwd do Streamlit).
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(_PROJECT_ROOT / ".env")
 load_dotenv()
 
 # --- CONFIGURAÇÕES DO BANCO DE DADOS (alinhado a config.py para produção) ---
