@@ -44,8 +44,9 @@ def main() -> None:
     install_streamlit_stub()
     _install_fake_database_module()
 
-    import pandas as pd
     import runpy
+
+    import pandas as pd
 
     with (
         patch("pandas.read_sql", return_value=pd.DataFrame()),
