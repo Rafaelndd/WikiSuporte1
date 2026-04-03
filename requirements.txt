@@ -44,9 +44,9 @@ lance-namespace-urllib3-client
 Mako
 MarkupSafe
 narwhals
-niquests
 numpy>=1.24.0
-openmeteo-requests>=1.0.0
+# openmeteo-requests 1.5+ puxa niquests/urllib3-future e quebra urllib3+requests (Streamlit).
+openmeteo-requests>=1.4.0,<1.5.0
 openmeteo_sdk
 openpyxl
 outcome
@@ -106,8 +106,8 @@ tzdata
 tzlocal
 uritemplate
 url-normalize
-urllib3
-urllib3-future
+# urllib3 canonico para requests/streamlit — NAO usar urllib3-future no mesmo venv (quebra import de __version__).
+urllib3>=2.0.0,<3
 uvicorn
 wassima
 watchdog
