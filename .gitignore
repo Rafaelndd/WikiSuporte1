@@ -87,8 +87,6 @@ hist
 docs
 *.bkp
 
-.streamlit/config.toml
-
 .streamlit/secrets.toml
 update_admin_password.py
 testar_goto.py
@@ -108,3 +106,4 @@ uploads/atendimentos/
 uploads/
 database/pgvector/pgvector-master/
 database/pgvector/
+Prompts.txt

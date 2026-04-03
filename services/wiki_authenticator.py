@@ -16,6 +16,7 @@ import streamlit as st
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 from streamlit_authenticator import Authenticate
+from streamlit_authenticator.utilities.exceptions import LoginError
 
 from modules.database import get_connection
 from services.perfil_usuario import normalizar_perfil_para_sessao
@@ -222,9 +223,40 @@ def wiki_force_logout() -> None:
         st.session_state.pop(k, None)
 
 
+def _limpar_sessao_stauth_invalida(auth: Authenticate) -> None:
+    """Remove cookie e estado stauth quando o token não corresponde mais às credenciais."""
+    try:
+        auth.cookie_controller.delete_cookie()
+    except Exception as e:
+        logging.debug("delete_cookie após token inválido: %s", e)
+    st.session_state["autenticado"] = False
+    for k in (
+        "authentication_status",
+        "username",
+        "name",
+        "email",
+        "roles",
+    ):
+        st.session_state.pop(k, None)
+    if "logout" in st.session_state:
+        st.session_state["logout"] = None
+
+
 def ensure_stauth_cookie_restored() -> None:
     """Processa cookie de re-login sem desenhar o formulário padrão da biblioteca."""
     auth = get_wiki_authenticator()
     st.session_state["_wiki_authenticator_ref"] = auth
-    auth.login(location="unrendered", key="ws_stauth_probe")
+    try:
+        auth.login(location="unrendered", key="ws_stauth_probe")
+    except LoginError as e:
+        # Cookie com username que não existe mais em credenciais (login alterado, user
+        # removido, TTL de cache vs DB, ou chave JWT diferente). Não derrubar a app.
+        logging.info(
+            "ensure_stauth_cookie_restored: cookie/sessão stauth rejeitado (%s). "
+            "Removendo cookie; utilize o formulário de login.",
+            e,
+        )
+        load_credentials_for_stauth.clear()
+        _limpar_sessao_stauth_invalida(auth)
+        return
     sync_wiki_session_from_stauth()

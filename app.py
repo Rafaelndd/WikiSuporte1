@@ -49,6 +49,8 @@ from services.wiki_authenticator import (
     sync_wiki_session_from_stauth,
     wiki_force_logout,
 )
+from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.release_notes_banner import render_home_release_nudge
 
 #======================================================================================================================#
 # Variáveis de ambiente: carregadas no topo (antes de database / wiki_authenticator).
@@ -501,7 +503,8 @@ def tela_login() -> None:
 def tela_home() -> None:
 
     render_global_notifications_listener()
-    
+    wiki_theme_apply_authenticated()
+
     # --- DADOS DO USUÁRIO ---
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
     perfil_usuario = str(st.session_state.get('perfil', 'analista')).lower()
@@ -573,6 +576,8 @@ def tela_home() -> None:
     # ==========================================
     # --- ÁREA PRINCIPAL DA TELA (CONTEÚDO) ---
     # ==========================================
+    render_home_release_nudge()
+
     st.markdown(
         """
         <style>

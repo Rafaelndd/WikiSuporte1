@@ -1,17 +1,21 @@
 """
-Página pública interna: notas de versão do WikiSuporte (linguagem para utilizadores).
-Conteúdo: releases/WIKISUPORTE_NOTAS_DE_VERSAO.md
+Página interna: notas de versão do WikiSuporte (utilizadores autenticados).
+
+Conteúdo principal: catálogo ``releases/releases_catalog.json`` (``utils.release_manager``).
+O Markdown ``releases/WIKISUPORTE_NOTAS_DE_VERSAO.md`` permanece como anexo opcional.
 """
 
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 import streamlit as st
 
 from services.release_notes_banner import RELEASE_NOTES_DATE, RELEASE_NOTES_VERSION
 from services.ui_realtime import render_global_notifications_listener
+from utils.release_manager import ReleaseRecord, load_catalog
 
 st.set_page_config(
     page_title="WikiSuporte — Notas de versão",
@@ -28,6 +32,30 @@ render_global_notifications_listener(show_release_banner=False)
 
 _BASE = Path(__file__).resolve().parent.parent
 _MD_PATH = _BASE / "releases" / "WIKISUPORTE_NOTAS_DE_VERSAO.md"
+
+
+def _fmt_data(iso: str) -> str:
+    try:
+        return date.fromisoformat(iso[:10]).strftime("%d/%m/%Y")
+    except ValueError:
+        return iso
+
+
+def _render_release_expander(rec: ReleaseRecord, *, expanded: bool) -> None:
+    title = f"{rec.versao} · {_fmt_data(rec.data_lancamento)}"
+    with st.expander(title, expanded=expanded):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("##### Como era")
+            st.markdown(rec.como_era or "—")
+        with c2:
+            st.markdown("##### Como ficou")
+            st.markdown(rec.como_ficou or "—")
+        st.caption(
+            f"Aviso na Home: {rec.dias_notificacao} dia(s) a partir do lançamento "
+            f"(último dia: {_fmt_data(rec.notificacao_ate)})."
+        )
+
 
 st.markdown(
     """
@@ -59,13 +87,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+catalog = load_catalog(create_if_missing=True)
+latest = catalog[0] if catalog else None
+hero_version = latest.versao if latest else RELEASE_NOTES_VERSION
+hero_date = latest.data_lancamento if latest else RELEASE_NOTES_DATE
+
 st.markdown(
     f"""
     <div class="ws-notes-hero">
         <h1 aria-label="WikiSuporte Notas de versão">
             <span class="wiki">Wiki</span><span class="suporte">Suporte</span>
         </h1>
-        <p class="meta"><strong>Notas de versão</strong> · Release {RELEASE_NOTES_VERSION} · {RELEASE_NOTES_DATE}</p>
+        <p class="meta"><strong>Notas de versão</strong> · Último release · {hero_version} · {_fmt_data(hero_date)}</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -73,14 +106,22 @@ st.markdown(
 
 st.divider()
 
+if not catalog:
+    st.warning("Ainda não há releases registadas no catálogo. Um administrador pode publicar em **Configurações → Lançar Nova Versão**.")
+else:
+    st.subheader("Histórico de releases", anchor=False)
+    st.caption("Do mais recente para o mais antigo. Abra cada versão para ver o comparativo **Como era** / **Como ficou**.")
+    for i, rec in enumerate(catalog):
+        _render_release_expander(rec, expanded=(i == 0))
+
+st.divider()
+st.subheader("Documentação adicional", anchor=False)
+
 if not _MD_PATH.is_file():
-    st.error("Ficheiro de notas não encontrado. Contacte a equipa técnica.")
-    st.stop()
-
-raw = _MD_PATH.read_text(encoding="utf-8")
-# Remove o primeiro H1 duplicado se existir (o título já está no hero)
-raw = re.sub(r"^#\s+Notas de versão[^\n]*\n+", "", raw.strip(), count=1)
-# Oculta bloco "Para a equipa técnica" na UI (mantém no repo para devs)
-raw = re.split(r"\n---\n## Para a equipa técnica", raw, maxsplit=1)[0].strip()
-
-st.markdown(raw)
+    st.caption("Não existe ficheiro Markdown complementar neste ambiente.")
+else:
+    raw = _MD_PATH.read_text(encoding="utf-8")
+    raw = re.sub(r"^#\s+Notas de versão[^\n]*\n+", "", raw.strip(), count=1)
+    raw = re.split(r"\n---\n## Para a equipa técnica", raw, maxsplit=1)[0].strip()
+    with st.expander("Texto longo / detalhes (Markdown histórico)", expanded=False):
+        st.markdown(raw)

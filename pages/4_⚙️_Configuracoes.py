@@ -8,7 +8,7 @@ import os
 import re
 import time
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
@@ -34,6 +34,8 @@ from services.system_notifications import (
 )
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
+from services.ui_theme_presets import wiki_theme_apply_authenticated
+from utils.release_manager import append_release, catalog_path, load_catalog
 
 try:
     from modules.auditoria import registrar_log_auditoria
@@ -66,6 +68,7 @@ usuario_id = st.session_state.get("usuario_id")
 nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
 perfil_raw = st.session_state.get("perfil", "")
 render_global_notifications_listener()
+wiki_theme_apply_authenticated()
 ensure_notifications_schema()
 
 if not eh_admin(perfil_raw):
@@ -82,13 +85,13 @@ nomes_abas = [
     "📞 Ramais e Analistas",
     "👥 Usuários",
     "🏢 Clientes e Telefones",
-    "🛠️ Funcionalidade inativa",
+    "📢 Lançar Nova Versão",
 ]
 tem_painel_notifs = True
 if tem_painel_notifs:
     nomes_abas.append("📣 Notificações e Comunicados")
 abas = st.tabs(nomes_abas)
-aba_robo, aba_ramais, aba_usuarios, aba_clientes, aba_diagnostico = abas[:5]
+aba_robo, aba_ramais, aba_usuarios, aba_clientes, aba_release_launch = abas[:5]
 aba_notificacoes = abas[5] if tem_painel_notifs else None
 
 # ==========================================
@@ -423,6 +426,70 @@ with aba_clientes:
             st.dataframe(df_cli, hide_index=True, use_container_width="stretch")
     except Exception as e:
         st.caption(f"Listagem indisponível: {e}")
+
+# ==========================================
+# ABA: LANÇAR NOVA VERSÃO (RELEASE NOTES)
+# ==========================================
+with aba_release_launch:
+    st.subheader("📢 Lançar Nova Versão")
+    st.caption(
+        "Os dados são guardados em **`releases/releases_catalog.json`**. "
+        "O aviso na **Home** fica visível até ao último dia da janela (dia de lançamento conta como dia 1)."
+    )
+    st.caption(f"Caminho: `{catalog_path()}`")
+
+    existentes = load_catalog(create_if_missing=True)
+    if existentes:
+        ult = existentes[0]
+        st.info(
+            f"Última publicada: **{ult.versao}** · {ult.data_lancamento} · "
+            f"aviso na Home até **{ult.notificacao_ate}**."
+        )
+
+    with st.form("form_lancar_release_wikisuporte", clear_on_submit=False):
+        in_versao = st.text_input("Número da versão", placeholder="v1.2.0")
+        in_data = st.date_input("Data de lançamento", value=date.today())
+        in_era = st.text_area("Como era", height=110, placeholder="Descreva o comportamento ou limitação anterior.")
+        in_ficou = st.text_area("Como ficou", height=130, placeholder="Descreva a melhoria ou a nova experiência.")
+        in_dias = st.number_input(
+            "Dias com notificação na Home (inclui o dia de lançamento)",
+            min_value=1,
+            max_value=365,
+            value=7,
+            step=1,
+            help="Ex.: 7 = mostra na Home durante 7 dias corridos a partir da data de lançamento.",
+        )
+        submitted = st.form_submit_button("💾 Guardar release", type="primary", use_container_width=True)
+
+        if submitted:
+            if not (in_versao or "").strip():
+                st.error("Indique o número da versão.")
+            elif not (in_era or "").strip() or not (in_ficou or "").strip():
+                st.error("Preencha **Como era** e **Como ficou**.")
+            else:
+                try:
+                    rec = append_release(
+                        versao=in_versao.strip(),
+                        data_lancamento=in_data,
+                        como_era=in_era,
+                        como_ficou=in_ficou,
+                        dias_notificacao=int(in_dias),
+                    )
+                    registrar_log_auditoria(
+                        usuario_id,
+                        "RELEASE_PUBLISH",
+                        f"Publicou release {rec.versao} (aviso até {rec.notificacao_ate})",
+                    )
+                    st.cache_data.clear()
+                    st.success(
+                        f"Release **{rec.versao}** guardada. Aviso na Home até **{rec.notificacao_ate}**."
+                    )
+                    st.balloons()
+                    st.rerun()
+                except ValueError as ve:
+                    st.error(str(ve))
+                except OSError as oe:
+                    st.error(f"Falha ao gravar ficheiro: {oe}")
 
 if aba_notificacoes:
     with aba_notificacoes:
