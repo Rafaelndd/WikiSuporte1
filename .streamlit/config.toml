@@ -1,0 +1,7 @@
+# WikiSuporte — interface para utilizador final (sem segredos aqui).
+# Oculta o botão "Deploy" e outras opções de desenvolvedor no menu superior.
+# Valores: auto | developer | viewer | minimal
+# https://docs.streamlit.io/develop/api-reference/configuration/config.toml
+
+[client]
+toolbarMode = "viewer"

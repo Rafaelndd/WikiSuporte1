@@ -9,7 +9,6 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from services.release_notes_banner import render_release_notes_banner
 from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.system_notifications import (
     bloqueios_versao_ativos,
@@ -226,10 +225,11 @@ def _render_inatividade_sidebar(usuario_id: Optional[int]) -> None:
 def render_global_notifications_listener(*, show_release_banner: bool = True) -> None:
     """
     Executa no início das páginas para escutar notificações ativas e lembretes.
+
+    ``show_release_banner`` mantém a assinatura por compatibilidade; o aviso de
+    release é tratado na Home via ``render_home_release_nudge`` (catálogo JSON).
     """
     inject_modern_css()
-    if show_release_banner:
-        render_release_notes_banner()
     role = normalizar_perfil_para_sessao(st.session_state.get("perfil", "analista"))
     usuario_id = st.session_state.get("usuario_id")
 

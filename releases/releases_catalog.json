@@ -1,0 +1,12 @@
+{
+  "releases": [
+    {
+      "versao": "v2.1.0",
+      "data_lancamento": "2026-04-02",
+      "como_era": "Versão anterior sem catálogo centralizado de releases na aplicação.",
+      "como_ficou": "Sessão de login mais estável no navegador, nova página de notas de versão e reforço de segurança nos bastidores.",
+      "dias_notificacao": 14,
+      "notificacao_ate": "2026-04-15"
+    }
+  ]
+}

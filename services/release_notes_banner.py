@@ -1,86 +1,104 @@
 """
-Banner de novidades da versão + link para a página de notas (releases).
+Aviso de nova versão na Home e metadados para a página de notas.
 
-Ao publicar uma nova versão, atualize as constantes abaixo e acrescente
-entradas em releases/WIKISUPORTE_NOTAS_DE_VERSAO.md.
+A fonte de verdade passou a ser ``releases/releases_catalog.json``, gerido por
+``utils/release_manager.py``. As constantes abaixo mantêm compatibilidade com
+código legado quando o catálogo está vazio.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-# --- Atualizar a cada release ---
+from utils.release_manager import (
+    get_latest_release,
+    load_catalog,
+    release_for_home_banner,
+)
+
+# --- Compat legado (fallback se não houver catálogo) ---
 RELEASE_NOTES_VERSION = "2.1.0"
 RELEASE_NOTES_DATE = "2026-04-02"
 RELEASE_NOTES_SUMMARY = (
     "Sessão de login mais estável no navegador, nova página de notas de versão e reforço de segurança nos bastidores."
 )
 
-_SESSION_ACK = f"ws_release_notes_ack_{RELEASE_NOTES_VERSION.replace('.', '_')}"
+_NOTAS_PAGE = "pages/10_📋_Notas_de_versao.py"
+
+
+def _sync_legacy_constants_from_catalog() -> None:
+    """Atualiza constantes de módulo a partir do catálogo (para imports antigos)."""
+    global RELEASE_NOTES_VERSION, RELEASE_NOTES_DATE, RELEASE_NOTES_SUMMARY
+    latest = get_latest_release(load_catalog(create_if_missing=False))
+    if latest is None:
+        return
+    RELEASE_NOTES_VERSION = latest.versao.lstrip("vV") or latest.versao
+    RELEASE_NOTES_DATE = latest.data_lancamento
+    RELEASE_NOTES_SUMMARY = (latest.como_ficou or "")[:500]
 
 
 def render_release_notes_banner() -> None:
     """
-    Exibe um aviso discreto com link para Notas de versão (uma vez por sessão até o utilizador dispensar).
-    Só faz sentido com utilizador autenticado; chamado a partir de ui_realtime.
+    Legado: antes mostrava banner em todas as páginas. Mantido vazio para não
+    duplicar o aviso — use ``render_home_release_nudge`` só na Home.
+    """
+    return
+
+
+def render_home_release_nudge() -> None:
+    """
+    Faixa na parte superior da Home: só aparece enquanto ``hoje <= notificacao_ate``
+    da última release. Link nativo para a página de notas via ``st.page_link``.
     """
     if not st.session_state.get("autenticado"):
         return
-    if st.session_state.get(_SESSION_ACK):
+
+    rec = release_for_home_banner()
+    if rec is None:
         return
 
     st.markdown(
         """
         <style>
-        .ws-release-banner {
+        .ws-home-release-nudge {
             border-radius: 12px;
-            border: 1px solid rgba(30, 95, 191, 0.35);
-            background: linear-gradient(135deg, rgba(30, 95, 191, 0.08), rgba(13, 148, 136, 0.06));
+            border: 1px solid rgba(22, 163, 74, 0.45);
+            background: linear-gradient(135deg, rgba(22, 163, 74, 0.12), rgba(13, 148, 136, 0.08));
             padding: 0.85rem 1rem;
-            margin: 0.25rem 0 0.75rem 0;
+            margin: 0 0 0.75rem 0;
         }
-        .ws-release-banner .ws-brand-wiki { color: #1e5fbf; font-weight: 800; }
-        .ws-release-banner .ws-brand-sup { color: #0d9488; font-weight: 800; }
-        html[data-theme="dark"] .ws-release-banner .ws-brand-wiki { color: #93c5fd; }
-        html[data-theme="dark"] .ws-release-banner .ws-brand-sup { color: #5eead4; }
-        .ws-release-meta { font-size: 0.9rem; color: #6b7280; margin-top: 0.25rem; }
-        html[data-theme="dark"] .ws-release-meta { color: #9ca3af; }
+        html[data-theme="dark"] .ws-home-release-nudge {
+            border-color: rgba(52, 211, 153, 0.4);
+            background: linear-gradient(135deg, rgba(22, 101, 52, 0.35), rgba(15, 118, 110, 0.2));
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
+    dl_fmt = rec.data_lancamento
+    try:
+        from datetime import date as _date
+
+        dl_fmt = _date.fromisoformat(rec.data_lancamento[:10]).strftime("%d/%m/%Y")
+    except ValueError:
+        pass
+
     st.markdown(
         f"""
-        <div class="ws-release-banner" role="region" aria-label="Novidades da versão">
-            <div>
-                <span class="ws-brand-wiki">Wiki</span><span class="ws-brand-sup">Suporte</span>
-                · <strong>Novidades da versão {RELEASE_NOTES_VERSION}</strong>
-            </div>
-            <div class="ws-release-meta">Publicado em {RELEASE_NOTES_DATE}</div>
+        <div class="ws-home-release-nudge" role="status">
+            <strong>✅ Novo Release do WikiSuporte está disponível!</strong>
+            <span style="opacity:0.9"> · Versão <code>{rec.versao}</code> · {dl_fmt}</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    st.caption("Para saber mais, use o link abaixo.")
+    st.page_link(_NOTAS_PAGE, label="👉 Clique aqui para abrir as notas de versão", icon="📋")
 
-    st.caption(RELEASE_NOTES_SUMMARY)
 
-    toast_key = f"ws_toast_release_{RELEASE_NOTES_VERSION.replace('.', '_')}"
-    if not st.session_state.get(toast_key):
-        st.toast(f"WikiSuporte {RELEASE_NOTES_VERSION}: há novidades — abra as notas de versão.", icon="📋")
-        st.session_state[toast_key] = True
-
-    c1, c2 = st.columns([1.2, 1])
-    with c1:
-        try:
-            st.page_link(
-                "pages/10_📋_Notas_de_versao.py",
-                label="Abrir notas de versão",
-                icon="📋",
-            )
-        except Exception:
-            st.markdown("*Use o menu lateral: **Notas de versão**.*")
-    with c2:
-        if st.button("Entendi", key=f"btn_ack_release_{RELEASE_NOTES_VERSION}", type="secondary"):
-            st.session_state[_SESSION_ACK] = True
-            st.rerun()
+# Ao importar, alinha constantes legadas ao JSON (quando existir)
+try:
+    _sync_legacy_constants_from_catalog()
+except Exception:
+    pass

@@ -50,6 +50,7 @@ from services.wiki_authenticator import (
     wiki_force_logout,
 )
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.release_notes_banner import render_home_release_nudge
 
 #======================================================================================================================#
 # Variáveis de ambiente: carregadas no topo (antes de database / wiki_authenticator).
@@ -575,6 +576,8 @@ def tela_home() -> None:
     # ==========================================
     # --- ÁREA PRINCIPAL DA TELA (CONTEÚDO) ---
     # ==========================================
+    render_home_release_nudge()
+
     st.markdown(
         """
         <style>

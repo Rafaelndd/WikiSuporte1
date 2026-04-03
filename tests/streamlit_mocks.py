@@ -132,6 +132,7 @@ def install_streamlit_stub(session_state: dict | None = None) -> MagicMock:
     st.json = MagicMock()
     st.code = MagicMock()
     st.link_button = MagicMock()
+    st.page_link = MagicMock()
     st.toast = MagicMock()
     st.spinner = MagicMock()
     st.progress = MagicMock()

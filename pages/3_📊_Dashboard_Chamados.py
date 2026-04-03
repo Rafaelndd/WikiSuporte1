@@ -14,7 +14,6 @@ from retry_requests import retry
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from services.ui_realtime import render_global_notifications_listener
-from services.ui_theme_presets import wiki_theme_apply_authenticated
 
 # ==========================================
 # 1. SEGURANÇA E SESSÃO
@@ -38,7 +37,6 @@ st.set_page_config(
 if not st.session_state.get("autenticado", False):
     st.switch_page("app.py")
 render_global_notifications_listener()
-wiki_theme_apply_authenticated()
 
 # ID do usuário logado (usado nos logs de auditoria)
 usuario_id = st.session_state.get("usuario_id")
