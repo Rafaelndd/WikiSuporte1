@@ -79,6 +79,7 @@ def get_wiki_authenticator() -> Authenticate:
         _cookie_signing_key(),
         30.0,
         auto_hash=False,
+        login_sleep_time=0,
     )
 
 

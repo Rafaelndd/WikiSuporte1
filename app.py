@@ -4,6 +4,7 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import random
 import streamlit as st
 import pandas as pd
 import requests
@@ -93,6 +94,10 @@ if 'notificacoes_lidas' not in st.session_state:
 # Restaura login via cookie do streamlit-authenticator (F5 / nova aba)
 if not st.session_state.get("autenticado"):
     ensure_stauth_cookie_restored()
+
+# Alinha sessão Wiki com stauth (evita um frame da tela de login após credenciais válidas)
+if st.session_state.get("authentication_status") and not st.session_state.get("autenticado"):
+    sync_wiki_session_from_stauth()
 
 # Oculta sidebar e menus (pages) na tela de login — aplicado cedo para evitar piscar
 if not st.session_state['autenticado']:
@@ -559,19 +564,97 @@ def tela_home() -> None:
     # ==========================================
     # --- ÁREA PRINCIPAL DA TELA (CONTEÚDO) ---
     # ==========================================
-    
-    # Ajuste visual: Mata o espaço em branco inútil do topo do Streamlit
-    st.markdown("<style>.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }</style>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <style>
+            .block-container { padding-top: 1.25rem; padding-bottom: 1rem; }
+            .ws-home-hero {
+                text-align: center;
+                max-width: 46rem;
+                margin: 0 auto 1.25rem auto;
+                padding: 0.5rem 0.75rem 0.75rem;
+            }
+            .ws-home-hero .ws-home-title {
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+                font-size: clamp(1.25rem, 3vw, 1.85rem);
+                font-weight: 800;
+                line-height: 1.35;
+                margin: 0 0 0.65rem 0;
+                letter-spacing: -0.03em;
+            }
+            .ws-home-hero .wiki { color: #1e5fbf; }
+            .ws-home-hero .suporte { color: #0d9488; }
+            html[data-theme="dark"] .ws-home-hero .wiki { color: #93c5fd; }
+            html[data-theme="dark"] .ws-home-hero .suporte { color: #5eead4; }
+            .ws-home-hero .ws-name-amp {
+                color: #4b5563;
+                font-weight: 700;
+                margin: 0 0.15em;
+            }
+            html[data-theme="dark"] .ws-home-hero .ws-name-amp { color: #d1d5db; }
+            .ws-home-hero a.epsy-home-link {
+                display: inline-flex;
+                align-items: baseline;
+                flex-wrap: wrap;
+                justify-content: center;
+                text-decoration: none;
+                background: #0f172a;
+                padding: 0.2em 0.55em 0.26em;
+                border-radius: 0.45em;
+                margin-left: 0.1em;
+                vertical-align: middle;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+            }
+            html[data-theme="dark"] .ws-home-hero a.epsy-home-link {
+                background: #020617;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+            }
+            .ws-home-hero a.epsy-home-link:hover { background: #1e293b; }
+            html[data-theme="dark"] .ws-home-hero a.epsy-home-link:hover { background: #0f172a; }
+            .ws-home-hero .epsy-e-mirror {
+                display: inline-block;
+                color: #ea580c;
+                font-weight: 800;
+                transform: scaleX(-1);
+                margin-right: 0.05em;
+            }
+            .ws-home-hero .epsy-rest,
+            .ws-home-hero .epsy-sistemas {
+                color: #ffffff !important;
+                font-weight: 700;
+            }
+            .ws-home-hero .epsy-sistemas { font-weight: 600; }
+            .ws-home-hero .ws-home-tagline {
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+                font-size: clamp(0.95rem, 2.1vw, 1.125rem);
+                line-height: 1.5;
+                margin: 0;
+                color: #374151;
+            }
+            html[data-theme="dark"] .ws-home-hero .ws-home-tagline { color: #d1d5db; }
+            .ws-home-hero .ws-home-tagline em {
+                font-style: italic;
+                font-weight: 500;
+            }
+        </style>
+        <header class="ws-home-hero" role="banner" aria-labelledby="ws-home-heading">
+            <h1 id="ws-home-heading" class="ws-home-title">
+                <span class="wiki">Wiki</span><span class="suporte">Suporte</span>
+                <span class="ws-name-amp">&amp;</span>
+                <a href="https://epsy.com.br/" target="_blank" rel="noopener noreferrer"
+                   class="epsy-home-link"
+                   title="EPSY Sistemas — site oficial (abre em nova aba)"
+                   aria-label="EPSY Sistemas, site oficial em nova aba">
+                    <span class="epsy-e-mirror" aria-hidden="true">E</span><span class="epsy-rest">PSY</span><span class="epsy-sistemas"> Sistemas</span>
+                </a>
+            </h1>
+            <p class="ws-home-tagline"><em>Onde o conhecimento de cada um se une para entregar excelência.</em></p>
+        </header>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # Logo centralizada
-    _, col_logo, _ = st.columns([2, 1, 2])
-    with col_logo:
-        try:
-            st.image("assets/imgepsy.png", width=220)
-        except Exception:
-            pass
-
-    st.divider()  # Linha para separar a logo do seu painel
+    st.divider()
 
     # SAUDAÇÃO E CLIMA USANDO COMPONENTES NATIVOS
     col_texto = st.container()
