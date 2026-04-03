@@ -71,6 +71,10 @@ documentacoes_sistema/
 # IDE / Editor
 .vscode/
 .idea/
+# Cursor: ignorar estado local; manter regras partilhadas em .cursor/rules/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 *.swp
 
 # OS Generated files

@@ -1,0 +1,18 @@
+# Bandit: análise estática de segurança (CI usa apenas severidade HIGH: bandit -lll).
+exclude_dirs:
+  - tests
+  - venv
+  - .venv
+  - env
+  - .git
+  - __pycache__
+  - .pytest_cache
+  - PostgreSQL
+  - uploads
+  - uploads_wiki
+  - documentacoes_sistema
+  - WikiFeedbacks
+  - backups
+  - dist
+  - build
+  - node_modules
