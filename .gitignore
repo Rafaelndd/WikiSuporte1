@@ -39,12 +39,24 @@ env/
 .env
 .streamlit/secrets.toml
 
+# Autenticação (streamlit-authenticator — configs locais)
+config_auth.yaml
+config_auth.yml
+credentials_wiki.yaml
+credentials_wiki.yml
+credentials_stauth.yaml
+credentials_stauth.yml
+auth_secrets.toml
+.streamlit/auth.toml
+.streamlit/authenticator.yaml
 
 # Arquivos de configuração específicos do ambiente
 ramais_config.json
 
-# Logs
+# Logs (evitar commit de dados sensíveis; *.log não cobre *.log.txt)
+logs/
 *.log
+*.log.txt
 oraculo_engine.log
 
 # Data files (Prevent committing customer data)

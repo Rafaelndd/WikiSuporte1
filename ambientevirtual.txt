@@ -12,4 +12,3 @@
 #
 # Este ficheiro é consumido por pip (-r). Inclui requirements.txt + pacotes extra.
 -r requirements.txt
-google-generativeai>=0.8.0

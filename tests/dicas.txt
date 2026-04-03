@@ -1,0 +1,32 @@
+Esse erro vem do resolver do pip ao tentar resolver tudo de uma vez num requirements.txt grande e “plano”. A ordem que costuma funcionar é esta:
+
+1. Ferramentas do pip (sempre primeiro)
+python -m pip install -U pip setuptools wheel
+2. “Núcleo” da app (reduz o grafo na segunda passagem)
+Instale manualmente os pacotes que puxam mais dependências antes do ficheiro completo:
+
+python -m pip install `
+  "streamlit>=1.28" `
+  "streamlit-authenticator>=0.4.0" `
+  "sqlalchemy>=2.0" `
+  "pandas>=2.0" `
+  "numpy>=1.24" `
+  "psycopg2-binary>=2.9" `
+  "python-dotenv>=1.0" `
+  bcrypt `
+  pydantic
+(Ajuste versões se o projeto exigir outras.)
+
+3. Resto do projeto
+python -m pip install -r requirements.txt
+Muitas linhas já ficam satisfeitas e o pip não entra num backtracking tão profundo.
+
+4. Desenvolvimento (só depois do principal)
+O vosso requirements-dev.txt inclui -r requirements.txt, por isso não use pip install -r requirements-dev.txt se o passo 3 ainda falhar — use só pytest em separado:
+
+python -m pip install "pytest>=8.0.0"
+Se ainda der resolution-too-deep
+Repetir o passo 1 e de seguida só o passo 3 (às vezes basta pip mais novo).
+Instalar em dois blocos a partir do requirements.txt: copiar metade do ficheiro para requirements-part1.txt e metade para requirements-part2.txt e instalar um de cada vez (sem duplicar linhas críticas).
+Alternativa moderna (resolve rápido): uv — uv pip install -r requirements.txt.
+Resumo: ordem prática = atualizar pip → instalar núcleo (passo 2) → pip install -r requirements.txt → pytest à parte se precisar de testes.

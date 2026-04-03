@@ -23,14 +23,9 @@ flatbuffers
 git-filter-repo
 gitdb
 GitPython
-google-ai-generativelanguage
-google-api-core
-google-api-python-client
-google-auth
-google-auth-httplib2
+# Gemini / IA: o código usa só `from google import genai` (pacote google-genai).
+# Não listar google-api-python-client nem google-generativeai aqui — puxam resolução enorme e são legado/redundantes.
 google-genai>=1.0.0
-google-generativeai
-googleapis-common-protos
 greenlet
 grpcio
 grpcio-status
@@ -98,6 +93,7 @@ sortedcontainers
 sqlalchemy>=2.0.0
 starlette
 streamlit
+streamlit-authenticator>=0.4.0
 tenacity
 toml
 tornado

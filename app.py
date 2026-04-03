@@ -5,7 +5,6 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import streamlit as st
-import random
 import pandas as pd
 import requests
 import logging
@@ -32,6 +31,12 @@ from modules.utils import inicializar_usuario, calcular_patente
 from services.ui_realtime import (
     render_global_notifications_listener,
     show_gamification_upgrade_card,
+)
+from services.wiki_authenticator import (
+    ensure_stauth_cookie_restored,
+    get_wiki_authenticator,
+    sync_wiki_session_from_stauth,
+    wiki_force_logout,
 )
 
 #======================================================================================================================#
@@ -84,6 +89,10 @@ if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 if 'notificacoes_lidas' not in st.session_state:
     st.session_state['notificacoes_lidas'] = []
+
+# Restaura login via cookie do streamlit-authenticator (F5 / nova aba)
+if not st.session_state.get("autenticado"):
+    ensure_stauth_cookie_restored()
 
 # Oculta sidebar e menus (pages) na tela de login — aplicado cedo para evitar piscar
 if not st.session_state['autenticado']:
@@ -214,34 +223,8 @@ def obter_kpis_home(usuario_id):
 
 
 # ==========================================
-# 4. FUNÇÕES DE SEGURANÇA E LOGIN
+# 4. FUNÇÕES DE SEGURANÇA E LOGIN (senha validada via streamlit-authenticator + BD)
 # ==========================================
-def verificar_login(username: str, senha_digitada: str) -> Tuple[bool, Optional[int], Optional[str]]:
-    """ Verifica as credenciais delegando a validação de hash da senha 100% para o PostgreSQL. """
-    engine = get_connection()
-    try:
-        with engine.connect() as conn:
-            # AJUSTE DE SEGURANÇA: Usando a função nativa crypt() do Postgres para comparar o hash.
-            # O Python NUNCA sabe qual é a senha real ou o hash, ele apenas repassa o texto limpo para o banco julgar.
-            query = text("""
-                SELECT id, perfil 
-                FROM usuarios 
-                WHERE nome ILIKE :u 
-                AND password_hash = crypt(:p, password_hash) 
-                AND ativo = TRUE
-            """)
-           # Passamos 'u' para o nome e 'p' para a senha em texto puro
-            resultado = conn.execute(query, {"u": username, "p": senha_digitada}).fetchone()
-            
-            if resultado:
-                # Retorna ID e Perfil para a sessão do Streamlit
-                return True, resultado[0], resultado[1]
-                
-    except Exception as e:
-        st.error(f"WikiSuporte encontrou um erro durante a autenticação: {e}")
-    
-    return False, None, None
-
 
 # --- 1. FUNÇÃO DE CONSUMO DE API (COM CACHE) ---
 # O TTL=3600 significa que o sistema só vai na internet buscar o clima a cada 1 hora (3600 segundos).
@@ -378,7 +361,8 @@ if st.session_state.get('autenticado'):   # <-- correção aqui
     ultimo_acesso = st.session_state.get('ultimo_acesso', agora)
     
     if agora - ultimo_acesso > timedelta(minutes=50):
-        st.session_state.clear() 
+        wiki_force_logout()
+        st.session_state.clear()
         st.warning("⏱️ Sessão expirada por inatividade (50 min). Por favor, faça login novamente para continuar.")
         st.stop()
     else:
@@ -393,92 +377,111 @@ def tela_login() -> None:
             [data-testid="collapsedControl"] { display: none !important; }
             [data-testid="stSidebar"] { display: none !important; }
             [data-testid="stSidebarNav"], [data-testid="stSidebarNavItems"] { display: none !important; }
+            [data-testid="stAppViewContainer"] .main .block-container {
+                min-height: calc(100vh - 4.5rem);
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: center !important;
+                padding-top: clamp(0.75rem, 3vh, 2rem) !important;
+                padding-bottom: clamp(1rem, 4vh, 2.5rem) !important;
+                max-width: 100% !important;
+            }
+            .ws-login-brand { text-align: center; margin: 0 auto 0.15rem auto; max-width: 100%; }
+            .ws-login-title {
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                font-weight: 800;
+                font-size: clamp(2rem, 5.5vw, 3.35rem);
+                line-height: 1.12;
+                letter-spacing: -0.03em;
+                margin: 0;
+                padding: 0;
+            }
+            .ws-login-title .wiki { color: #1e5fbf; }
+            .ws-login-title .suporte { color: #0d9488; }
+            html[data-theme="dark"] .ws-login-title .wiki { color: #93c5fd; }
+            html[data-theme="dark"] .ws-login-title .suporte { color: #5eead4; }
+            .ws-login-subtitle {
+                text-align: center;
+                color: #6b7280;
+                font-size: clamp(0.88rem, 2.2vw, 1.05rem);
+                margin: 0 0 1.1rem 0;
+                line-height: 1.4;
+            }
+            html[data-theme="dark"] .ws-login-subtitle { color: #9ca3af; }
+            .ws-login-footer {
+                text-align: center;
+                color: #9ca3af;
+                font-size: clamp(0.72rem, 1.8vw, 0.82rem);
+                margin-top: 1.25rem;
+            }
+            html[data-theme="dark"] .ws-login-footer { color: #6b7280; }
             .stAlert p, .stCaption { text-align: center; display: block; }
+            @media (max-width: 480px) {
+                .ws-login-title { font-size: clamp(1.65rem, 9vw, 2.35rem); }
+            }
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("<br><br>", unsafe_allow_html=True)
     col_vazia1, col_centro, col_vazia2 = st.columns([1, 1.5, 1])
 
     with col_centro:
-        c_img1, c_img2, c_img3 = st.columns([1, 2, 1])
-        with c_img2:
-            try: st.image("mascote/psy_no_dashbsoard.png", width='stretch')
-            except: pass
-            
-        st.markdown("<h2 style='text-align: center;'>WikiSuporte</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: gray;'>Plataforma de Suporte Técnico</p>", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div class="ws-login-brand">
+                <h1 class="ws-login-title" aria-label="WikiSuporte">
+                    <span class="wiki">Wiki</span><span class="suporte">Suporte</span>
+                </h1>
+            </div>
+            <p class="ws-login-subtitle">Plataforma de Suporte Técnico</p>
+            """,
+            unsafe_allow_html=True,
+        )
 
         with st.container(border=True):
             st.markdown("<h4 style='text-align: center;'>🔐 Login </h4>", unsafe_allow_html=True)
-            
+
             with st.form("form_login"):
                 usuario = st.text_input("👤 Usuário", placeholder="Insira o seu nome de usuário")
                 senha = st.text_input("🔑 Senha", type="password", placeholder="••••••••")
                 st.markdown("<br>", unsafe_allow_html=True)
-                btn_login = st.form_submit_button("Entrar", type="primary", use_container_width='stretch')
-                
+                btn_login = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+
             if btn_login:
                 if usuario and senha:
-                    sucesso, user_id, user_perfil = verificar_login(usuario, senha)
-                    if sucesso:
-                        st.session_state['autenticado'] = True
-                        st.session_state['usuario_id'] = user_id
-                        st.session_state['usuario_nome'] = usuario
-                        st.session_state['perfil'] = user_perfil 
-                        st.session_state['ultimo_acesso'] = datetime.now() 
-                        registrar_log_auditoria(user_id, "LOGIN", "Usuário autenticou-se com sucesso.")
-                        st.rerun()  # Redireciona imediatamente, sem mostrar mensagem para evitar flash da tela de login
-                    else:
+                    auth = st.session_state.get("_wiki_authenticator_ref") or get_wiki_authenticator()
+                    st.session_state["_wiki_authenticator_ref"] = auth
+                    login_ok = auth.authentication_controller.login(
+                        usuario.strip().lower(),
+                        senha,
+                        None,
+                        None,
+                        None,
+                        single_session=False,
+                        callback=None,
+                        captcha=False,
+                        entered_captcha=None,
+                    )
+                    if login_ok:
+                        auth.cookie_controller.set_cookie()
+                        sync_wiki_session_from_stauth()
+                        uid = st.session_state.get("usuario_id")
+                        if uid:
+                            registrar_log_auditoria(
+                                int(uid), "LOGIN", "Usuário autenticou-se com sucesso."
+                            )
+                        st.session_state["ultimo_acesso"] = datetime.now()
+                        st.rerun()
+                    elif login_ok is False:
                         st.error("❌ Usuário ou senha incorretos. Por favor, tente novamente.")
+                    else:
+                        st.error("❌ Não foi possível validar o login. Tente novamente.")
                 else:
                     st.warning("⚠️ Por favor, preencha ambos os campos de usuário e senha.")
-            
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        frases = [
-                    "Aquele que quer ser o maior entre vós, seja o que serve. Jesus",
-                    "A imaginação é mais importante que o conhecimento. Albert Einstein",
-                    "Seja a mudança que você deseja ver no mundo. Mahatma Gandhi",
-                    "Paciência é um elemento fundamental do sucesso. Bill Gates",
-                    "A persistência é o caminho do êxito. Charles Chaplin",
-                    "Saber que não sabemos nada é o começo da sabedoria. Sócrates",
-                    "O que importa não é o que acontece com você, mas como você reage. Epicteto",
-                    "Comece onde você está, use o que você tem, faça o que você pode. Arthur Ashe",
-                    "O homem é o que ele pensa o dia todo. Ralph Waldo Emerson",
-                    "Não espere por circunstâncias ideais, elas nunca chegam. Napoleon Hill",
-                    "A alegria de fazer o bem é a única felicidade verdadeira. Leon Tolstói",
-                    "Quanto maior a dificuldade, maior a glória em superá-la. Epicuro",
-                    "Se você não pode fazer grandes coisas, faça pequenas coisas de forma grandiosa. Napoleon Hill",
-                    "A simplicidade é o último grau da sofisticação. Leonardo da Vinci",
-                    "Onde há amor pela humanidade, há amor pela arte de curar. Hipócrates",
-                    "Viver é a coisa mais rara do mundo. A maioria das pessoas apenas existe. Oscar Wilde",
-                    "A vida é 10% o que acontece comigo e 90% como eu reajo a isso. Charles Swindoll",
-                    "Sempre parece impossível até que seja feito. Nelson Mandela",
-                    "A única coisa que se coloca entre você e seu objetivo é a história que você conta a si mesmo. Jordan Belfort",
-                    "Procure ser um homem de valor, em vez de ser um homem de sucesso. Albert Einstein",
-                    "Nós somos o que fazemos repetidamente. Excelência, então, não é um ato, mas um hábito. Will Durant",
-                    "O melhor modo de prever o futuro é criá-lo. Alan Kay",
-                    "Nossa maior fraqueza está em desistir. Thomas Edison",
-                    "Para ganhar conhecimento, adicione coisas todos os dias. Para ganhar sabedoria, elimine coisas todos os dias. Lao Tzu",
-                    "Qualidade significa fazer certo quando ninguém está olhando. Henry Ford",
-                    "Um cliente satisfeito é a melhor estratégia de negócios de todas. Michael LeBoeuf",
-                    "A maior descoberta da minha geração é que um ser humano pode alterar sua vida ao alterar suas atitudes. William James",
-                    "Se você quer ir rápido, vá sozinho. Se você quer ir longe, vá acompanhado. Provérbio Africano",
-                    "A tecnologia é apenas uma ferramenta. O professor é o mais importante. Bill Gates",
-                    
-                ]
-
-        with col_centro:
-                # ... (seu formulário de login)
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                # Frase centralizada
-                st.success(f"💡 **Pensamento do dia:**\n\n_{random.choice(frases)}_")
-                
-                # Rodapé centralizado com HTML
-                st.markdown("<p style='text-align: center; color: gray; font-size: 0.8rem;'>© 2026 WikiSuporte — Desenvolvido por Rafael D. Nascimento.</p>", unsafe_allow_html=True)
+        st.markdown(
+            "<p class='ws-login-footer'>© 2026 WikiSuporte — Desenvolvido por Rafael D. Nascimento.</p>",
+            unsafe_allow_html=True,
+        )
 
 
 def tela_home() -> None:
@@ -549,6 +552,7 @@ def tela_home() -> None:
     # --- BOTÃO DE SAIR (SEMPRE POR ÚLTIMO NA SIDEBAR) ---
     if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True, type="secondary"):
         registrar_log_auditoria(usuario_id, "LOGOUT", "Usuário saiu do sistema.")
+        wiki_force_logout()
         st.session_state.clear()
         st.rerun()
 

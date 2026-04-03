@@ -65,7 +65,12 @@ def render_release_notes_banner() -> None:
 
     st.caption(RELEASE_NOTES_SUMMARY)
 
-    c1, c2, c3 = st.columns([1.1, 1.1, 2.2])
+    toast_key = f"ws_toast_release_{RELEASE_NOTES_VERSION.replace('.', '_')}"
+    if not st.session_state.get(toast_key):
+        st.toast(f"WikiSuporte {RELEASE_NOTES_VERSION}: há novidades — abra as notas de versão.", icon="📋")
+        st.session_state[toast_key] = True
+
+    c1, c2 = st.columns([1.2, 1])
     with c1:
         try:
             st.page_link(
@@ -74,10 +79,8 @@ def render_release_notes_banner() -> None:
                 icon="📋",
             )
         except Exception:
-            st.markdown("*Abra **Notas de versão** no menu lateral.*")
+            st.markdown("*Use o menu lateral: **Notas de versão**.*")
     with c2:
         if st.button("Entendi", key=f"btn_ack_release_{RELEASE_NOTES_VERSION}", type="secondary"):
             st.session_state[_SESSION_ACK] = True
             st.rerun()
-    with c3:
-        pass
