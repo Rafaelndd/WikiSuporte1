@@ -152,4 +152,4 @@ Na raiz do repo, com venv ativo, ou execute:
 
 `scripts\windows\reparar-urllib3-requests.cmd`
 
-Ou manualmente: `pip uninstall -y urllib3-future` e `pip install --force-reinstall "urllib3>=2.2.2,<2.6" "requests>=2.31.0,<3"`.
+Ou manualmente: `pip uninstall -y urllib3-future` e `pip install --force-reinstall "urllib3>=2.6.3" "requests>=2.31.0,<3"`.

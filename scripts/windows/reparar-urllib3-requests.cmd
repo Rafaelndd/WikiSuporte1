@@ -17,7 +17,7 @@ if not defined PYTHON_EXE (
 
 echo Usando: "%PYTHON_EXE%"
 "%PYTHON_EXE%" -m pip uninstall -y urllib3-future 2>nul
-"%PYTHON_EXE%" -m pip install --upgrade --force-reinstall "urllib3>=2.2.2,<2.6" "requests>=2.31.0,<3"
+"%PYTHON_EXE%" -m pip install --upgrade --force-reinstall "urllib3>=2.6.3" "requests>=2.31.0,<3"
 echo.
 echo Concluido. Teste: streamlit run app.py
 exit /b 0
