@@ -5,6 +5,11 @@ alwaysApply: true
 
 # WikiSuporte — núcleo do projeto
 
+## Comunicação e idioma
+
+- O assistente deve responder e explicar **sempre em português brasileiro (pt-BR)** — vocabulário, ortografia e convenções do Brasil (ex.: “usuário”, “aplicação”, sem usar português de Portugal salvo citação de texto existente).
+- Mensagens ao usuário, descrições de PR/commit quando pedido, documentação nova orientada à equipe e comentários de código opcionais devem seguir **pt-BR**, salvo pedido explícito em outro idioma ou termos técnicos consagrados em inglês (logs, nomes de variáveis, APIs).
+
 ## Contexto
 
 - Sistema **em produção**: **WikiSuporte**.
