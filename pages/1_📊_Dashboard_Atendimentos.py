@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, time
 from modules.database import get_connection
 from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.ui_realtime import render_global_notifications_listener
+from services.ui_theme_presets import wiki_theme_apply_authenticated
 from config_ramais import (
     RAMAIS_EXCLUIR,
     RAMAL_NOME_ESPECIAL,
@@ -74,6 +75,7 @@ if "notificacoes_lidas" not in st.session_state:
 if not st.session_state.get("autenticado", False):
     st.switch_page("app.py")
 render_global_notifications_listener()
+wiki_theme_apply_authenticated()
 
 perfil_logado = normalizar_perfil_para_sessao(st.session_state.get("perfil", "analista"))
 

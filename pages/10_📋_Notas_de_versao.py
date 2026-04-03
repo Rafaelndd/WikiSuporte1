@@ -12,6 +12,7 @@ import streamlit as st
 
 from services.release_notes_banner import RELEASE_NOTES_DATE, RELEASE_NOTES_VERSION
 from services.ui_realtime import render_global_notifications_listener
+from services.ui_theme_presets import wiki_theme_apply_authenticated
 
 st.set_page_config(
     page_title="WikiSuporte — Notas de versão",
@@ -25,6 +26,7 @@ if not st.session_state.get("autenticado", False):
     st.switch_page("app.py")
 
 render_global_notifications_listener(show_release_banner=False)
+wiki_theme_apply_authenticated()
 
 _BASE = Path(__file__).resolve().parent.parent
 _MD_PATH = _BASE / "releases" / "WIKISUPORTE_NOTAS_DE_VERSAO.md"

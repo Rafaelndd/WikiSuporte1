@@ -14,6 +14,7 @@ from typing import Iterable, List
 import streamlit as st
 
 from services.perfil_usuario import normalizar_perfil_para_sessao
+from services.ui_theme_presets import wiki_theme_apply_authenticated
 
 
 def normalize_perfil(raw_perfil: str | None) -> str:
@@ -40,6 +41,10 @@ def require_login() -> str:
     try:
         from services.ui_realtime import render_global_notifications_listener
         render_global_notifications_listener()
+    except Exception:
+        pass
+    try:
+        wiki_theme_apply_authenticated()
     except Exception:
         pass
     return perfil_norm

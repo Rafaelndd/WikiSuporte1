@@ -34,6 +34,7 @@ from services.system_notifications import (
 )
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
+from services.ui_theme_presets import wiki_theme_apply_authenticated
 
 try:
     from modules.auditoria import registrar_log_auditoria
@@ -66,6 +67,7 @@ usuario_id = st.session_state.get("usuario_id")
 nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
 perfil_raw = st.session_state.get("perfil", "")
 render_global_notifications_listener()
+wiki_theme_apply_authenticated()
 ensure_notifications_schema()
 
 if not eh_admin(perfil_raw):
