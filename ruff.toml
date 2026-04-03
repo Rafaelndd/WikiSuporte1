@@ -1,0 +1,36 @@
+# Lint progressivo: o CI valida `tests/` (ver .github/workflows/main.yml).
+# Para expandir: `ruff check .` após ir corrigindo o legado.
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "PostgreSQL",
+    "uploads",
+    "uploads_wiki",
+    "documentacoes_sistema",
+    "database/pgvector",
+]

@@ -164,7 +164,7 @@ def processar_csv_goto(arquivo: io.BytesIO) -> pd.DataFrame:
             if id_original and id_original != "nan":
                 return id_original
             assinatura_evento = f"{row['data_chamada']}_{row['telefone_hash']}_{row.get('duracao_ms', 0)}"
-            return f"SINTETICO_{hashlib.md5(assinatura_evento.encode('utf-8')).hexdigest()}"
+            return f"SINTETICO_{hashlib.md5(assinatura_evento.encode('utf-8'), usedforsecurity=False).hexdigest()}"
 
         df_limpo["id_conversa"] = df_limpo.apply(resolver_id_faltante, axis=1)
         return df_limpo

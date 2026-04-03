@@ -1,0 +1,28 @@
+---
+description: WikiSuporte — Python, Streamlit, PostgreSQL, segredos e UX/temas
+globs:
+  - "**/*.py"
+alwaysApply: false
+---
+
+# WikiSuporte — código e interface
+
+## Python e Streamlit
+
+- **PEP 8** de forma rigorosa.
+- Antes de propor novos componentes de UI, alinhar com a [documentação oficial do Streamlit](https://docs.streamlit.io/).
+
+## SQL e banco
+
+- Boas práticas alinhadas à [documentação PostgreSQL 18](https://www.postgresql.org/docs/18/index.html).
+- **SQLAlchemy** e **psycopg2** obrigatórios para acesso ao banco: integridade e prevenção de SQL injection.
+
+## Segredos e repositório
+
+- **Nunca** expor credenciais no código; usar `.streamlit/secrets.toml` (e fluxo local adequado para validação).
+- Manter **`.gitignore` completo**, com padrões que impeçam commit de credenciais e artefatos sensíveis.
+
+## Interface e UX
+
+- Visual **profissional e consistente**.
+- Temas Streamlit (claro/escuro): claro com inspiração **antropológica**; escuro inspirado no **Spotify**; seguir orientações de [theming](https://docs.streamlit.io/develop/concepts/configuration/theming) e identidade corporativa quando aplicável.

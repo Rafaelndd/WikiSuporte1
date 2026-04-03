@@ -1,0 +1,21 @@
+---
+description: WikiSuporte — testes obrigatórios (pytest, AppTest, Selenium)
+globs:
+  - "**/test_*.py"
+  - "**/*_test.py"
+  - "**/tests/**/*.py"
+alwaysApply: false
+---
+
+# WikiSuporte — testes
+
+## Requisito de PR
+
+- **Nenhum PR** sem cobertura de testes adequada à mudança.
+
+## Tipos de teste
+
+- **Lógica, UI e estado**: testes rápidos com **AppTest** + **pytest** (Streamlit).
+- **Renderização e fluxo completo**: testes **E2E** com **Selenium** + **pytest**.
+
+Ao implementar ou revisar código de produção relacionado, garantir que existam (ou sejam adicionados) testes nos moldes acima antes de considerar a entrega completa.

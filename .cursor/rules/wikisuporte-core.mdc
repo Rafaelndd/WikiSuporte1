@@ -1,0 +1,28 @@
+---
+description: WikiSuporte — contexto, GSD obrigatório, portões de qualidade e fluxo Git/CI
+alwaysApply: true
+---
+
+# WikiSuporte — núcleo do projeto
+
+## Contexto
+
+- Sistema **em produção**: **WikiSuporte**.
+- Stack: **Python 3.14**, **PostgreSQL 18**, **Streamlit**.
+- Repositório: https://github.com/Rafaelndd/WikiSuporte1
+
+## GSD (uso obrigatório)
+
+- Trabalhar com **GSD** via: `npx get-shit-done-cc@latest` (referência: https://github.com/gsd-build/get-shit-done.git).
+- Toda feature ou alteração: **Spec-Driven Development** com GSD para evitar *context rot*.
+- Respeitar **portões de qualidade** do GSD, com foco em:
+  1. **Schema drift**: sinalizar mudanças no ORM sem migração correspondente.
+  2. **Validações ancoradas** aos modelos de segurança.
+  3. **Sem redução silenciosa de escopo** frente aos requisitos acordados.
+
+## Git e CI/CD
+
+- **Nenhum PR** sem cobertura de testes alinhada à mudança (rápidos: **AppTest** + **pytest**; E2E: **Selenium** + **pytest**).
+- **Nunca** alterar nem fazer commit direto na branch `main`.
+- Toda alteração em **nova branch** (ex.: `feature/nome`, `fix/nome`).
+- Produção apenas após **Pull Request** e **CI/CD** (GitHub Actions) aprovados.
