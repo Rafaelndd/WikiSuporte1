@@ -1,7 +1,7 @@
 """
 WikiSuporte - Página de Configurações.
 Permite controle dos bots de varredura, gestão de usuários/ramais e cadastro de clientes com telefones.
-Acesso restrito a perfis "dev" e "coordenador". O status dos bots é lido do arquivo `robo_state.json` e pode ser controlado por este painel, mas o motor precisa estar rodando (via `motor_extracao.py`) para processar as solicitações. As configurações de intervalo e limites de segurança ajudam a evitar sobrecarga do servidor. A gestão de usuários permite alterar perfis e senhas (exceto para dev). O cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs de auditoria registram ações importantes. A aba de diagnóstico (comentada) pode ser ativada para testes de conexão e recursos do servidor, mas é restrita ao perfil dev. O código é organizado em seções claras para cada funcionalidade, com uso de formulários e feedback visual para melhor experiência do usuário.    
+Acesso restrito ao perfil **admin**. O status dos bots é lido do arquivo `robo_state.json` e pode ser controlado por este painel, mas o motor precisa estar rodando (via `motor_extracao.py`) para processar as solicitações. A gestão de usuários permite alterar perfis e senhas. O cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs de auditoria registram ações importantes.
 """
 import json
 import os
@@ -32,6 +32,7 @@ from services.system_notifications import (
     registrar_bloqueio_versao,
     resolver_bloqueio_versao,
 )
+from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
 
 try:
@@ -63,14 +64,15 @@ if not st.session_state.get("autenticado"):
 
 usuario_id = st.session_state.get("usuario_id")
 nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
-perfil_raw = str(st.session_state.get("perfil", "")).strip().lower()
-perfil_usuario = "dev" if perfil_raw in ("dev", "desenvolvedor") else "coordenador" if perfil_raw in ("coordenador", "coordenação") else perfil_raw
+perfil_raw = st.session_state.get("perfil", "")
 render_global_notifications_listener()
 ensure_notifications_schema()
 
-if perfil_usuario not in ["dev", "coordenador", "supervisor"]:
-    st.error("⛔ Acesso Negado.")
+if not eh_admin(perfil_raw):
+    st.error("⛔ Acesso Negado. Apenas utilizadores com perfil **admin**.")
     st.stop()
+
+perfil_usuario = "admin"
 
 st.title("⚙️ WikiSuporte - Configurações")
 st.markdown("Controle dos bots, gestão de usuários, clientes e comunicados globais do sistema.")
@@ -82,7 +84,7 @@ nomes_abas = [
     "🏢 Clientes e Telefones",
     "🛠️ Funcionalidade inativa",
 ]
-tem_painel_notifs = perfil_usuario in ("coordenador", "supervisor", "dev")
+tem_painel_notifs = True
 if tem_painel_notifs:
     nomes_abas.append("📣 Notificações e Comunicados")
 abas = st.tabs(nomes_abas)
@@ -275,53 +277,105 @@ with aba_usuarios:
         u1, u2 = st.columns(2)
 
         with u1:
-            st.markdown("#### Alterar usuário (exceto dev)")
+            st.markdown("#### Alterar utilizador")
             user_sel = st.selectbox("Usuário", df_u["nome"].tolist())
             row = df_u[df_u["nome"] == user_sel].iloc[0]
-            is_dev = str(row.get("perfil", "")).lower() in ("dev", "desenvolvedor")
+            perfis_opts = ["analista", "admin"]
+            raw_pf = str(row.get("perfil", "analista")).strip().lower()
+            if raw_pf not in perfis_opts:
+                raw_pf = "analista"
+            idx = perfis_opts.index(raw_pf) if raw_pf in perfis_opts else 0
+            novo_perfil = st.selectbox("Perfil", perfis_opts, index=idx)
+            nova_senha = st.text_input("Nova senha (vazio = manter)", type="password")
 
-            if is_dev:
-                st.warning("⛔ Alteração de perfil e senha do usuário **dev** não é permitida aqui.")
-            else:
-                perfis = [p for p in ["Analista", "Coordenação"]]
-                idx = perfis.index(row["perfil"]) if row["perfil"] in perfis else 0
-                novo_perfil = st.selectbox("Perfil", perfis, index=idx)
-                nova_senha = st.text_input("Nova senha (vazio = manter)", type="password")
+            if st.button("Salvar alterações"):
+                import bcrypt
 
-                if st.button("Salvar alterações"):
-                    engine = get_connection()
-                    try:
-                        with engine.begin() as conn:
-                            if nova_senha.strip():
-                                conn.execute(text("UPDATE usuarios SET perfil = :p, password_hash = :s WHERE nome = :n"), {"p": novo_perfil, "s": nova_senha.strip(), "n": user_sel})
-                            else:
-                                conn.execute(text("UPDATE usuarios SET perfil = :p WHERE nome = :n"), {"p": novo_perfil, "n": user_sel})
-                        st.success("Alterado.")
-                        registrar_log_auditoria(usuario_id, "UPDATE_USER", f"Alterou {user_sel}")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(str(e))
+                engine = get_connection()
+                try:
+                    with engine.begin() as conn:
+                        if nova_senha.strip():
+                            salt = bcrypt.gensalt()
+                            h = bcrypt.hashpw(
+                                nova_senha.strip().encode("utf-8"), salt
+                            ).decode("utf-8")
+                            conn.execute(
+                                text(
+                                    "UPDATE usuarios SET perfil = :p, password_hash = :s WHERE nome = :n"
+                                ),
+                                {"p": novo_perfil, "s": h, "n": user_sel},
+                            )
+                        else:
+                            conn.execute(
+                                text("UPDATE usuarios SET perfil = :p WHERE nome = :n"),
+                                {"p": novo_perfil, "n": user_sel},
+                            )
+                    st.success("Alterado. Utilizadores devem voltar a entrar se a senha mudou.")
+                    registrar_log_auditoria(usuario_id, "UPDATE_USER", f"Alterou {user_sel}")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
         with u2:
-            st.markdown("#### Senha do desenvolvedor")
-            st.caption("Apenas o próprio dev pode alterar sua senha. Não é permitido alterar o perfil dev.")
-            if perfil_usuario != "dev":
-                st.error("Acesso restrito ao perfil desenvolvedor.")
-            else:
-                nova_admin = st.text_input("Nova senha admin", type="password", key="pass_admin")
-                if st.button("Atualizar senha admin"):
-                    if nova_admin.strip():
-                        with get_connection().begin() as conn:
-                            res = conn.execute(text("UPDATE usuarios SET password_hash = :s WHERE id = :id AND LOWER(perfil) IN ('dev', 'desenvolvedor')"), {"s": nova_admin.strip(), "id": usuario_id})
-                            rows = res.rowcount
-                        if rows and rows > 0:
-                            st.success("Senha alterada.")
-                            st.rerun()
-                        else:
-                            st.error("Nenhuma linha atualizada.")
+            st.markdown("#### Criar utilizador")
+            st.caption("Perfil **admin** ou **analista**; senha forte (8+ caracteres, maiúscula, número, especial).")
+            cn = st.text_input("Nome de login (nome)", key="nu_nome")
+            cu = st.text_input("Username (opcional, se existir na tabela)", key="nu_user")
+            cp = st.text_input("Senha inicial", type="password", key="nu_pass")
+            cper = st.selectbox("Perfil", ["analista", "admin"], key="nu_perfil")
+            if st.button("Cadastrar", key="nu_btn"):
+                import bcrypt
+
+                if not cn.strip() or not cp.strip():
+                    st.warning("Nome e senha são obrigatórios.")
+                else:
+                    from cadastro_usuarios import validar_senha_forte
+
+                    okp, msgp = validar_senha_forte(cp.strip())
+                    if not okp:
+                        st.error(msgp)
                     else:
-                        st.warning("Senha não pode ser vazia.")
+                        salt = bcrypt.gensalt()
+                        h = bcrypt.hashpw(cp.strip().encode("utf-8"), salt).decode("utf-8")
+                        try:
+                            with get_connection().begin() as conn:
+                                if cu.strip():
+                                    try:
+                                        conn.execute(
+                                            text(
+                                                "INSERT INTO usuarios (nome, username, password_hash, perfil) "
+                                                "VALUES (:n, :u, :h, :p)"
+                                            ),
+                                            {
+                                                "n": cn.strip()[:100],
+                                                "u": cu.strip().lower()[:100],
+                                                "h": h,
+                                                "p": cper,
+                                            },
+                                        )
+                                    except Exception:
+                                        conn.execute(
+                                            text(
+                                                "INSERT INTO usuarios (nome, password_hash, perfil) VALUES (:n, :h, :p)"
+                                            ),
+                                            {"n": cn.strip()[:100], "h": h, "p": cper},
+                                        )
+                                else:
+                                    conn.execute(
+                                        text(
+                                            "INSERT INTO usuarios (nome, password_hash, perfil) VALUES (:n, :h, :p)"
+                                        ),
+                                        {"n": cn.strip()[:100], "h": h, "p": cper},
+                                    )
+                            st.success("Utilizador criado.")
+                            registrar_log_auditoria(
+                                usuario_id, "CREATE_USER", f"Criou {cn.strip()}"
+                            )
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(str(e))
 
 # ==========================================
 # ABA 4: CLIENTES E TELEFONES

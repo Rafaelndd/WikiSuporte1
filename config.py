@@ -1,8 +1,11 @@
 # Arquivo: config.py
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Carrega as variáveis do arquivo .env apenas uma vez
+_ROOT = Path(__file__).resolve().parent
+load_dotenv(_ROOT / ".env")
 load_dotenv()
 
 class Config:
@@ -16,13 +19,13 @@ class Config:
     DB_USER = os.getenv("DB_USER")
     DB_PASS = os.getenv("DB_PASS")
 
-    # --- CREDENCIAIS DE ACESSO TECNUV ---
-    try:
-        TECNUV_USER = os.environ["TECNUV_USER"]
-        TECNUV_PASS = os.environ["TECNUV_PASS"]
-        LGPD_SECRET_KEY = os.environ["LGPD_SECRET_KEY"]
-    except KeyError as e:
-        raise ValueError(f"ERRO CRÍTICO: A variável obrigatória {e} não foi encontrada no arquivo .env.")
+    # --- CREDENCIAIS DE ACESSO TECNUV / LGPD ---
+    # Não levantar exceção na importação: o Streamlit (app.py) deve subir mesmo sem
+    # Tecnuv configurado (homologação focada em login/UI). O motor de extração e o
+    # robô validam credenciais ao executar.
+    TECNUV_USER = os.getenv("TECNUV_USER", "").strip()
+    TECNUV_PASS = os.getenv("TECNUV_PASS", "").strip()
+    LGPD_SECRET_KEY = os.getenv("LGPD_SECRET_KEY", "").strip()
 
     # --- CREDENCIAIS DA API GOTO CONNECT (Plano Principal de Integração) ---
     # Estas credenciais são opcionais: o sistema funciona sem elas usando o

@@ -33,7 +33,9 @@ def ids_coordenadores() -> List[int]:
             text(
                 """
                 SELECT id FROM usuarios
-                WHERE LOWER(COALESCE(perfil, '')) IN ('coordenador', 'coordenação')
+                WHERE LOWER(COALESCE(perfil, '')) IN (
+                    'admin', 'coordenador', 'coordenação', 'coordenacao', 'dev', 'desenvolvedor'
+                )
                 """
             )
         ).fetchall()

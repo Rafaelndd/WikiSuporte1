@@ -22,6 +22,7 @@ import unicodedata
 import re
 from menus import *
 from modules.utils import inicializar_usuario, calcular_patente
+from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.ui_realtime import render_global_notifications_listener, show_gamification_upgrade_card
 
 load_dotenv()
@@ -50,11 +51,11 @@ if usuario_logado_id is None:  # Sugestão: Verificação para ID ausente
     st.switch_page("app.py")  # Redireciona se ID não existir
 
 # Definição de perfis válidos como constante para validação (sugestão para consistência e manutenção)
-PERFIS_VALIDOS = ['analista', 'dev', 'coordenador']  # Adicione mais perfis conforme necessário
-perfil_logado = str(st.session_state.get('perfil', 'analista')).lower()
-if perfil_logado not in PERFIS_VALIDOS:  # Sugestão: Validação de perfil
-    st.warning(f"Perfil '{perfil_logado}' não reconhecido. Usando default 'analista'.")
-    perfil_logado = 'analista'
+PERFIS_VALIDOS = ("analista", "admin")
+perfil_logado = normalizar_perfil_para_sessao(st.session_state.get("perfil", "analista"))
+if perfil_logado not in PERFIS_VALIDOS:
+    st.warning(f"Perfil não reconhecido. Usando default 'analista'.")
+    perfil_logado = "analista"
 
 # Configuração do diretório de upload (sem mudanças significativas, mas com comentário para segurança)
 UPLOAD_DIR = "uploads_wiki"
@@ -208,7 +209,7 @@ with st.expander("🤔 Como usar esta página?"):
 # ==========================================
 # 4. DEFINIÇÃO DAS ABAS (Nova Ordem de UX)
 # ==========================================
-if perfil_logado in ['coordenador', 'dev']:
+if perfil_logado == "admin":
     abas = st.tabs([
         "🏅 Inicio & Ranking", 
         "🤖 Assistente Virtual", 
@@ -1028,7 +1029,7 @@ with aba_nova:
                 
                 try:
                     with engine.begin() as conn:
-                        status_inicial = "APROVADO" if perfil_logado in ['coordenador', 'dev'] else "PENDENTE"
+                        status_inicial = "APROVADO" if perfil_logado == "admin" else "PENDENTE"
                         categoria_final = menu.upper()
 
                         # if subsubmenu:
@@ -1200,7 +1201,7 @@ with aba_minhas:
 # ==========================================
 # ABA 8: FILA DE AVALIAÇÃO (Apenas Coordenadores e Desenvolvedores)
 # ==========================================
-if perfil_logado in ['coordenador', 'dev']:
+if perfil_logado == "admin":
     with aba_fila:
         st.subheader("⚖️ Fila de Controle de Qualidade (QA)")
         st.markdown("Avalie as contribuições pendentes. Garanta que o conhecimento salvo siga os padrões técnicos.")
@@ -1385,7 +1386,7 @@ with aba_explorar:
                             st.caption("Votos pausados (obsoleta).")
 
                         # Marcar obsoleto: só APROVADO; coord/dev (evita abuso)
-                        if perfil_logado in ("coordenador", "dev") and not is_obsoleto:
+                        if perfil_logado == "admin" and not is_obsoleto:
                             with st.expander("⚠️ Marcar obsoleta", expanded=False):
                                 motivo_obs = st.text_input(
                                     "Motivo / o que o autor deve atualizar",

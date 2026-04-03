@@ -148,10 +148,8 @@ def get_active_notifications(role: str = "todos") -> pd.DataFrame:
     ensure_schema()
     engine = get_connection()
     role = (role or "todos").strip().lower()
-    if role in ("desenvolvedor",):
-        role = "dev"
-    elif role in ("coordenação",):
-        role = "coordenador"
+    if role in ("desenvolvedor", "dev", "coordenador", "coordenação", "coordenacao", "supervisor", "master"):
+        role = "admin"
     q = text(
         """
         SELECT id, tipo, titulo, mensagem, autor, data_criacao, data_expiracao, ativo, target_role
@@ -159,10 +157,13 @@ def get_active_notifications(role: str = "todos") -> pd.DataFrame:
         WHERE ativo = TRUE
           AND (data_expiracao IS NULL OR data_expiracao >= CURRENT_TIMESTAMP)
           AND (
-             :role = 'dev'
+             :role IN ('admin', 'dev')
              OR target_role = 'todos'
              OR target_role = :role
-             OR (:role = 'analista' AND target_role = 'tecnico')
+             OR (:role = 'analista' AND target_role IN ('tecnico', 'Analistas'))
+             OR (:role = 'admin' AND target_role IN (
+                  'Desenvolvedores', 'Coordenadores', 'Supervisores'
+                ))
           )
         ORDER BY
            CASE tipo

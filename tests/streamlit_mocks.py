@@ -24,7 +24,7 @@ def install_streamlit_stub(session_state: dict | None = None) -> MagicMock:
     if session_state is None:
         session_state = {
             "autenticado": True,
-            "perfil": "dev",
+            "perfil": "admin",
             "usuario_id": 1,
             "usuario_nome": "QA Gate",
             "notificacoes_lidas": [],

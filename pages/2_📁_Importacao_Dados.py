@@ -43,9 +43,9 @@ except Exception:
 # ==========================================
 st.set_page_config(page_title="WikiSuporte", page_icon="📊", layout="wide")
 
-# Exige login e restringe aos perfis dev / coordenador
+# Exige login e restringe ao perfil admin (gestão)
 perfil_usuario = require_profile(
-    ["dev", "coordenador"],
+    ["admin"],
     titulo_bloqueio="⛔ Acesso Negado: Você não tem permissão para acessar esta página.",
 )
 

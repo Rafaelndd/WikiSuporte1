@@ -1,4 +1,5 @@
 @echo off
+REM Arranque manual / legado. Para produção com Servicos Windows, ver scripts\windows\README.md (NSSM).
 title WikiSuporte - Inicializador de Producao
 
 cd /d %~dp0

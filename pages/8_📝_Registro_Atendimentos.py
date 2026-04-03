@@ -50,7 +50,7 @@ with st.expander("🤔 Como usar esta página?"):
     )
 
 abas = ["📝 Lançar Atendimento", "🔎 Consulta de Atendimentos"]
-if perfil in ("coordenador", "dev", "supervisor"):
+if perfil == "admin":
     abas.append("📊 Gestão")
 tab_lancar, tab_consulta, *rest = st.tabs(abas)
 tab_gestao = rest[0] if rest else None
@@ -319,7 +319,7 @@ with tab_lancar:
         st.session_state["p8_reset_pending"] = True
 
     categorias = listar_categorias_atendimento() or list(CATEGORIAS_INICIAIS)
-    if perfil == "dev":
+    if perfil == "admin":
         with st.expander("⚙️ Gerenciar categorias de atendimento (DEV)"):
             nova_categoria = st.text_input("Nova categoria", key="p8_nova_categoria_dev")
             if st.button("Adicionar categoria", key="p8_add_categoria_dev", use_container_width=True):
@@ -498,7 +498,7 @@ with tab_consulta:
 
             analistas_df = _carregar_analistas_ativos()
             analista_id = None
-            if perfil in ("coordenador", "dev", "supervisor") and not analistas_df.empty:
+            if perfil == "admin" and not analistas_df.empty:
                 dic_analistas: Dict[str, Optional[int]] = {"Todos": None}
                 for _, r in analistas_df.iterrows():
                     dic_analistas[f"{r['nome']} ({r['perfil_norm']})"] = int(r["id"])
