@@ -36,4 +36,4 @@ exclude = [
 ]
 
 [lint.isort]
-known-first-party = ["services", "modules", "utils", "cadastro_usuarios"]
+known-first-party = ["app", "services", "modules", "utils", "cadastro_usuarios"]
