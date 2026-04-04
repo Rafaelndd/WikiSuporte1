@@ -227,14 +227,15 @@ with tab_fechamento:
             with st.spinner("Processando penalidades..."):
                 with engine.begin() as conn:
                     res = processar_penalidades_contribuicao(conn)
+            avaliados = res.usuarios_encontrados - res.isentos_pulados
             st.success(
                 "Fechamento concluído.\n\n"
-                f"- **Analistas avaliados (não isentos):** {res['processados']}\n"
-                f"- **Isentos (férias / externo):** {res['isentos']}\n"
-                f"- **Novas penalidades gravadas:** {res['penalizados']}\n"
-                f"- **Já existiam nesta semana (sem novo desconto):** {res['penalidades_ja_existiam']}\n"
-                f"- **Sem penalidade aplicável (motor):** {res['sem_penalidade_motor']}\n"
-                f"- **Total na lista (analistas ativos):** {res['usuarios_listados']}"
+                f"- **Analistas avaliados (não isentos):** {avaliados}\n"
+                f"- **Isentos (férias / externo):** {res.isentos_pulados}\n"
+                f"- **Novas penalidades gravadas:** {res.penalidades_inseridas}\n"
+                f"- **Já existiam nesta semana (sem novo desconto):** {res.penalidades_ja_existiam}\n"
+                f"- **Sem penalidade aplicável (motor):** {res.sem_penalidade_motor}\n"
+                f"- **Total na lista (analistas ativos):** {res.usuarios_encontrados}"
             )
         except Exception as ex:
             logging.exception("processar_penalidades_contribuicao painel admin")
