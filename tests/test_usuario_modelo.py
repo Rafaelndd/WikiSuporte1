@@ -1,4 +1,7 @@
-"""Testes do modelo de persistência de utilizadores (sem PostgreSQL)."""
+"""Testes do modelo de persistência de utilizadores (sem PostgreSQL).
+
+Imports em bloco multilinha (exigência Ruff I001 / isort no CI).
+"""
 
 from __future__ import annotations
 

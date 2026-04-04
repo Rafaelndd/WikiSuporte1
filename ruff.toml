@@ -34,3 +34,6 @@ exclude = [
     "documentacoes_sistema",
     "database/pgvector",
 ]
+
+[lint.isort]
+known-first-party = ["services", "modules", "utils", "cadastro_usuarios"]
