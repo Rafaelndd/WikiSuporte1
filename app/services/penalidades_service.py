@@ -209,10 +209,10 @@ def persistir_penalidade_se_necessario(
     return "duplicada"
 
 
-def processar_penalidades_contribuicao(conn: Connection) -> ResumoPenalidadesDict:
+def processar_penalidades_contribuicao(conn: Connection) -> ResumoProcessamentoPenalidades:
     """
     Avalia analistas ativos (perfil analista) na transação de `conn`.
-    Retorna dicionário com contagens para exibição na UI.
+    Retorna o resumo estruturado; use `resumo_para_dict` na UI (Streamlit, APIs).
     """
     resumo = ResumoProcessamentoPenalidades()
     p7, min_sem, p_insuf = carregar_regras_penalidade(conn)
@@ -248,4 +248,4 @@ def processar_penalidades_contribuicao(conn: Connection) -> ResumoPenalidadesDic
         elif status == "duplicada":
             resumo.penalidades_ja_existiam += 1
 
-    return resumo_para_dict(resumo)
+    return resumo

@@ -11,12 +11,14 @@ import pandas as pd
 import streamlit as st
 
 import cadastro_usuarios as cu
+from app.services.penalidades_service import (
+    processar_penalidades_contribuicao,
+    resumo_para_dict,
+)
 from modules.database import get_connection
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
 from services.ui_theme_presets import wiki_theme_apply_authenticated
-
-from app.services.penalidades_service import processar_penalidades_contribuicao
 
 st.set_page_config(page_title="WikiSuporte - Utilizadores", page_icon="👥", layout="wide")
 
@@ -226,7 +228,7 @@ with tab_fechamento:
             engine = get_connection()
             with st.spinner("Processando penalidades..."):
                 with engine.begin() as conn:
-                    res = processar_penalidades_contribuicao(conn)
+                    res = resumo_para_dict(processar_penalidades_contribuicao(conn))
             st.success(
                 "Fechamento concluído.\n\n"
                 f"- **Analistas avaliados (não isentos):** {res['processados']}\n"
