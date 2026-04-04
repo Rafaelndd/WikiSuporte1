@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from services.usuario_modelo import defaults_novo_usuario, normalizar_username, perfil_aceite_para_gravar
+from services.usuario_modelo import (
+    defaults_novo_usuario,
+    normalizar_username,
+    perfil_aceite_para_gravar,
+)
 
 
 def test_normalizar_username():
