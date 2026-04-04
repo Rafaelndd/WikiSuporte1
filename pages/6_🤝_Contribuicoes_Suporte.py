@@ -9,7 +9,14 @@ from sqlalchemy import text
 from modules.database import get_connection
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.services.base_conhecimento_service import (
+    AprovacaoContribuicaoError,
+    aprovar_contribuicao_conhecimento,
+    computar_xp_aprovacao,
+    registrar_bonus_semanal_contribuicao,
+)
 import tempfile
 import unicodedata
 import re
@@ -982,8 +989,8 @@ with aba_nova:
         btn_salvar = st.form_submit_button("💾 Salvar Contribuição", type="primary")
         
         if btn_salvar:
-            if not titulo or not categoria or not conteudo or not data_evento:
-                st.warning("⚠️ Preencha Título, Categoria, Conteúdo e Data do Ocorrido.")
+            if not titulo or not menu or not conteudo or not data_evento:
+                st.warning("⚠️ Preencha Título, Menu (categoria), Conteúdo e Data do Ocorrido.")
             else:
                 # Processamento de anexo (Mantive sua lógica original)
                 texto_extraido = ""
@@ -1032,30 +1039,66 @@ with aba_nova:
                 try:
                     with engine.begin() as conn:
                         status_inicial = "APROVADO" if perfil_logado == "admin" else "PENDENTE"
-                        categoria_final = menu.upper()
+                        categoria_final = menu.strip().upper()
+                        subcategoria_final = "GERAL"
 
-                        # if subsubmenu:
-                        #     subcategoria_final = f"{submenu} > {subsubmenu}".upper()
-                        # else:
-                        #     subcategoria_final = submenu.upper()
-                        # AJUSTE NO SQL: Incluindo data_ocorrido para disparar a Trigger de XP
-                        conn.execute(
-                            text("""
-                                INSERT INTO base_conhecimento 
-                                (origem, titulo, categoria, subcategoria, conteudo, id_analista_autor, status, caminho_anexo, qtd_tentativas, data_ocorrido) 
-                                VALUES ('CONHECIMENTO_SUPORTE', :t, :c, :s, :co, :a, :st, :ax, 1, :do)
-                            """),
-                            {
-                                "t": titulo.strip(),
-                                "c": categoria.strip().upper(),
-                                "s": subcategoria.strip().upper() if subcategoria else "GERAL",
-                                "co": conteudo_final,
-                                "a": usuario_logado_id,
-                                "st": status_inicial,
-                                "ax": caminho_anexo_db,
-                                "do": data_evento  # NOVO VALOR
-                            }
-                        )
+                        if status_inicial == "APROVADO":
+                            agora = datetime.now(timezone.utc)
+                            xp_res = computar_xp_aprovacao(
+                                conn,
+                                autor_id=int(usuario_logado_id),
+                                exclude_contribuicao_id=None,
+                                modalidade="EVENTO_ATUAL",
+                                data_ocorrido=data_evento,
+                                criado_em=agora,
+                                era_revisao_pendente=False,
+                            )
+                            ins = conn.execute(
+                                text("""
+                                    INSERT INTO base_conhecimento
+                                    (origem, titulo, categoria, subcategoria, conteudo, id_analista_autor,
+                                     status, caminho_anexo, qtd_tentativas, data_ocorrido,
+                                     pontos_contribuicao, data_avaliacao, id_avaliador, modalidade_contribuicao)
+                                    VALUES ('CONHECIMENTO_SUPORTE', :t, :c, :s, :co, :a, :st, :ax, 1, :do,
+                                            :pts, CURRENT_TIMESTAMP, :av, 'EVENTO_ATUAL')
+                                    RETURNING id
+                                """),
+                                {
+                                    "t": titulo.strip(),
+                                    "c": categoria_final,
+                                    "s": subcategoria_final,
+                                    "co": conteudo_final,
+                                    "a": usuario_logado_id,
+                                    "st": status_inicial,
+                                    "ax": caminho_anexo_db,
+                                    "do": data_evento,
+                                    "pts": xp_res.pontos_contribuicao,
+                                    "av": usuario_logado_id,
+                                },
+                            )
+                            novo_id = ins.scalar_one()
+                            registrar_bonus_semanal_contribuicao(
+                                conn, int(novo_id), int(usuario_logado_id), xp_res
+                            )
+                        else:
+                            conn.execute(
+                                text("""
+                                    INSERT INTO base_conhecimento
+                                    (origem, titulo, categoria, subcategoria, conteudo, id_analista_autor,
+                                     status, caminho_anexo, qtd_tentativas, data_ocorrido)
+                                    VALUES ('CONHECIMENTO_SUPORTE', :t, :c, :s, :co, :a, :st, :ax, 1, :do)
+                                """),
+                                {
+                                    "t": titulo.strip(),
+                                    "c": categoria_final,
+                                    "s": subcategoria_final,
+                                    "co": conteudo_final,
+                                    "a": usuario_logado_id,
+                                    "st": status_inicial,
+                                    "ax": caminho_anexo_db,
+                                    "do": data_evento,
+                                },
+                            )
                     
                     # UX: Feedback elegante conforme solicitado
                     st.toast("✅ Contribuição enviada! Seu XP será atualizado após a aprovação.", icon="🚀")
@@ -1215,7 +1258,8 @@ if perfil_logado == "admin":
                        to_char(b.criado_em, 'DD/MM/YYYY às HH24:MI') as data_envio, u.nome AS autor 
                 FROM base_conhecimento b 
                 JOIN usuarios u ON b.id_analista_autor = u.id 
-                WHERE b.origem = 'CONHECIMENTO_SUPORTE' AND b.status = 'PENDENTE'
+                WHERE b.origem = 'CONHECIMENTO_SUPORTE'
+                  AND b.status IN ('PENDENTE', 'REVISAO_PENDENTE')
                 ORDER BY b.criado_em ASC
             """)
             df_fila = pd.read_sql(query_fila, conn)
@@ -1245,10 +1289,20 @@ if perfil_logado == "admin":
                     with c1:
                         if st.button("✅ Aprovar e Publicar", key=f"apr_{row['id']}", type="primary", width='stretch'):
                             try:
-                                with engine.begin() as conn_apr: 
-                                    conn_apr.execute(text("UPDATE base_conhecimento SET status = 'APROVADO' WHERE id = :id"), {"id": row['id']})
-                                registrar_log_auditoria(usuario_logado_id, "APROVOU_CONTRIBUICAO", f"Aprovou ID: {row['id']}")
+                                with engine.begin() as conn_apr:
+                                    aprovar_contribuicao_conhecimento(
+                                        conn_apr,
+                                        int(row["id"]),
+                                        int(usuario_logado_id),
+                                    )
+                                registrar_log_auditoria(
+                                    usuario_logado_id,
+                                    "APROVOU_CONTRIBUICAO",
+                                    f"Aprovou ID: {row['id']}",
+                                )
                                 st.success("Documento homologado e publicado na Base!")
+                            except AprovacaoContribuicaoError as e:
+                                st.error(str(e))
                             except Exception as e:
                                 st.error(f"Erro ao aprovar: {e}")
                     with c2:

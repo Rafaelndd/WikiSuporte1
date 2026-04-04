@@ -182,6 +182,11 @@ CREATE TABLE IF NOT EXISTS base_conhecimento (
     data_ocorrido DATE DEFAULT CURRENT_DATE,
     qtd_upvotes INTEGER DEFAULT 0,
     qtd_visualizacoes INTEGER DEFAULT 0,
+    qtd_tentativas INTEGER DEFAULT 1,
+    modalidade_contribuicao VARCHAR(32) DEFAULT 'EVENTO_ATUAL',
+    pontos_contribuicao INTEGER,
+    data_avaliacao TIMESTAMP WITH TIME ZONE,
+    id_avaliador INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
     criado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     atualizado_em TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_doc_origem UNIQUE (origem, nr_documento)
@@ -194,6 +199,35 @@ CREATE TABLE IF NOT EXISTS base_conhecimento_votos (
     data_voto TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(id_conhecimento, id_analista_votante)
 );
+
+CREATE TABLE IF NOT EXISTS contribution_scoring_rules (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    pontos_evento_passado INTEGER NOT NULL DEFAULT 125,
+    multiplicador_diario_apos_qtd INTEGER NOT NULL DEFAULT 3,
+    multiplicador_diario_valor INTEGER NOT NULL DEFAULT 2,
+    bonus_semanal_meta_qtd INTEGER NOT NULL DEFAULT 15,
+    bonus_semanal_meta_pontos INTEGER NOT NULL DEFAULT 1000,
+    penalidade_sem_7_dias INTEGER NOT NULL DEFAULT 200,
+    minimo_semanal_sem_penalidade INTEGER NOT NULL DEFAULT 5,
+    penalidade_semana_insuficiente INTEGER NOT NULL DEFAULT 100,
+    atualizado_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO contribution_scoring_rules (id) VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS user_xp_events (
+    id SERIAL PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    tipo_evento VARCHAR(64) NOT NULL,
+    pontos INTEGER NOT NULL,
+    id_base_conhecimento INTEGER REFERENCES base_conhecimento(id) ON DELETE SET NULL,
+    event_key VARCHAR(256) NOT NULL,
+    criado_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_xp_events_event_key UNIQUE (event_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_xp_events_usuario ON user_xp_events(usuario_id);
 
 CREATE TABLE IF NOT EXISTS historico_buscas_psy (
     id SERIAL PRIMARY KEY,
@@ -423,63 +457,99 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Função para calcular o XP e a medalha do usuário com base em suas contribuições.
+-- Recálculo de XP: soma contribuições aprovadas (pontos_contribuicao ou legado), upvotes e user_xp_events.
+CREATE OR REPLACE FUNCTION recalcular_xp_total_usuario(p_user_id INTEGER)
+RETURNS VOID AS $$
+DECLARE
+    v_contrib BIGINT;
+    v_ev BIGINT;
+    v_xp BIGINT;
+    v_medalha VARCHAR(100);
+BEGIN
+    SELECT
+        COALESCE(SUM(
+            CASE
+                WHEN bc.pontos_contribuicao IS NOT NULL THEN bc.pontos_contribuicao::bigint
+                ELSE (
+                    CASE
+                        WHEN (EXTRACT(DAY FROM (bc.criado_em - bc.data_ocorrido::timestamp)) <= 7) THEN 100
+                        WHEN (EXTRACT(DAY FROM (bc.criado_em - bc.data_ocorrido::timestamp)) <= 14) THEN 50
+                        WHEN (EXTRACT(DAY FROM (bc.criado_em - bc.data_ocorrido::timestamp)) <= 21) THEN 25
+                        ELSE 0
+                    END
+                )::bigint
+            END
+        ), 0)::bigint
+        + (COALESCE(SUM(bc.qtd_upvotes), 0)::bigint * 20)
+    INTO v_contrib
+    FROM base_conhecimento bc
+    WHERE bc.id_analista_autor = p_user_id AND bc.status = 'APROVADO';
+
+    SELECT COALESCE(SUM(ux.pontos::bigint), 0) INTO v_ev
+    FROM user_xp_events ux
+    WHERE ux.usuario_id = p_user_id;
+
+    v_xp := COALESCE(v_contrib, 0) + COALESCE(v_ev, 0);
+
+    v_medalha := CASE
+        WHEN v_xp >= 1000000 THEN 'Expert'
+        WHEN v_xp >= 950000  THEN 'Lenda do Suporte'
+        WHEN v_xp >= 850000  THEN 'Referência Técnica'
+        WHEN v_xp >= 700000  THEN 'Analista Mestre'
+        WHEN v_xp >= 550000  THEN 'Analista Pleno'
+        WHEN v_xp >= 400000  THEN 'Analista Jr'
+        WHEN v_xp >= 250000  THEN 'Especialista Sênior'
+        WHEN v_xp >= 150000  THEN 'Especialista N2'
+        WHEN v_xp >= 100000  THEN 'Especialista N1'
+        WHEN v_xp >= 75000   THEN 'Contribuidor Pleno'
+        WHEN v_xp >= 50000   THEN 'Contribuidor Ativo'
+        WHEN v_xp >= 20000   THEN 'Contribuidor Jr'
+        WHEN v_xp >= 10000   THEN 'Novato Consistente'
+        WHEN v_xp >= 5000    THEN 'Novato Proativo'
+        WHEN v_xp >= 1000    THEN 'Novato Aspirante'
+        ELSE 'Estagiário'
+    END;
+
+    UPDATE usuarios
+    SET xp_total = v_xp::integer,
+        medalha_atual = v_medalha
+    WHERE id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION atualizar_xp_usuario()
 RETURNS TRIGGER AS $$
 DECLARE
     v_id_autor INTEGER;
-    v_xp_calculado INTEGER;
-    v_nova_medalha VARCHAR(100);
 BEGIN
-    -- Identifica o autor do conteúdo ou do voto para saber quem deve ter o XP atualizado.
     IF (TG_TABLE_NAME = 'base_conhecimento') THEN
         v_id_autor := NEW.id_analista_autor;
     ELSIF (TG_TABLE_NAME = 'base_conhecimento_votos') THEN
-        SELECT id_analista_autor INTO v_id_autor FROM base_conhecimento 
+        SELECT id_analista_autor INTO v_id_autor FROM base_conhecimento
         WHERE id = COALESCE(NEW.id_conhecimento, OLD.id_conhecimento);
     END IF;
-    
-    -- Recalcula o XP total do zero para garantir consistência.
-    -- A regra combina um bônus por agilidade (data_ocorrido vs criado_em) e um bônus por qualidade (upvotes).
-    SELECT 
-        COALESCE(SUM(
-            CASE 
-                WHEN (EXTRACT(DAY FROM (bc.criado_em - bc.data_ocorrido)) <= 7) THEN 100
-                WHEN (EXTRACT(DAY FROM (bc.criado_em - bc.data_ocorrido)) <= 14) THEN 50
-                WHEN (EXTRACT(DAY FROM (bc.criado_em - bc.data_ocorrido)) <= 21) THEN 25
-                ELSE 0 
-            END
-        ), 0) + (COALESCE(SUM(bc.qtd_upvotes), 0) * 20)
-    INTO v_xp_calculado
-    FROM base_conhecimento bc
-    WHERE bc.id_analista_autor = v_id_autor AND bc.status = 'APROVADO';
 
-    -- Determina a nova medalha com base na nova pontuação de XP.
-    v_nova_medalha := CASE 
-        WHEN v_xp_calculado >= 1000000 THEN 'Expert'
-        WHEN v_xp_calculado >= 950000  THEN 'Lenda do Suporte'
-        WHEN v_xp_calculado >= 850000  THEN 'Referência Técnica'
-        WHEN v_xp_calculado >= 700000  THEN 'Analista Mestre'
-        WHEN v_xp_calculado >= 550000  THEN 'Analista Pleno'
-        WHEN v_xp_calculado >= 400000  THEN 'Analista Jr'
-        WHEN v_xp_calculado >= 250000  THEN 'Especialista Sênior'
-        WHEN v_xp_calculado >= 150000  THEN 'Especialista N2'
-        WHEN v_xp_calculado >= 100000  THEN 'Especialista N1'
-        WHEN v_xp_calculado >= 75000   THEN 'Contribuidor Pleno'
-        WHEN v_xp_calculado >= 50000   THEN 'Contribuidor Ativo'
-        WHEN v_xp_calculado >= 20000   THEN 'Contribuidor Jr'
-        WHEN v_xp_calculado >= 10000   THEN 'Novato Consistente'
-        WHEN v_xp_calculado >= 5000    THEN 'Novato Proativo'
-        WHEN v_xp_calculado >= 1000    THEN 'Novato Aspirante'
-        ELSE 'Estagiário'
-    END;
+    IF v_id_autor IS NOT NULL THEN
+        PERFORM recalcular_xp_total_usuario(v_id_autor);
+    END IF;
 
-    -- Atualiza a tabela de usuários com os novos valores de XP e medalha.
-    UPDATE usuarios 
-    SET xp_total = COALESCE(v_xp_calculado, 0), 
-        medalha_atual = v_nova_medalha 
-    WHERE id = v_id_autor;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION trg_dispara_recalc_xp_por_evento()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_uid INTEGER;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_uid := OLD.usuario_id;
+    ELSE
+        v_uid := NEW.usuario_id;
+    END IF;
+    IF v_uid IS NOT NULL THEN
+        PERFORM recalcular_xp_total_usuario(v_uid);
+    END IF;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -525,6 +595,11 @@ DROP TRIGGER IF EXISTS trg_atualizar_xp_votos ON base_conhecimento_votos;
 CREATE TRIGGER trg_atualizar_xp_votos
 AFTER INSERT OR UPDATE OR DELETE ON base_conhecimento_votos
 FOR EACH ROW EXECUTE FUNCTION atualizar_xp_usuario();
+
+DROP TRIGGER IF EXISTS trg_user_xp_events_recalc ON user_xp_events;
+CREATE TRIGGER trg_user_xp_events_recalc
+AFTER INSERT OR UPDATE OR DELETE ON user_xp_events
+FOR EACH ROW EXECUTE FUNCTION trg_dispara_recalc_xp_por_evento();
 
 -- =================================================================================
 -- 6. ÍNDICES PARA OTIMIZAÇÃO DE CONSULTAS
