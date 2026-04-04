@@ -11,10 +11,13 @@ Saída: imprime "OK" no stdout; qualquer exceção falha o processo com código 
 
 from __future__ import annotations
 
+import runpy
 import sys
 import types
 from pathlib import Path
 from unittest.mock import patch
+
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,10 +46,6 @@ def main() -> None:
 
     install_streamlit_stub()
     _install_fake_database_module()
-
-    import runpy
-
-    import pandas as pd
 
     with (
         patch("pandas.read_sql", return_value=pd.DataFrame()),
