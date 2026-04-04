@@ -207,6 +207,9 @@ CREATE TABLE IF NOT EXISTS contribution_scoring_rules (
     multiplicador_diario_valor INTEGER NOT NULL DEFAULT 2,
     bonus_semanal_meta_qtd INTEGER NOT NULL DEFAULT 15,
     bonus_semanal_meta_pontos INTEGER NOT NULL DEFAULT 1000,
+    penalidade_sem_7_dias INTEGER NOT NULL DEFAULT 200,
+    minimo_semanal_sem_penalidade INTEGER NOT NULL DEFAULT 5,
+    penalidade_semana_insuficiente INTEGER NOT NULL DEFAULT 100,
     atualizado_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
