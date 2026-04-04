@@ -33,3 +33,26 @@ def test_atualizar_usuario_senha_vazia_string():
     """Senha '' não conta como alteração de hash."""
     ok, msg = cu.atualizar_usuario("x", "", None)
     assert not ok
+
+
+def test_slug_para_nome_ficheiro_perfil():
+    assert cu.slug_para_nome_ficheiro_perfil("maria.silva", 1) == "maria.silva"
+    assert cu.slug_para_nome_ficheiro_perfil("", 42) == "id42"
+    assert cu.slug_para_nome_ficheiro_perfil("a" * 100, 1).startswith("a")
+
+
+def test_validar_bytes_imagem_perfil_png():
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+    ok, ext = cu.validar_bytes_imagem_perfil(png)
+    assert ok and ext == ".png"
+
+
+def test_validar_bytes_imagem_perfil_jpeg():
+    jpg = b"\xff\xd8\xff\xe0" + b"\x00" * 30
+    ok, ext = cu.validar_bytes_imagem_perfil(jpg)
+    assert ok and ext == ".jpg"
+
+
+def test_validar_bytes_imagem_perfil_rejeita_exe():
+    ok, msg = cu.validar_bytes_imagem_perfil(b"MZ\x90\x00" + b"x" * 100)
+    assert not ok

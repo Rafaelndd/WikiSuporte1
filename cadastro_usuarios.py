@@ -25,9 +25,11 @@ import re
 import sys
 
 import bcrypt
+import pandas as pd
 from sqlalchemy import text
 
 from modules.database import get_connection
+from services.usuario_modelo import defaults_novo_usuario, normalizar_username
 
 
 def validar_senha_forte(senha: str) -> tuple[bool, str]:
@@ -60,9 +62,24 @@ def mapear_perfil_cli(valor: str) -> str:
     return mapa.get(v, "analista")
 
 
-def criar_usuario(username: str, senha: str, perfil: str) -> tuple[bool, str]:
+def criar_usuario(
+    username: str,
+    senha: str,
+    perfil: str,
+    *,
+    nome_exibicao: str | None = None,
+    ramal: str = "",
+    ativo: bool = True,
+    em_ferias: bool = False,
+    em_atendimento_externo: bool = False,
+    caminho_foto_perfil: str = "",
+) -> tuple[bool, str]:
     """
-    Insere usuário. Retorna (True, mensagem sucesso) ou (False, mensagem erro).
+    Insere usuário no modelo alinhado à gestão (nome, username, hash, perfil, ramal, flags).
+
+    Parâmetro `username` (primeiro argumento posicional): login curto quando `nome_exibicao`
+    é informado; caso contrário mantém o comportamento legado (valor gravado em `nome` e
+    espelhado em `username` em minúsculas).
     """
     valida, msg = validar_senha_forte(senha)
     if not valida:
@@ -71,19 +88,39 @@ def criar_usuario(username: str, senha: str, perfil: str) -> tuple[bool, str]:
     salt = bcrypt.gensalt()
     senha_hash = bcrypt.hashpw(senha.encode("utf-8"), salt).decode("utf-8")
     perfil_db = mapear_perfil_cli(perfil)
+    canon = perfil_db.lower()
+
+    nome_db, user_db = defaults_novo_usuario(
+        nome_exibicao if (nome_exibicao or "").strip() else username,
+        username if (nome_exibicao or "").strip() else None,
+    )
+    if not nome_db:
+        return False, "Nome de utilizador vazio."
 
     try:
         engine = get_connection()
         with engine.begin() as conn:
             query = text(
-                "INSERT INTO usuarios (nome, password_hash, perfil) VALUES (:nome, :h, :p)"
+                "INSERT INTO usuarios (nome, username, password_hash, perfil, ramal, ativo, "
+                "em_ferias, em_atendimento_externo, caminho_foto_perfil) "
+                "VALUES (:nome, :u, :h, :p, :ramal, :ativo, :ferias, :ext, :foto)"
             )
             conn.execute(
                 query,
-                {"nome": username.strip(), "h": senha_hash, "p": perfil_db.lower()},
+                {
+                    "nome": nome_db[:150],
+                    "u": (user_db[:150] if user_db else None),
+                    "h": senha_hash,
+                    "p": canon,
+                    "ramal": (ramal or "")[:20],
+                    "ativo": ativo,
+                    "ferias": em_ferias,
+                    "ext": em_atendimento_externo,
+                    "foto": (caminho_foto_perfil or "")[:500],
+                },
             )
         return True, (
-            f"Usuário '{username.strip()}' criado com perfil '{perfil_db}'."
+            f"Usuário '{nome_db}' criado (login: {user_db or nome_db}) com perfil '{canon}'."
         )
     except Exception as e:
         err = str(e)
@@ -143,6 +180,281 @@ def atualizar_usuario(
         return True, f"Utilizador '{nome}' atualizado ({', '.join(partes)})."
     except Exception as e:
         return False, f"Erro ao atualizar: {e}"
+
+
+def listar_usuarios_admin() -> tuple[bool, str, pd.DataFrame | None]:
+    """
+    Lista utilizadores para o painel admin (sem `password_hash`).
+    Retorna (sucesso, mensagem_erro_ou_vazia, DataFrame|None).
+    """
+    sql = text(
+        """
+        SELECT
+            id,
+            nome,
+            COALESCE(username, '') AS username,
+            perfil,
+            COALESCE(ramal, '') AS ramal,
+            COALESCE(ativo, TRUE) AS ativo,
+            COALESCE(em_ferias, FALSE) AS em_ferias,
+            COALESCE(em_atendimento_externo, FALSE) AS em_atendimento_externo
+        FROM usuarios
+        ORDER BY nome
+        """
+    )
+    try:
+        engine = get_connection()
+        df = pd.read_sql(sql, engine)
+        return True, "", df
+    except Exception as e:
+        return False, f"Falha ao consultar utilizadores: {e}", None
+
+
+def atualizar_usuario_painel(
+    usuario_id: int,
+    nome: str,
+    username: str,
+    ramal: str,
+    perfil: str,
+    ativo: bool,
+    em_ferias: bool,
+    em_atendimento_externo: bool,
+    nova_senha: str | None = None,
+) -> tuple[bool, str]:
+    """
+    Atualiza campos operacionais e opcionalmente a senha (hash bcrypt). Chave: `id`.
+    """
+    if usuario_id <= 0:
+        return False, "ID de utilizador inválido."
+
+    nome_db = (nome or "").strip()
+    if not nome_db:
+        return False, "Nome é obrigatório."
+
+    user_norm = normalizar_username(username)
+    perfil_db = mapear_perfil_cli(perfil)
+    canon = perfil_db.lower()
+    if canon not in ("admin", "analista"):
+        return False, "Perfil inválido: use apenas admin ou analista."
+
+    sets = [
+        "nome = :nome",
+        "username = :username",
+        "ramal = :ramal",
+        "perfil = :perfil",
+        "ativo = :ativo",
+        "em_ferias = :ferias",
+        "em_atendimento_externo = :ext",
+    ]
+    params: dict = {
+        "id": usuario_id,
+        "nome": nome_db[:150],
+        "username": user_norm[:150] if user_norm else None,
+        "ramal": (ramal or "")[:20],
+        "perfil": canon,
+        "ativo": bool(ativo),
+        "ferias": bool(em_ferias),
+        "ext": bool(em_atendimento_externo),
+    }
+
+    if nova_senha is not None and str(nova_senha).strip() != "":
+        valida, msg = validar_senha_forte(str(nova_senha).strip())
+        if not valida:
+            return False, msg
+        salt = bcrypt.gensalt()
+        params["h"] = bcrypt.hashpw(str(nova_senha).strip().encode("utf-8"), salt).decode(
+            "utf-8"
+        )
+        sets.append("password_hash = :h")
+
+    try:
+        engine = get_connection()
+        sql = text(f"UPDATE usuarios SET {', '.join(sets)} WHERE id = :id")
+        with engine.begin() as conn:
+            res = conn.execute(sql, params)
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Utilizador não encontrado ou ID inválido."
+        return True, "Utilizador atualizado com sucesso."
+    except Exception as e:
+        err = str(e)
+        if "UniqueViolation" in type(e).__name__ or "unique" in err.lower():
+            err += " Verifique se nome ou username já estão em uso."
+        return False, f"Erro ao atualizar utilizador: {err}"
+
+
+def inativar_usuario_por_id(usuario_id: int) -> tuple[bool, str]:
+    """Soft delete: apenas `ativo = FALSE` (preserva histórico)."""
+    if usuario_id <= 0:
+        return False, "ID de utilizador inválido."
+    try:
+        engine = get_connection()
+        with engine.begin() as conn:
+            res = conn.execute(
+                text("UPDATE usuarios SET ativo = FALSE WHERE id = :id"),
+                {"id": usuario_id},
+            )
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Utilizador não encontrado."
+        return True, "Utilizador inativado (mantido no histórico)."
+    except Exception as e:
+        return False, f"Erro ao inativar utilizador: {e}"
+
+
+# --- Meu Perfil (utilizador autenticado): leitura segura, foto e troca de senha ---
+
+_MAX_BYTES_FOTO_PERFIL = 2_500_000  # ~2,5 MB
+
+
+def slug_para_nome_ficheiro_perfil(username: str, usuario_id: int) -> str:
+    """Segmento seguro para o nome do ficheiro (sem path traversal)."""
+    raw = (username or "").strip().lower()
+    raw = re.sub(r"[^a-z0-9._-]+", "_", raw, flags=re.IGNORECASE)
+    raw = raw.strip("._")
+    if not raw:
+        raw = f"id{int(usuario_id)}"
+    return raw[:80]
+
+
+def validar_bytes_imagem_perfil(data: bytes) -> tuple[bool, str]:
+    """
+    Aceita apenas assinatura PNG ou JPEG (defesa contra uploads maliciosos).
+    Em caso de sucesso devolve (True, '.png'|'.jpg'); em falha (False, mensagem).
+    """
+    if not data:
+        return False, "Ficheiro vazio."
+    if len(data) > _MAX_BYTES_FOTO_PERFIL:
+        return False, "Ficheiro demasiado grande (máx. 2,5 MB)."
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return True, ".png"
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return True, ".jpg"
+    return False, "Formato inválido. Use apenas PNG ou JPEG."
+
+
+def obter_dados_perfil_meu_perfil(usuario_id: int) -> tuple[bool, str, dict | None]:
+    """
+    Dados do próprio utilizador para a página «Meu Perfil» (sem expor `password_hash`).
+    """
+    if usuario_id <= 0:
+        return False, "Sessão inválida.", None
+    sql = text(
+        """
+        SELECT
+            id,
+            nome,
+            COALESCE(NULLIF(trim(username), ''), '') AS username,
+            COALESCE(NULLIF(trim(ramal), ''), '') AS ramal,
+            COALESCE(NULLIF(trim(caminho_foto_perfil), ''), '') AS caminho_foto_perfil
+        FROM usuarios
+        WHERE id = :id
+        """
+    )
+    try:
+        engine = get_connection()
+        with engine.connect() as conn:
+            row = conn.execute(sql, {"id": usuario_id}).mappings().fetchone()
+        if not row:
+            return False, "Perfil não encontrado na base de dados.", None
+        return True, "", dict(row)
+    except Exception as e:
+        return False, f"Erro ao carregar perfil: {e}", None
+
+
+def atualizar_caminho_foto_perfil_usuario(
+    usuario_id: int, caminho_relativo_posix: str
+) -> tuple[bool, str]:
+    """Grava o caminho relativo (ex.: uploads/fotos_perfil/...)."""
+    if usuario_id <= 0:
+        return False, "Sessão inválida."
+    rel = (caminho_relativo_posix or "").strip().replace("\\", "/")
+    if ".." in rel or rel.startswith("/"):
+        return False, "Caminho de foto inválido."
+    try:
+        engine = get_connection()
+        with engine.begin() as conn:
+            res = conn.execute(
+                text(
+                    "UPDATE usuarios SET caminho_foto_perfil = :p WHERE id = :id"
+                ),
+                {"p": rel[:500], "id": usuario_id},
+            )
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Não foi possível atualizar a foto (utilizador inexistente)."
+        return True, "Caminho da foto atualizado."
+    except Exception as e:
+        return False, f"Erro ao gravar foto na base: {e}"
+
+
+def _password_hash_bytes(stored: object) -> bytes:
+    if stored is None:
+        return b""
+    if isinstance(stored, memoryview):
+        stored = stored.tobytes()
+    if isinstance(stored, bytes):
+        h = stored
+    else:
+        h = str(stored).strip().encode("utf-8")
+    return h
+
+
+def trocar_senha_meu_perfil(
+    usuario_id: int,
+    senha_atual: str,
+    nova_senha: str,
+    nova_senha_confirmacao: str,
+) -> tuple[bool, str]:
+    """
+    Valida a senha atual (bcrypt), confirma política da nova senha e atualiza o hash.
+    """
+    if usuario_id <= 0:
+        return False, "Sessão inválida."
+
+    nova = (nova_senha or "").strip()
+    conf = (nova_senha_confirmacao or "").strip()
+    if nova != conf:
+        return False, "A nova senha e a confirmação não coincidem."
+
+    valida, msg = validar_senha_forte(nova)
+    if not valida:
+        return False, msg
+
+    atual = senha_atual or ""
+    try:
+        engine = get_connection()
+        with engine.begin() as conn:
+            row = conn.execute(
+                text("SELECT password_hash FROM usuarios WHERE id = :id"),
+                {"id": usuario_id},
+            ).fetchone()
+            if not row:
+                return False, "Utilizador não encontrado."
+            stored = _password_hash_bytes(row[0])
+            if not stored:
+                return False, "Conta sem senha configurada; contacte um administrador."
+
+            try:
+                ok = bcrypt.checkpw(atual.encode("utf-8"), stored)
+            except (ValueError, TypeError):
+                return False, "Não foi possível validar a senha atual."
+
+            if not ok:
+                return False, "Senha atual incorreta."
+
+            salt = bcrypt.gensalt()
+            new_h = bcrypt.hashpw(nova.encode("utf-8"), salt).decode("utf-8")
+            res = conn.execute(
+                text("UPDATE usuarios SET password_hash = :h WHERE id = :id"),
+                {"h": new_h, "id": usuario_id},
+            )
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Falha ao atualizar a senha."
+        return True, "Senha atualizada com sucesso."
+    except Exception as e:
+        return False, f"Erro ao alterar a senha: {e}"
 
 
 def _ler_senha_cli(args: argparse.Namespace) -> str | None:

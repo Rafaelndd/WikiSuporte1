@@ -30,7 +30,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
-      - run: python -m ruff check tests
+      - name: Ruff (pasta tests/)
+        run: |
+          set -euxo pipefail
+          python -m ruff check tests --fix
+          if ! git diff --quiet -- tests/; then
+            echo "::error::Ruff: correções pendentes em tests/. Rode: python -m ruff check tests --fix"
+            git diff -- tests/
+            exit 1
+          fi
       - run: python -m pytest tests -q
       - run: python -m pip_audit -r requirements.txt --desc on
       - run: python -m bandit -c bandit.yaml -r . -lll -q

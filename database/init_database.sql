@@ -37,11 +37,15 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS usuarios (
     id SERIAL PRIMARY KEY,
     nome VARCHAR(150) UNIQUE NOT NULL,
+    username VARCHAR(150),
     email VARCHAR(150) UNIQUE,
     perfil VARCHAR(50) NOT NULL,
     ramal VARCHAR(20),
     password_hash VARCHAR(255),
     ativo BOOLEAN DEFAULT TRUE,
+    em_ferias BOOLEAN DEFAULT FALSE,
+    em_atendimento_externo BOOLEAN DEFAULT FALSE,
+    caminho_foto_perfil VARCHAR(500) DEFAULT '',
     data_criacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     xp_total INTEGER DEFAULT 0,
     medalha_atual VARCHAR(100) DEFAULT 'Iniciante 🌱'
