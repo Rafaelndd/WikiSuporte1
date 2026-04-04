@@ -302,6 +302,161 @@ def inativar_usuario_por_id(usuario_id: int) -> tuple[bool, str]:
         return False, f"Erro ao inativar utilizador: {e}"
 
 
+# --- Meu Perfil (utilizador autenticado): leitura segura, foto e troca de senha ---
+
+_MAX_BYTES_FOTO_PERFIL = 2_500_000  # ~2,5 MB
+
+
+def slug_para_nome_ficheiro_perfil(username: str, usuario_id: int) -> str:
+    """Segmento seguro para o nome do ficheiro (sem path traversal)."""
+    raw = (username or "").strip().lower()
+    raw = re.sub(r"[^a-z0-9._-]+", "_", raw, flags=re.IGNORECASE)
+    raw = raw.strip("._")
+    if not raw:
+        raw = f"id{int(usuario_id)}"
+    return raw[:80]
+
+
+def validar_bytes_imagem_perfil(data: bytes) -> tuple[bool, str]:
+    """
+    Aceita apenas assinatura PNG ou JPEG (defesa contra uploads maliciosos).
+    Em caso de sucesso devolve (True, '.png'|'.jpg'); em falha (False, mensagem).
+    """
+    if not data:
+        return False, "Ficheiro vazio."
+    if len(data) > _MAX_BYTES_FOTO_PERFIL:
+        return False, "Ficheiro demasiado grande (máx. 2,5 MB)."
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return True, ".png"
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return True, ".jpg"
+    return False, "Formato inválido. Use apenas PNG ou JPEG."
+
+
+def obter_dados_perfil_meu_perfil(usuario_id: int) -> tuple[bool, str, dict | None]:
+    """
+    Dados do próprio utilizador para a página «Meu Perfil» (sem expor `password_hash`).
+    """
+    if usuario_id <= 0:
+        return False, "Sessão inválida.", None
+    sql = text(
+        """
+        SELECT
+            id,
+            nome,
+            COALESCE(NULLIF(trim(username), ''), '') AS username,
+            COALESCE(NULLIF(trim(ramal), ''), '') AS ramal,
+            COALESCE(NULLIF(trim(caminho_foto_perfil), ''), '') AS caminho_foto_perfil
+        FROM usuarios
+        WHERE id = :id
+        """
+    )
+    try:
+        engine = get_connection()
+        with engine.connect() as conn:
+            row = conn.execute(sql, {"id": usuario_id}).mappings().fetchone()
+        if not row:
+            return False, "Perfil não encontrado na base de dados.", None
+        return True, "", dict(row)
+    except Exception as e:
+        return False, f"Erro ao carregar perfil: {e}", None
+
+
+def atualizar_caminho_foto_perfil_usuario(
+    usuario_id: int, caminho_relativo_posix: str
+) -> tuple[bool, str]:
+    """Grava o caminho relativo (ex.: uploads/fotos_perfil/...)."""
+    if usuario_id <= 0:
+        return False, "Sessão inválida."
+    rel = (caminho_relativo_posix or "").strip().replace("\\", "/")
+    if ".." in rel or rel.startswith("/"):
+        return False, "Caminho de foto inválido."
+    try:
+        engine = get_connection()
+        with engine.begin() as conn:
+            res = conn.execute(
+                text(
+                    "UPDATE usuarios SET caminho_foto_perfil = :p WHERE id = :id"
+                ),
+                {"p": rel[:500], "id": usuario_id},
+            )
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Não foi possível atualizar a foto (utilizador inexistente)."
+        return True, "Caminho da foto atualizado."
+    except Exception as e:
+        return False, f"Erro ao gravar foto na base: {e}"
+
+
+def _password_hash_bytes(stored: object) -> bytes:
+    if stored is None:
+        return b""
+    if isinstance(stored, memoryview):
+        stored = stored.tobytes()
+    if isinstance(stored, bytes):
+        h = stored
+    else:
+        h = str(stored).strip().encode("utf-8")
+    return h
+
+
+def trocar_senha_meu_perfil(
+    usuario_id: int,
+    senha_atual: str,
+    nova_senha: str,
+    nova_senha_confirmacao: str,
+) -> tuple[bool, str]:
+    """
+    Valida a senha atual (bcrypt), confirma política da nova senha e atualiza o hash.
+    """
+    if usuario_id <= 0:
+        return False, "Sessão inválida."
+
+    nova = (nova_senha or "").strip()
+    conf = (nova_senha_confirmacao or "").strip()
+    if nova != conf:
+        return False, "A nova senha e a confirmação não coincidem."
+
+    valida, msg = validar_senha_forte(nova)
+    if not valida:
+        return False, msg
+
+    atual = senha_atual or ""
+    try:
+        engine = get_connection()
+        with engine.begin() as conn:
+            row = conn.execute(
+                text("SELECT password_hash FROM usuarios WHERE id = :id"),
+                {"id": usuario_id},
+            ).fetchone()
+            if not row:
+                return False, "Utilizador não encontrado."
+            stored = _password_hash_bytes(row[0])
+            if not stored:
+                return False, "Conta sem senha configurada; contacte um administrador."
+
+            try:
+                ok = bcrypt.checkpw(atual.encode("utf-8"), stored)
+            except (ValueError, TypeError):
+                return False, "Não foi possível validar a senha atual."
+
+            if not ok:
+                return False, "Senha atual incorreta."
+
+            salt = bcrypt.gensalt()
+            new_h = bcrypt.hashpw(nova.encode("utf-8"), salt).decode("utf-8")
+            res = conn.execute(
+                text("UPDATE usuarios SET password_hash = :h WHERE id = :id"),
+                {"h": new_h, "id": usuario_id},
+            )
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Falha ao atualizar a senha."
+        return True, "Senha atualizada com sucesso."
+    except Exception as e:
+        return False, f"Erro ao alterar a senha: {e}"
+
+
 def _ler_senha_cli(args: argparse.Namespace) -> str | None:
     if args.senha is not None:
         return args.senha
