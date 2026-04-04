@@ -1,1 +1,1 @@
-"""Serviços com transações e acesso a dados (Streamlit / jobs)."""
+"""Serviços com transações (Streamlit / jobs)."""

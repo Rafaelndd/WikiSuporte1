@@ -25,4 +25,4 @@ alwaysApply: false
 ## Interface e UX
 
 - Visual **profissional e consistente**.
-- Temas Streamlit (claro/escuro): claro com inspiração **antropológica**; escuro inspirado no **Spotify**; seguir orientações de [theming](https://docs.streamlit.io/develop/concepts/configuration/theming) e identidade corporativa quando aplicável.
+- Temas Streamlit: apenas **claro** e **escuro**, com paleta de marca EPSY (laranja `#f85001`, azul `#15789a`); seguir [theming](https://docs.streamlit.io/develop/concepts/configuration/theming) e identidade corporativa quando aplicável.

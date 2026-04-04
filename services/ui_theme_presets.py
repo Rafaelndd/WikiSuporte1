@@ -1,22 +1,13 @@
 """
-Presets visuais opcionais para o WikiSuporte (Streamlit).
+Tema visual do WikiSuporte (Streamlit).
 
-Objetivo
---------
-Complementar o tema nativo do Streamlit (claro/escuro em ☰ → Configurações)
-com paletas de marca **não destrutivas**: apenas CSS extra, sem novas dependências.
+Duas ferramentas Streamlit alinhadas às práticas recomendadas:
+- ``st.markdown(..., unsafe_allow_html=True)`` para CSS de marca (paleta EPSY).
+- ``streamlit.components.v1.html`` para sincronizar o tema nativo (claro/escuro)
+  com ``localStorage`` no formato esperado pelo frontend do Streamlit 1.55+.
 
-Presets
--------
-- **padrao**: nenhum CSS adicional (comportamento Streamlit puro).
-- **anthropic_light**: papel quente, tipografia neutra — pensado para uso com
-  aparência **clara** do Streamlit (`html[data-theme="light"]`).
-- **spotify_dark**: base #121212 e cartões elevados — pensado para aparência
-  **escura** do Streamlit (`html[data-theme="dark"]`).
-
-Os seletores respeitam `data-theme` para não forçar contraste ilegível quando
-o utilizador mistura preset e modo do Streamlit; nesse caso o impacto visual
-é reduzido de propósito.
+Chave de armazenamento no navegador (igual ao Streamlit):
+``stActiveTheme-{pathname}-v2`` com valor ``JSON.stringify("Light"|"Dark")``.
 """
 
 from __future__ import annotations
@@ -24,154 +15,214 @@ from __future__ import annotations
 from typing import Final
 
 import streamlit as st
+import streamlit.components.v1 as components
 
-# Chave única na sessão (evitar colisão com outras flags)
-SESSION_PRESET_KEY: Final[str] = "ws_ui_theme_preset"
+# Chave da escolha do utilizador (claro / escuro)
+SESSION_THEME_KEY: Final[str] = "ws_streamlit_theme"
+# Guarda o valor já processado nesta sessão para detetar mudança no rádio
+_SESSION_THEME_SNAPSHOT_KEY: Final[str] = "_ws_streamlit_theme_snapshot"
 
-VALID_PRESETS: Final[tuple[str, ...]] = ("padrao", "anthropic_light", "spotify_dark")
+VALID_THEMES: Final[tuple[str, ...]] = ("light", "dark")
 
 _LABELS: Final[dict[str, str]] = {
-    "padrao": "Padrão Streamlit",
-    "anthropic_light": "Claro (inspiração Anthropic)",
-    "spotify_dark": "Escuro (inspiração Spotify)",
+    "light": "Claro",
+    "dark": "Escuro",
 }
 
 
-def normalize_preset(raw: str | None) -> str:
-    """Devolve um preset suportado; valores desconhecidos caem em 'padrao'."""
-    if raw in VALID_PRESETS:
+def normalize_theme(raw: str | None) -> str:
+    """Devolve ``light`` ou ``dark``; valores desconhecidos caem em ``light``."""
+    if raw in VALID_THEMES:
         return raw
-    return "padrao"
+    return "light"
 
 
 def ensure_theme_session_defaults() -> None:
-    """Garante chave inicial na sessão antes de widgets com a mesma key."""
-    if SESSION_PRESET_KEY not in st.session_state:
-        st.session_state[SESSION_PRESET_KEY] = "padrao"
+    """Garante tema inicial e migra presets antigos (anthropic_light / spotify_dark)."""
+    if SESSION_THEME_KEY not in st.session_state:
+        legacy = st.session_state.get("ws_ui_theme_preset")
+        if legacy == "spotify_dark":
+            st.session_state[SESSION_THEME_KEY] = "dark"
+        elif legacy == "anthropic_light":
+            st.session_state[SESSION_THEME_KEY] = "light"
+        else:
+            ctx_type = getattr(getattr(st, "context", None), "theme", None)
+            ct = getattr(ctx_type, "type", None) if ctx_type is not None else None
+            st.session_state[SESSION_THEME_KEY] = "dark" if ct == "dark" else "light"
 
 
-def build_theme_stylesheet(preset: str) -> str:
+def _streamlit_storage_label(theme: str) -> str:
+    return "Dark" if normalize_theme(theme) == "dark" else "Light"
+
+
+def build_theme_stylesheet(theme: str) -> str:
     """
-    Gera o bloco CSS para o preset (função pura — fácil de testar).
+    CSS de marca para o modo escolhido (função pura — fácil de testar).
 
-    O CSS é aplicado só quando o modo nativo do Streamlit corresponde ao
-    preset escolhido, para manter contraste acessível.
+    Reforça fundos e botões com a paleta EPSY sem depender de terceiros.
     """
-    p = normalize_preset(preset)
-    if p == "padrao":
-        return ""
-
-    if p == "anthropic_light":
+    t = normalize_theme(theme)
+    if t == "dark":
         return """
         <style>
-        /* Claro — papel quente, bordas suaves (use tema claro do Streamlit) */
+        html[data-theme="dark"] .stApp {
+            background: #0f1419 !important;
+        }
+        html[data-theme="dark"] [data-testid="stHeader"] {
+            background: rgba(15, 20, 25, 0.94) !important;
+            border-bottom: 1px solid #1e2a33 !important;
+            backdrop-filter: blur(8px);
+        }
+        html[data-theme="dark"] [data-testid="stSidebar"] {
+            background: #0c1014 !important;
+            border-right: 1px solid #1e2a33 !important;
+        }
+        html[data-theme="dark"] [data-testid="stSidebar"] .stMarkdown,
+        html[data-theme="dark"] [data-testid="stSidebar"] p,
+        html[data-theme="dark"] [data-testid="stSidebar"] span {
+            color: #e8eef2 !important;
+        }
+        html[data-theme="dark"] .block-container {
+            color: #f0f4f7 !important;
+        }
+        html[data-theme="dark"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border-color: #243540 !important;
+            background: #151d24 !important;
+        }
+        html[data-theme="dark"] .stButton > button[kind="primary"] {
+            background: linear-gradient(180deg, #15789a 0%, #0f5f7a 100%) !important;
+            border: none !important;
+            color: #fff !important;
+        }
+        html[data-theme="dark"] a {
+            color: #4db3d4 !important;
+        }
+        </style>
+        """
+    return """
+        <style>
         html[data-theme="light"] .stApp {
-            background: linear-gradient(180deg, #faf8f5 0%, #f3f0ea 100%) !important;
+            background: linear-gradient(180deg, #fafbfc 0%, #f3f6f8 100%) !important;
         }
         html[data-theme="light"] [data-testid="stHeader"] {
-            background: rgba(250, 248, 245, 0.92) !important;
-            border-bottom: 1px solid #e8e4dc !important;
+            background: rgba(250, 251, 252, 0.94) !important;
+            border-bottom: 1px solid #e2e8f0 !important;
             backdrop-filter: blur(8px);
         }
         html[data-theme="light"] [data-testid="stSidebar"] {
-            background: #fffcf7 !important;
-            border-right: 1px solid #e8e4dc !important;
+            background: #ffffff !important;
+            border-right: 1px solid #e2e8f0 !important;
         }
         html[data-theme="light"] .block-container {
-            color: #1f1f1f !important;
+            color: #1a202c !important;
         }
         html[data-theme="light"] .stMarkdown, html[data-theme="light"] .stCaption {
-            color: #3a3a3a;
+            color: #2d3748;
         }
         html[data-theme="light"] .stButton > button[kind="primary"] {
-            background: linear-gradient(180deg, #c47a5a 0%, #b86f52 100%) !important;
+            background: linear-gradient(180deg, #f85001 0%, #e04800 100%) !important;
             border: none !important;
             color: #fff !important;
         }
         html[data-theme="light"] .stButton > button[kind="primary"]:hover {
-            box-shadow: 0 2px 8px rgba(180, 111, 82, 0.35);
+            box-shadow: 0 2px 10px rgba(248, 80, 1, 0.35);
+        }
+        html[data-theme="light"] a {
+            color: #15789a !important;
         }
         </style>
         """
 
-    # spotify_dark
-    return """
-    <style>
-    /* Escuro — camadas tipo Spotify (use tema escuro do Streamlit) */
-    html[data-theme="dark"] .stApp {
-        background: #121212 !important;
-    }
-    html[data-theme="dark"] [data-testid="stHeader"] {
-        background: rgba(18, 18, 18, 0.92) !important;
-        border-bottom: 1px solid #282828 !important;
-        backdrop-filter: blur(8px);
-    }
-    html[data-theme="dark"] [data-testid="stSidebar"] {
-        background: #000000 !important;
-        border-right: 1px solid #282828 !important;
-    }
-    html[data-theme="dark"] [data-testid="stSidebar"] .stMarkdown,
-    html[data-theme="dark"] [data-testid="stSidebar"] p,
-    html[data-theme="dark"] [data-testid="stSidebar"] span {
-        color: #e0e0e0 !important;
-    }
-    html[data-theme="dark"] .block-container {
-        color: #f5f5f5 !important;
-    }
-    html[data-theme="dark"] [data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: #333333 !important;
-        background: #1e1e1e !important;
-    }
-    html[data-theme="dark"] .stButton > button[kind="secondary"] {
-        background: #282828 !important;
-        color: #fff !important;
-        border: 1px solid #3e3e3e !important;
-    }
-    html[data-theme="dark"] a {
-        color: #1ed760 !important;
-    }
-    </style>
-    """
 
-
-def inject_theme_stylesheet(preset: str | None = None) -> None:
-    """Injeta CSS global via markdown (idempotente por rerun)."""
+def inject_theme_markdown_css(theme: str | None = None) -> None:
+    """Injeta o CSS de marca via ``st.markdown``."""
     ensure_theme_session_defaults()
-    key = preset if preset is not None else str(st.session_state.get(SESSION_PRESET_KEY, "padrao"))
+    key = theme if theme is not None else str(st.session_state.get(SESSION_THEME_KEY, "light"))
     css = build_theme_stylesheet(key)
-    if css.strip():
-        st.markdown(css, unsafe_allow_html=True)
+    st.markdown(css, unsafe_allow_html=True)
+
+
+def inject_parent_data_theme_script(theme: str) -> None:
+    """
+    Ajusta ``data-theme`` no documento pai (iframe → app) para alinhar CSS customizado.
+    """
+    t = normalize_theme(theme)
+    attr = "dark" if t == "dark" else "light"
+    html = f"""<!DOCTYPE html><html><body><script>
+    (function () {{
+      try {{
+        var p = window.parent;
+        var root = p.document.documentElement;
+        if (root) root.setAttribute("data-theme", "{attr}");
+      }} catch (e) {{}}
+    }})();
+    </script></body></html>"""
+    components.html(html, height=0, width=0)
+
+
+def inject_streamlit_native_theme_reload(theme: str) -> None:
+    """
+    Persiste o tema no ``localStorage`` do Streamlit e recarrega a página.
+
+    Usa a mesma chave e formato que o frontend do Streamlit 1.55+.
+    """
+    label = _streamlit_storage_label(theme)
+    # JSON.stringify("Light") → chave com aspas no valor armazenado
+    html = f"""<!DOCTYPE html><html><body><script>
+    (function () {{
+      try {{
+        var p = window.parent;
+        var key = "stActiveTheme-" + p.location.pathname + "-v2";
+        p.localStorage.setItem(key, JSON.stringify("{label}"));
+        p.location.reload();
+      }} catch (e) {{}}
+    }})();
+    </script></body></html>"""
+    components.html(html, height=0, width=0)
 
 
 def render_theme_sidebar_controls() -> None:
-    """Controlo na barra lateral: preset guardado em session_state."""
+    """Rádio Claro / Escuro na barra lateral; recarrega ao mudar para aplicar o tema nativo."""
     ensure_theme_session_defaults()
     with st.sidebar:
-        with st.expander("🎨 Tema visual", expanded=False):
+        with st.expander("Aparência", expanded=False):
+            previous = st.session_state.get(_SESSION_THEME_SNAPSHOT_KEY)
             st.radio(
-                "Preset de cor",
-                options=list(VALID_PRESETS),
+                "Tema",
+                options=list(VALID_THEMES),
                 format_func=lambda x: _LABELS.get(x, x),
-                key=SESSION_PRESET_KEY,
+                key=SESSION_THEME_KEY,
                 help=(
-                    "Combina com o tema claro/escuro do Streamlit "
-                    "(menu ☰ → Configurações → Aparência). "
-                    "Claro Anthropic funciona melhor no modo claro; "
-                    "Spotify escuro no modo escuro."
+                    "Alterna entre tema claro e escuro do Streamlit. "
+                    "Ao mudar, a página recarrega uma vez para aplicar a aparência nativa."
                 ),
             )
-            st.caption(
-                "Modo claro/escuro global: ☰ **Configurações do app** → **Aparência**."
-            )
+            current = normalize_theme(str(st.session_state.get(SESSION_THEME_KEY, "light")))
+            if previous is not None and previous != current:
+                st.session_state[_SESSION_THEME_SNAPSHOT_KEY] = current
+                inject_streamlit_native_theme_reload(current)
+                st.stop()
+            st.session_state[_SESSION_THEME_SNAPSHOT_KEY] = current
 
 
 def wiki_theme_apply_authenticated() -> None:
     """
-    Aplica tema para sessões autenticadas: CSS + controlo na sidebar.
+    Aplica tema para sessões autenticadas: CSS, ``data-theme`` e controlo na sidebar.
 
-    Deve ser chamado depois de `st.set_page_config` e da verificação de login.
+    Deve ser chamado depois de ``st.set_page_config`` e da verificação de login.
     """
     if not st.session_state.get("autenticado"):
         return
-    inject_theme_stylesheet()
+    ensure_theme_session_defaults()
+    theme = normalize_theme(str(st.session_state.get(SESSION_THEME_KEY, "light")))
+    inject_theme_markdown_css(theme)
+    inject_parent_data_theme_script(theme)
     render_theme_sidebar_controls()
+
+
+def wiki_theme_apply_login_page() -> None:
+    """Tela de login: só CSS + ``data-theme`` (sem recarregar nem sidebar)."""
+    ensure_theme_session_defaults()
+    theme = normalize_theme(str(st.session_state.get(SESSION_THEME_KEY, "light")))
+    inject_theme_markdown_css(theme)
+    inject_parent_data_theme_script(theme)

@@ -1,5 +1,5 @@
 """
-Página interna: Release da versão do WikiSuporte (usuários autenticados).
+Página interna: release da versão do WikiSuporte (utilizadores autenticados).
 
 Conteúdo principal: catálogo ``releases/releases_catalog.json`` (``utils.release_manager``).
 O Markdown ``releases/WIKISUPORTE_NOTAS_DE_VERSAO.md`` permanece como anexo opcional.
@@ -68,14 +68,14 @@ st.markdown(
     .ws-notes-hero h1 {
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         font-weight: 800;
-        font-size: clamp(1.75rem, 4vw, 2.25rem);
+        font-size: clamp(2rem, 4.8vw, 2.85rem);
         margin: 0 0 0.35rem 0;
         letter-spacing: -0.03em;
     }
-    .ws-notes-hero .wiki { color: #1e5fbf; }
-    .ws-notes-hero .suporte { color: #0d9488; }
-    html[data-theme="dark"] .ws-notes-hero .wiki { color: #93c5fd; }
-    html[data-theme="dark"] .ws-notes-hero .suporte { color: #5eead4; }
+    .ws-notes-hero .wiki { color: #f85001; }
+    .ws-notes-hero .suporte { color: #15789a; }
+    html[data-theme="dark"] .ws-notes-hero .wiki { color: #ff9a6b; }
+    html[data-theme="dark"] .ws-notes-hero .suporte { color: #5eb8d9; }
     .ws-notes-hero .meta {
         color: #6b7280;
         font-size: 0.95rem;
@@ -107,7 +107,7 @@ st.markdown(
 st.divider()
 
 if not catalog:
-    st.warning("Ainda não há releases registradas no sistema.")
+    st.warning("Ainda não há releases registadas no sistema.")
 else:
     st.subheader("Histórico de releases", anchor=False)
     st.caption("Do mais recente para o mais antigo. Abra cada versão para ver o comparativo **Como era** / **Como ficou**.")

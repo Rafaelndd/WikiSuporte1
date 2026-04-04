@@ -1,21 +1,29 @@
 """
-Rotina de penalidades por contribuição (§11 em docs/regras_contribuicao.md): isenções, métricas
-reais e eventos idempotentes em `user_xp_events`.
-
-Requer migrações: `contribution_scoring_rules` (colunas de penalidade), `user_xp_events`,
-colunas em `base_conhecimento` quando aplicável.
+Rotina de penalidades por contribuição: isenções, métricas e eventos idempotentes em user_xp_events.
+Requer migrações: contribution_scoring_rules (com colunas de penalidade), user_xp_events, colunas em base_conhecimento.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, TypedDict
 
 from sqlalchemy import Connection, text
 
 from app.core.penalidades_xp import ResultadoPenalidade, avaliar_penalidades_usuario
 
 ORIGEM_CONHECIMENTO_SUPORTE = "CONHECIMENTO_SUPORTE"
+
+
+class ResumoPenalidadesDict(TypedDict):
+    """Resumo exposto à UI / integrações (valores inteiros)."""
+
+    processados: int
+    penalizados: int
+    isentos: int
+    usuarios_listados: int
+    penalidades_ja_existiam: int
+    sem_penalidade_motor: int
 
 
 @dataclass
@@ -27,17 +35,19 @@ class ResumoProcessamentoPenalidades:
     penalidades_ja_existiam: int = 0
 
 
-@dataclass
-class MetricasContribuicaoUsuario:
-    dias_desde_ultima_aprovacao: int
-    aprovacoes_ultimos_7_dias: int
-    aprovacoes_semana_iso_atual: int
+def resumo_para_dict(r: ResumoProcessamentoPenalidades) -> ResumoPenalidadesDict:
+    processados = r.usuarios_encontrados - r.isentos_pulados
+    return {
+        "processados": processados,
+        "penalizados": r.penalidades_inseridas,
+        "isentos": r.isentos_pulados,
+        "usuarios_listados": r.usuarios_encontrados,
+        "penalidades_ja_existiam": r.penalidades_ja_existiam,
+        "sem_penalidade_motor": r.sem_penalidade_motor,
+    }
 
 
-def carregar_regras_penalidade(
-    conn: Connection,
-) -> tuple[int, int, int]:
-    """penalidade_sem_7_dias, minimo_semanal_sem_penalidade, penalidade_semana_insuficiente."""
+def carregar_regras_penalidade(conn: Connection) -> tuple[int, int, int]:
     row = conn.execute(
         text(
             """
@@ -59,7 +69,6 @@ def carregar_regras_penalidade(
 
 
 def listar_analistas_para_penalidade(conn: Connection) -> list[Mapping[str, Any]]:
-    """Ativos com perfil analista (exclui apenas admin — únicos perfis atuais no sistema)."""
     result = conn.execute(
         text(
             """
@@ -75,7 +84,6 @@ def listar_analistas_para_penalidade(conn: Connection) -> list[Mapping[str, Any]
 
 
 def obter_semana_iso_utc_referencia(conn: Connection) -> tuple[str, str]:
-    """Retorna (ano_iso, semana_iso) como em to_char IYYY e IW."""
     row = conn.execute(
         text(
             """
@@ -125,10 +133,6 @@ def contar_aprovacoes_semana_iso_atual_utc(conn: Connection, usuario_id: int) ->
 
 
 def dias_desde_ultima_aprovacao(conn: Connection, usuario_id: int) -> int:
-    """
-    Dias entre a data UTC atual e a última data_avaliacao (CONHECIMENTO_SUPORTE, APROVADO).
-    Se nunca houve aprovação, retorna 999.
-    """
     row = conn.execute(
         text(
             """
@@ -151,23 +155,17 @@ def dias_desde_ultima_aprovacao(conn: Connection, usuario_id: int) -> int:
     return int(row["dias"])
 
 
-def coletar_metricas_contribuicao(
-    conn: Connection, usuario_id: int
-) -> MetricasContribuicaoUsuario:
-    return MetricasContribuicaoUsuario(
-        dias_desde_ultima_aprovacao=dias_desde_ultima_aprovacao(conn, usuario_id),
-        aprovacoes_ultimos_7_dias=contar_aprovacoes_ultimos_7_dias_utc(conn, usuario_id),
-        aprovacoes_semana_iso_atual=contar_aprovacoes_semana_iso_atual_utc(conn, usuario_id),
+def coletar_metricas_contribuicao(conn: Connection, usuario_id: int) -> tuple[int, int, int]:
+    return (
+        dias_desde_ultima_aprovacao(conn, usuario_id),
+        contar_aprovacoes_ultimos_7_dias_utc(conn, usuario_id),
+        contar_aprovacoes_semana_iso_atual_utc(conn, usuario_id),
     )
 
 
 def montar_event_key_penalidade(
     ano_iso: str, semana_iso: str, usuario_id: int, codigo_penalidade: str
 ) -> str:
-    """
-    Chave idempotente por semana ISO (UTC) e usuário.
-    Formato: PENALIDADE_SEMANA_{ano}_{semana}_USER_{id}_{codigo}
-    """
     codigo_curto = codigo_penalidade.replace(" ", "_")
     return f"PENALIDADE_SEMANA_{ano_iso}_{semana_iso}_USER_{usuario_id}_{codigo_curto}"
 
@@ -187,10 +185,6 @@ def persistir_penalidade_se_necessario(
     ano_iso: str,
     semana_iso: str,
 ) -> str:
-    """
-    Insere em user_xp_events com ON CONFLICT DO NOTHING.
-    Retorna: 'inserida' | 'duplicada' | 'ignorada'
-    """
     if not resultado.aplicar or resultado.pontos >= 0 or not resultado.codigo:
         return "ignorada"
 
@@ -217,8 +211,8 @@ def persistir_penalidade_se_necessario(
 
 def processar_penalidades_contribuicao(conn: Connection) -> ResumoProcessamentoPenalidades:
     """
-    Avalia todos os analistas elegíveis na transação de `conn`.
-    Idempotente: reexecutar na mesma semana não duplica desconto (event_key + ON CONFLICT).
+    Avalia analistas ativos (perfil analista) na transação de `conn`.
+    Retorna o resumo estruturado; use `resumo_para_dict` na UI (Streamlit, APIs).
     """
     resumo = ResumoProcessamentoPenalidades()
     p7, min_sem, p_insuf = carregar_regras_penalidade(conn)
@@ -234,10 +228,10 @@ def processar_penalidades_contribuicao(conn: Connection) -> ResumoProcessamentoP
             resumo.isentos_pulados += 1
             continue
 
-        m = coletar_metricas_contribuicao(conn, uid)
+        _, a7, sem = coletar_metricas_contribuicao(conn, uid)
         r = avaliar_penalidades_usuario(
-            aprovacoes_ultimos_7_dias=m.aprovacoes_ultimos_7_dias,
-            aprovacoes_semana_iso_atual=m.aprovacoes_semana_iso_atual,
+            aprovacoes_ultimos_7_dias=a7,
+            aprovacoes_semana_iso_atual=sem,
             penalidade_sem_7_dias=p7,
             minimo_semanal_sem_penalidade=min_sem,
             penalidade_semana_insuficiente=p_insuf,

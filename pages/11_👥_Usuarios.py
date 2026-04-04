@@ -11,14 +11,16 @@ import pandas as pd
 import streamlit as st
 
 import cadastro_usuarios as cu
+from app.services.penalidades_service import (
+    processar_penalidades_contribuicao,
+    resumo_para_dict,
+)
 from modules.database import get_connection
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
 from services.ui_theme_presets import wiki_theme_apply_authenticated
 
-from app.services.penalidades_service import processar_penalidades_contribuicao
-
-st.set_page_config(page_title="WikiSuporte - Usuários", page_icon="👥", layout="wide")
+st.set_page_config(page_title="WikiSuporte - Utilizadores", page_icon="👥", layout="wide")
 
 if not st.session_state.get("autenticado"):
     st.switch_page("app.py")
@@ -70,7 +72,7 @@ else:
     st.dataframe(exibir, use_container_width=True, hide_index=True)
 
 tab_novo, tab_editar, tab_fechamento = st.tabs(
-    ["➕ Novo usuário", "✏️ Editar / inativar", "📅 Fechamento Semanal"]
+    ["➕ Novo utilizador", "✏️ Editar / inativar", "📅 Fechamento Semanal"]
 )
 
 with tab_novo:
@@ -214,10 +216,10 @@ with tab_fechamento:
     st.info(
         "Esta rotina avalia as contribuições da semana e aplica as regras de XP. "
         "O processo é seguro e **não duplicará descontos** se for executada mais de uma vez "
-        "(chaves idempotentes por usuário e semana)."
+        "(chaves idempotentes por utilizador e semana)."
     )
     st.caption(
-        "Apenas usuários **analistas** ativos entram na avaliação. Quem está em **férias** ou "
+        "Apenas utilizadores **analistas** ativos entram na avaliação. Quem está em **férias** ou "
         "**atendimento externo** é ignorado."
     )
 
@@ -226,16 +228,15 @@ with tab_fechamento:
             engine = get_connection()
             with st.spinner("Processando penalidades..."):
                 with engine.begin() as conn:
-                    res = processar_penalidades_contribuicao(conn)
-            avaliados = res.usuarios_encontrados - res.isentos_pulados
+                    res = resumo_para_dict(processar_penalidades_contribuicao(conn))
             st.success(
                 "Fechamento concluído.\n\n"
-                f"- **Analistas avaliados (não isentos):** {avaliados}\n"
-                f"- **Isentos (férias / externo):** {res.isentos_pulados}\n"
-                f"- **Novas penalidades gravadas:** {res.penalidades_inseridas}\n"
-                f"- **Já existiam nesta semana (sem novo desconto):** {res.penalidades_ja_existiam}\n"
-                f"- **Sem penalidade aplicável (motor):** {res.sem_penalidade_motor}\n"
-                f"- **Total na lista (analistas ativos):** {res.usuarios_encontrados}"
+                f"- **Analistas avaliados (não isentos):** {res['processados']}\n"
+                f"- **Isentos (férias / externo):** {res['isentos']}\n"
+                f"- **Novas penalidades gravadas:** {res['penalizados']}\n"
+                f"- **Já existiam nesta semana (sem novo desconto):** {res['penalidades_ja_existiam']}\n"
+                f"- **Sem penalidade aplicável (motor):** {res['sem_penalidade_motor']}\n"
+                f"- **Total na lista (analistas ativos):** {res['usuarios_listados']}"
             )
         except Exception as ex:
             logging.exception("processar_penalidades_contribuicao painel admin")

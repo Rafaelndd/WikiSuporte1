@@ -1,7 +1,4 @@
-"""
-Motor puro de penalidades por contribuição (docs/regras_contribuicao.md §11).
-Sem I/O: a rotina chama `avaliar_penalidades_usuario` com métricas já calculadas.
-"""
+"""Motor puro de penalidades por contribuição (regras de negócio, sem I/O)."""
 
 from __future__ import annotations
 
@@ -29,10 +26,6 @@ def avaliar_penalidades_usuario(
     penalidade_semana_insuficiente: int,
     isento: bool,
 ) -> ResultadoPenalidade:
-    """
-    Prioridade (§11): primeiro “sem aprovação nos últimos 7 dias”; senão, meta semanal.
-    Isentos (férias / atendimento externo na rotina) não recebem penalidade.
-    """
     if isento:
         return ResultadoPenalidade(False, 0, "", "isento_ferias_ou_atendimento_externo")
 
