@@ -68,14 +68,14 @@ st.markdown(
     .ws-notes-hero h1 {
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         font-weight: 800;
-        font-size: clamp(1.75rem, 4vw, 2.25rem);
+        font-size: clamp(2rem, 4.8vw, 2.85rem);
         margin: 0 0 0.35rem 0;
         letter-spacing: -0.03em;
     }
-    .ws-notes-hero .wiki { color: #1e5fbf; }
-    .ws-notes-hero .suporte { color: #0d9488; }
-    html[data-theme="dark"] .ws-notes-hero .wiki { color: #93c5fd; }
-    html[data-theme="dark"] .ws-notes-hero .suporte { color: #5eead4; }
+    .ws-notes-hero .wiki { color: #f85001; }
+    .ws-notes-hero .suporte { color: #15789a; }
+    html[data-theme="dark"] .ws-notes-hero .wiki { color: #ff9a6b; }
+    html[data-theme="dark"] .ws-notes-hero .suporte { color: #5eb8d9; }
     .ws-notes-hero .meta {
         color: #6b7280;
         font-size: 0.95rem;

@@ -27,7 +27,40 @@ PONTOS_VR = [
 ]
 
 
+def inject_hide_streamlit_chrome_for_end_users() -> None:
+    """
+    Oculta o menu do canto superior direito (tema, impressão, gravar ecrã, etc.)
+    e o rodapé com a marca Streamlit. Complementa ``client.toolbarMode = minimal``
+    no ``config.toml`` para versões em que o menu ainda aparece.
+    """
+    st.markdown(
+        """
+        <style>
+        [data-testid="stToolbar"] {
+            display: none !important;
+        }
+        [data-testid="stToolbarActions"],
+        [data-testid="stToolbarItems"] {
+            display: none !important;
+        }
+        /* Rodapé "Made with Streamlit" / versão */
+        .stApp > footer,
+        .stApp footer,
+        footer[data-testid="stFooter"] {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            overflow: hidden !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def inject_modern_css() -> None:
+    inject_hide_streamlit_chrome_for_end_users()
     st.markdown(
         """
         <style>

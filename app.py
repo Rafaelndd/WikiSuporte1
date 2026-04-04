@@ -40,6 +40,7 @@ from typing import Union
 from typing import Optional, Dict, Union  
 from modules.utils import inicializar_usuario, calcular_patente
 from services.ui_realtime import (
+    inject_hide_streamlit_chrome_for_end_users,
     render_global_notifications_listener,
     show_gamification_upgrade_card,
 )
@@ -50,7 +51,7 @@ from services.wiki_authenticator import (
     sync_wiki_session_from_stauth,
     wiki_force_logout,
 )
-from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.ui_theme_presets import wiki_theme_apply_authenticated, wiki_theme_apply_login_page
 from services.ui_avatar import html_avatar_perfil_circular
 from services.release_notes_banner import render_home_release_nudge
 
@@ -95,6 +96,9 @@ st.set_page_config(
     layout="wide", 
     initial_sidebar_state="collapsed"
 )
+
+# Oculta menu ⋮ e rodapé Streamlit (login e Home no app principal)
+inject_hide_streamlit_chrome_for_end_users()
 
 # Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
 if 'autenticado' not in st.session_state:
@@ -318,7 +322,6 @@ def obter_kpis_home(usuario_id):
 
     return kpis
 
-    return kpis
 
 def _html_avatar_perfil_circular(caminho: str | None, tamanho_px: int = 76) -> str:
     """Retorna <img> em data-URI para uso em st.markdown, ou string vazia."""
@@ -373,6 +376,7 @@ if st.session_state.get('autenticado'):   # <-- correção aqui
 # 6. TELA DE LOGIN E HOME PRINCIPAL
 # ==========================================
 def tela_login() -> None:
+    wiki_theme_apply_login_page()
     st.markdown("""
         <style>
             [data-testid="collapsedControl"] { display: none !important; }
@@ -391,16 +395,16 @@ def tela_login() -> None:
             .ws-login-title {
                 font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
                 font-weight: 800;
-                font-size: clamp(2rem, 5.5vw, 3.35rem);
+                font-size: clamp(2.45rem, 6.5vw, 4.15rem);
                 line-height: 1.12;
                 letter-spacing: -0.03em;
                 margin: 0;
                 padding: 0;
             }
-            .ws-login-title .wiki { color: #1e5fbf; }
-            .ws-login-title .suporte { color: #0d9488; }
-            html[data-theme="dark"] .ws-login-title .wiki { color: #93c5fd; }
-            html[data-theme="dark"] .ws-login-title .suporte { color: #5eead4; }
+            .ws-login-title .wiki { color: #f85001; }
+            .ws-login-title .suporte { color: #15789a; }
+            html[data-theme="dark"] .ws-login-title .wiki { color: #ff9a6b; }
+            html[data-theme="dark"] .ws-login-title .suporte { color: #5eb8d9; }
             .ws-login-subtitle {
                 text-align: center;
                 color: #6b7280;
@@ -418,7 +422,7 @@ def tela_login() -> None:
             html[data-theme="dark"] .ws-login-footer { color: #6b7280; }
             .stAlert p, .stCaption { text-align: center; display: block; }
             @media (max-width: 480px) {
-                .ws-login-title { font-size: clamp(1.65rem, 9vw, 2.35rem); }
+                .ws-login-title { font-size: clamp(1.9rem, 10vw, 2.85rem); }
             }
         </style>
     """, unsafe_allow_html=True)
@@ -576,34 +580,58 @@ def tela_home() -> None:
                 padding: 0.5rem 0.75rem 0.75rem;
             }
             .ws-home-hero .ws-home-title {
-                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-                font-size: clamp(1.25rem, 3vw, 1.85rem);
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                font-size: clamp(1.85rem, 5vw, 3rem);
                 font-weight: 800;
-                line-height: 1.35;
+                line-height: 1.2;
                 margin: 0 0 0.65rem 0;
                 letter-spacing: -0.03em;
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: center;
+                column-gap: 0.2em;
+                row-gap: 0.15em;
             }
-            .ws-home-hero .wiki { color: #1e5fbf; }
-            .ws-home-hero .suporte { color: #0d9488; }
-            html[data-theme="dark"] .ws-home-hero .wiki { color: #93c5fd; }
-            html[data-theme="dark"] .ws-home-hero .suporte { color: #5eead4; }
+            .ws-home-hero .ws-home-brand-ws {
+                display: inline-flex;
+                align-items: center;
+                font: inherit;
+                letter-spacing: inherit;
+            }
+            .ws-home-hero .ws-home-title .wiki,
+            .ws-home-hero .ws-home-title .suporte {
+                font: inherit;
+                letter-spacing: inherit;
+            }
+            .ws-home-hero .wiki { color: #f85001; }
+            .ws-home-hero .suporte { color: #15789a; }
+            html[data-theme="dark"] .ws-home-hero .wiki { color: #ff9a6b; }
+            html[data-theme="dark"] .ws-home-hero .suporte { color: #5eb8d9; }
             .ws-home-hero .ws-name-amp {
                 color: #4b5563;
                 font-weight: 700;
-                margin: 0 0.15em;
+                font-family: inherit;
+                font-size: inherit;
+                line-height: 1;
+                align-self: center;
             }
             html[data-theme="dark"] .ws-home-hero .ws-name-amp { color: #d1d5db; }
             .ws-home-hero a.epsy-home-link {
                 display: inline-flex;
-                align-items: baseline;
-                flex-wrap: wrap;
-                justify-content: center;
+                align-items: center;
+                flex-wrap: nowrap;
+                font-family: inherit;
+                font-size: inherit;
+                font-weight: 800;
+                line-height: 1;
+                letter-spacing: inherit;
                 text-decoration: none;
                 background: transparent;
                 padding: 0;
                 border-radius: 0;
-                margin-left: 0.1em;
-                vertical-align: middle;
+                margin: 0;
+                vertical-align: unset;
                 box-shadow: none;
             }
             html[data-theme="dark"] .ws-home-hero a.epsy-home-link {
@@ -620,21 +648,31 @@ def tela_home() -> None:
             }
             .ws-home-hero .epsy-e-mirror {
                 display: inline-block;
-                color: #ea580c;
+                color: #f85001;
+                font: inherit;
                 font-weight: 800;
                 transform: scaleX(-1);
-                margin-right: 0.05em;
+                margin-right: 0.04em;
+                line-height: 1;
+                vertical-align: -0.02em;
             }
-            .ws-home-hero .epsy-rest,
+            .ws-home-hero .epsy-rest {
+                color: #f85001 !important;
+                font: inherit;
+                font-weight: 800;
+            }
             .ws-home-hero .epsy-sistemas {
-                color: #0f172a !important;
+                color: #15789a !important;
+                font: inherit;
                 font-weight: 700;
             }
-            html[data-theme="dark"] .ws-home-hero .epsy-rest,
-            html[data-theme="dark"] .ws-home-hero .epsy-sistemas {
-                color: #f1f5f9 !important;
+            html[data-theme="dark"] .ws-home-hero .epsy-e-mirror,
+            html[data-theme="dark"] .ws-home-hero .epsy-rest {
+                color: #ff9a6b;
             }
-            .ws-home-hero .epsy-sistemas { font-weight: 600; }
+            html[data-theme="dark"] .ws-home-hero .epsy-sistemas {
+                color: #5eb8d9 !important;
+            }
             .ws-home-hero .ws-home-tagline {
                 font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
                 font-size: clamp(0.95rem, 2.1vw, 1.125rem);
@@ -650,7 +688,9 @@ def tela_home() -> None:
         </style>
         <header class="ws-home-hero" role="banner" aria-labelledby="ws-home-heading">
             <h1 id="ws-home-heading" class="ws-home-title">
-                <span class="wiki">Wiki</span><span class="suporte">Suporte</span>
+                <span class="ws-home-brand-ws">
+                    <span class="wiki">Wiki</span><span class="suporte">Suporte</span>
+                </span>
                 <span class="ws-name-amp">&amp;</span>
                 <a href="https://epsy.com.br/" target="_blank" rel="noopener noreferrer"
                    class="epsy-home-link"

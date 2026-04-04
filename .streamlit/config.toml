@@ -1,7 +1,8 @@
 # WikiSuporte — interface para utilizador final (sem segredos aqui).
-# Oculta o botão "Deploy" e outras opções de desenvolvedor no menu superior.
+# minimal: esconde o menu ⋮ nativo (tema sistema/claro/escuro, impressão, gravar ecrã,
+# "Made with Streamlit", etc.) quando não há itens externos — ver também CSS em ui_realtime.
 # Valores: auto | developer | viewer | minimal
 # https://docs.streamlit.io/develop/api-reference/configuration/config.toml
 
 [client]
-toolbarMode = "viewer"
+toolbarMode = "minimal"
