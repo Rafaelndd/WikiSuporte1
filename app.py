@@ -51,6 +51,7 @@ from services.wiki_authenticator import (
     wiki_force_logout,
 )
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.ui_avatar import html_avatar_perfil_circular
 from services.release_notes_banner import render_home_release_nudge
 
 #======================================================================================================================#
@@ -84,7 +85,7 @@ logging.info("--- Aplicação iniciada e logs configurados ---")
 try:
     from modules.auditoria import registrar_log_auditoria
 except ImportError:
-    # Fallback caso o ficheiro não exista ainda
+    # Fallback caso o arquivo não exista ainda
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
@@ -317,6 +318,7 @@ def obter_kpis_home(usuario_id):
 
     return kpis
 
+    return kpis
 
 def _html_avatar_perfil_circular(caminho: str | None, tamanho_px: int = 76) -> str:
     """Retorna <img> em data-URI para uso em st.markdown, ou string vazia."""
@@ -964,7 +966,16 @@ def renderizar_dashboard_conquistas(kpis):
                     st.markdown(f"{missao}")
                 st.caption("Complete missões para ganhar bônus de XP e medalhas exclusivas.")
 
-    st.divider()
+            if bonus_sem:
+                st.success(
+                    "🎉 **Bônus da semana!** Você recebeu XP extra pelo desempenho "
+                    "(ex.: meta semanal de aprovações — 5 contribuições **+1000 XP**). Parabéeeeeeens!"
+                )
+
+            if pen_sem < 0:
+                st.caption(
+                    f"📉 Na  última semana foi aplicado desconto de **{pen_sem} do seu XP**"
+                )
 
     # 4. MINI-RESUMO DE CONTRIBUIÇÕES
     st.subheader("📚 Minhas Estatísticas", anchor=False)

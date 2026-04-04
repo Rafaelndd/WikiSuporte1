@@ -1,5 +1,5 @@
 """
-WikiSuporte — Painel de gestão de utilizadores (apenas perfil admin).
+WikiSuporte — Painel de gestão de usuários (apenas perfil admin).
 CRUD com soft delete (`ativo = false`). Sem exposição de `password_hash`.
 """
 
@@ -28,14 +28,14 @@ wiki_theme_apply_authenticated()
 
 perfil_raw = st.session_state.get("perfil", "")
 if not eh_admin(perfil_raw):
-    st.error("⛔ Acesso Negado. Apenas utilizadores com perfil **admin**.")
+    st.error("⛔ Acesso negado. Apenas usuários com perfil **admin**.")
     st.stop()
 
 meu_id = int(st.session_state.get("usuario_id") or 0)
 
-st.title("Gestão de Usuários")
+st.title("Gestão de usuários")
 st.caption(
-    "Consulta e alteração de utilizadores na base PostgreSQL. "
+    "Consulta e alteração de usuários na base PostgreSQL. "
     "A exclusão lógica apenas desativa o acesso (`ativo = false`), preservando histórico."
 )
 
@@ -44,16 +44,16 @@ try:
 except Exception as ex:
     logging.exception("listar_usuarios_admin")
     ok_lista = False
-    err_lista = f"Erro inesperado ao listar utilizadores: {ex}"
+    err_lista = f"Erro inesperado ao listar usuários: {ex}"
     df_users = None
 
 if not ok_lista or df_users is None:
-    st.error(err_lista or "Não foi possível carregar a lista de utilizadores.")
+    st.error(err_lista or "Não foi possível carregar a lista de usuários.")
     st.info("Verifique a ligação ao PostgreSQL e se a migração da tabela `usuarios` está aplicada.")
     st.stop()
 
 if df_users.empty:
-    st.warning("Não existem utilizadores na tabela `usuarios`.")
+    st.warning("Não existem usuários na tabela `usuarios`.")
 else:
     exibir = df_users.copy()
     exibir.columns = [
@@ -66,7 +66,7 @@ else:
         "Em férias",
         "Atend. externo",
     ]
-    st.subheader("Utilizadores cadastrados")
+    st.subheader("Usuários cadastrados")
     st.dataframe(exibir, use_container_width=True, hide_index=True)
 
 tab_novo, tab_editar, tab_fechamento = st.tabs(
@@ -74,23 +74,23 @@ tab_novo, tab_editar, tab_fechamento = st.tabs(
 )
 
 with tab_novo:
-    st.markdown("#### Cadastrar novo utilizador")
+    st.markdown("#### Cadastrar novo usuário")
     with st.form("form_novo_usuario", clear_on_submit=True):
         fn_nome = st.text_input("Nome (exibição)", placeholder="Ex.: Maria Silva")
         fn_user = st.text_input("Username (login)", placeholder="Ex.: maria.silva")
         fn_ramal = st.text_input("Ramal", placeholder="Opcional")
         fn_perfil = st.selectbox("Perfil", ["analista", "admin"], index=0)
         fn_senha = st.text_input("Senha inicial", type="password")
-        fn_ativo = st.toggle("Utilizador ativo", value=True)
+        fn_ativo = st.toggle("Usuário ativo", value=True)
         fn_ferias = st.toggle("Em férias", value=False)
         fn_ext = st.toggle("Em atendimento externo", value=False)
-        sub_novo = st.form_submit_button("Guardar novo utilizador", type="primary")
+        sub_novo = st.form_submit_button("Salvar novo usuário", type="primary")
 
         if sub_novo:
             if not (fn_nome or "").strip() or not (fn_user or "").strip():
                 st.error("Nome e username são obrigatórios.")
             elif not (fn_senha or "").strip():
-                st.error("Defina uma senha inicial forte para o novo utilizador.")
+                st.error("Defina uma senha inicial forte para o novo usuário.")
             else:
                 try:
                     ok, msg = cu.criar_usuario(
@@ -114,16 +114,16 @@ with tab_novo:
 
 with tab_editar:
     if df_users.empty:
-        st.info("Não há utilizadores para editar.")
+        st.info("Não há usuários para editar.")
     else:
-        st.markdown("#### Alterar dados do utilizador")
+        st.markdown("#### Alterar dados do usuário")
 
         def _label_uid(uid: int) -> str:
             r = df_users.loc[df_users["id"] == uid].iloc[0]
             return f"{int(r['id'])} — {r['nome']}"
 
         uids = [int(x) for x in df_users["id"].tolist()]
-        sel_id = st.selectbox("Utilizador", uids, format_func=_label_uid, key="sel_edit_uid")
+        sel_id = st.selectbox("Usuário", uids, format_func=_label_uid, key="sel_edit_uid")
         row = df_users.loc[df_users["id"] == sel_id].iloc[0]
 
         with st.form("form_editar_usuario"):
@@ -140,7 +140,7 @@ with tab_editar:
                 help="Só preencha para forçar reposição da senha (política de senha forte).",
             )
             fe_ativo = st.toggle(
-                "Utilizador ativo",
+                "Usuário ativo",
                 value=bool(row["ativo"]) if pd.notna(row["ativo"]) else True,
             )
             fe_ferias = st.toggle(
@@ -179,17 +179,17 @@ with tab_editar:
                     st.error(msg)
 
         st.divider()
-        st.markdown("#### Inativar utilizador (exclusão lógica)")
+        st.markdown("#### Inativar usuário (exclusão lógica)")
         st.caption("O registo permanece na base (histórico, XP, auditoria). Apenas o acesso é bloqueado.")
 
         sel_inat = st.selectbox(
-            "Utilizador a inativar",
+            "Usuário a inativar",
             uids,
             format_func=_label_uid,
             key="sel_inat_uid",
         )
         confirma = st.checkbox(
-            "Confirmo que pretendo inativar este utilizador",
+            "Confirmo que pretendo inativar este usuário",
             key="chk_inat",
         )
         if st.button("Inativar acesso", type="primary", key="btn_inat"):

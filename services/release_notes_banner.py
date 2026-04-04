@@ -1,5 +1,5 @@
 """
-Aviso de nova versão na Home e metadados para a página de notas.
+Aviso de nova versão na Home e metadados para a página de release da versão.
 
 A fonte de verdade passou a ser ``releases/releases_catalog.json``, gerido por
 ``utils/release_manager.py``. As constantes abaixo mantêm compatibilidade com
@@ -17,10 +17,10 @@ from utils.release_manager import (
 )
 
 # --- Compat legado (fallback se não houver catálogo) ---
-RELEASE_NOTES_VERSION = "2.1.0"
-RELEASE_NOTES_DATE = "2026-04-02"
+RELEASE_NOTES_VERSION = "1.0.1"
+RELEASE_NOTES_DATE = "2026-04-04"
 RELEASE_NOTES_SUMMARY = (
-    "Sessão de login mais estável no navegador, nova página de notas de versão e reforço de segurança nos bastidores."
+    "Login mais estável no navegador, página Release da versão e reforço de segurança nos bastidores."
 )
 
 _NOTAS_PAGE = "pages/10_📋_Notas_de_versao.py"
@@ -48,7 +48,7 @@ def render_release_notes_banner() -> None:
 def render_home_release_nudge() -> None:
     """
     Faixa na parte superior da Home: só aparece enquanto ``hoje <= notificacao_ate``
-    da última release. Link nativo para a página de notas via ``st.page_link``.
+    da última release. Link nativo para a página de release da versão via ``st.page_link``.
     """
     if not st.session_state.get("autenticado"):
         return
@@ -94,7 +94,7 @@ def render_home_release_nudge() -> None:
         unsafe_allow_html=True,
     )
     st.caption("Para saber mais, use o link abaixo.")
-    st.page_link(_NOTAS_PAGE, label="👉 Clique aqui para abrir as notas de versão", icon="📋")
+    st.page_link(_NOTAS_PAGE, label="👉 Clique aqui para abrir o Release da versão", icon="📋")
 
 
 # Ao importar, alinha constantes legadas ao JSON (quando existir)

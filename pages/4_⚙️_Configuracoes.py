@@ -71,7 +71,7 @@ wiki_theme_apply_authenticated()
 ensure_notifications_schema()
 
 if not eh_admin(perfil_raw):
-    st.error("⛔ Acesso Negado. Apenas utilizadores com perfil **admin**.")
+    st.error("⛔ Acesso Negado. Apenas usuários com perfil **admin**.")
     st.stop()
 
 perfil_usuario = "admin"
@@ -366,7 +366,7 @@ with aba_release_launch:
                 except ValueError as ve:
                     st.error(str(ve))
                 except OSError as oe:
-                    st.error(f"Falha ao gravar ficheiro: {oe}")
+                    st.error(f"Falha ao gravar arquivo: {oe}")
 
 if aba_notificacoes:
     with aba_notificacoes:
