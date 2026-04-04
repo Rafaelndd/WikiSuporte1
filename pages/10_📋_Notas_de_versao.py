@@ -1,5 +1,5 @@
 """
-Página interna: notas de versão do WikiSuporte (utilizadores autenticados).
+Página interna: release da versão do WikiSuporte (utilizadores autenticados).
 
 Conteúdo principal: catálogo ``releases/releases_catalog.json`` (``utils.release_manager``).
 O Markdown ``releases/WIKISUPORTE_NOTAS_DE_VERSAO.md`` permanece como anexo opcional.
@@ -18,7 +18,7 @@ from services.ui_realtime import render_global_notifications_listener
 from utils.release_manager import ReleaseRecord, load_catalog
 
 st.set_page_config(
-    page_title="WikiSuporte — Notas de versão",
+    page_title="WikiSuporte — Release da versão",
     page_icon="📋",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -95,10 +95,10 @@ hero_date = latest.data_lancamento if latest else RELEASE_NOTES_DATE
 st.markdown(
     f"""
     <div class="ws-notes-hero">
-        <h1 aria-label="WikiSuporte Notas de versão">
+        <h1 aria-label="WikiSuporte Release da versão">
             <span class="wiki">Wiki</span><span class="suporte">Suporte</span>
         </h1>
-        <p class="meta"><strong>Notas de versão</strong> · Último release · {hero_version} · {_fmt_data(hero_date)}</p>
+        <p class="meta"><strong>Release da versão</strong> · Último release · {hero_version} · {_fmt_data(hero_date)}</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -107,7 +107,7 @@ st.markdown(
 st.divider()
 
 if not catalog:
-    st.warning("Ainda não há releases registadas no catálogo. Um administrador pode publicar em **Configurações → Lançar Nova Versão**.")
+    st.warning("Ainda não há releases registadas no sistema.")
 else:
     st.subheader("Histórico de releases", anchor=False)
     st.caption("Do mais recente para o mais antigo. Abra cada versão para ver o comparativo **Como era** / **Como ficou**.")
@@ -118,10 +118,9 @@ st.divider()
 st.subheader("Documentação adicional", anchor=False)
 
 if not _MD_PATH.is_file():
-    st.caption("Não existe ficheiro Markdown complementar neste ambiente.")
+    st.caption("Não existe arquivo.")
 else:
     raw = _MD_PATH.read_text(encoding="utf-8")
-    raw = re.sub(r"^#\s+Notas de versão[^\n]*\n+", "", raw.strip(), count=1)
-    raw = re.split(r"\n---\n## Para a equipa técnica", raw, maxsplit=1)[0].strip()
-    with st.expander("Texto longo / detalhes (Markdown histórico)", expanded=False):
+    raw = re.sub(r"^#\s+Release da versão[^\n]*\n+", "", raw.strip(), count=1)
+    with st.expander("Detalhes", expanded=False):
         st.markdown(raw)
