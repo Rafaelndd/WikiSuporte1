@@ -50,8 +50,8 @@ jobs:
       - name: Pytest
         run: python -m pytest tests -q
 
-      # Audita o ambiente já instalado (requirements-dev.txt → requirements.txt), não só a
-      # resolução isolada de `-r requirements.txt` (evita árvore com urllib3 2.5.x ignorando pin).
+      # Audita o ambiente já instalado (requirements-dev.txt → requirements.txt). `-r requirements.txt`
+      # isolado pode resolver urllib3 2.5.x apesar de `urllib3>=2.6.3` no ficheiro (pip-audit / CI).
       - name: pip-audit (ambiente instalado)
         run: python -m pip_audit --desc on
 
