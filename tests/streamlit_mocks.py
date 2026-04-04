@@ -7,6 +7,7 @@ Uso em subprocesso para não contaminar `sys.modules` entre testes.
 from __future__ import annotations
 
 import sys
+import types
 from datetime import date, time
 from unittest.mock import MagicMock
 
@@ -138,8 +139,14 @@ def install_streamlit_stub(session_state: dict | None = None) -> MagicMock:
     st.progress = MagicMock()
 
     comp = MagicMock()
-    v1 = MagicMock()
+    # ``streamlit.components.v1`` tem de ser um módulo real: pacotes como
+    # ``extra_streamlit_components`` fazem ``from streamlit.components.v1.components import CustomComponent``.
+    # Um MagicMock em ``sys.modules["streamlit.components.v1"]`` não expõe o submódulo ``.components``.
+    v1 = types.ModuleType("streamlit.components.v1")
     v1.html = MagicMock()
+    v1_components = types.ModuleType("streamlit.components.v1.components")
+    v1_components.CustomComponent = MagicMock()
+    sys.modules["streamlit.components.v1.components"] = v1_components
     comp.v1 = v1
 
     sys.modules["streamlit"] = st
