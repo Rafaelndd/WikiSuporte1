@@ -23,6 +23,8 @@ from services.perfil_usuario import normalizar_perfil_para_sessao
 
 WIKI_COOKIE_NAME = "wikisuporte_auth"
 CREDENTIALS_CACHE_TTL_SEC = 120
+# Query string para impedir re-login imediato via cookie após logout (multipage / clear()).
+WS_LOGOUT_QUERY_PARAM = "ws_logout"
 
 # Inclui NULL e valores "ativos" sem misturar boolean com integer (PG falha em `ativo = 1` se `ativo` for boolean).
 _USUARIO_CONSIDERADO_ATIVO = """(
@@ -221,6 +223,17 @@ def wiki_force_logout() -> None:
     st.session_state["autenticado"] = False
     for k in ("usuario_id", "usuario_nome", "perfil", "ultimo_acesso"):
         st.session_state.pop(k, None)
+    for k in (
+        "authentication_status",
+        "username",
+        "name",
+        "email",
+        "roles",
+        "_wiki_authenticator_ref",
+    ):
+        st.session_state.pop(k, None)
+    if "logout" in st.session_state:
+        st.session_state["logout"] = None
 
 
 def _limpar_sessao_stauth_invalida(auth: Authenticate) -> None:
@@ -240,6 +253,61 @@ def _limpar_sessao_stauth_invalida(auth: Authenticate) -> None:
         st.session_state.pop(k, None)
     if "logout" in st.session_state:
         st.session_state["logout"] = None
+
+
+def _logout_query_param_truthy() -> bool:
+    raw = st.query_params.get(WS_LOGOUT_QUERY_PARAM)
+    if raw is None:
+        return False
+    val = raw[0] if isinstance(raw, list) and raw else raw
+    return str(val).strip().lower() in ("1", "true", "yes")
+
+
+def process_forced_logout_from_url() -> bool:
+    """
+    Chamado no início do ``app.py`` **antes** de ``ensure_stauth_cookie_restored``.
+
+    Com ``?ws_logout=1``, força novo ``wiki_force_logout`` e remove o parâmetro da URL,
+    evitando que o cookie restaure a sessão no mesmo ciclo em que ``st.session_state`` foi limpo.
+    """
+    if not _logout_query_param_truthy():
+        return False
+    wiki_force_logout()
+    try:
+        del st.query_params[WS_LOGOUT_QUERY_PARAM]
+    except Exception as e:
+        logging.warning("Remover %s da URL: %s", WS_LOGOUT_QUERY_PARAM, e)
+    st.session_state["autenticado"] = False
+    if "notificacoes_lidas" not in st.session_state:
+        st.session_state["notificacoes_lidas"] = []
+    return True
+
+
+def render_wiki_sidebar_logout_button() -> None:
+    """Botão Sair na sidebar; use no fim do bloco lateral (ex.: Home após ponto VR)."""
+    if not st.session_state.get("autenticado"):
+        return
+    if st.sidebar.button(
+        "🚪 Sair do Sistema",
+        use_container_width=True,
+        type="secondary",
+        key="ws_sidebar_logout",
+    ):
+        try:
+            from modules.auditoria import registrar_log_auditoria
+
+            uid = st.session_state.get("usuario_id")
+            if uid is not None:
+                registrar_log_auditoria(int(uid), "LOGOUT", "Usuário saiu do sistema.")
+        except Exception as e:
+            logging.warning("registrar_log_auditoria no logout: %s", e)
+        wiki_force_logout()
+        try:
+            st.query_params[WS_LOGOUT_QUERY_PARAM] = "1"
+        except Exception as e:
+            logging.warning("Definir ws_logout na URL: %s", e)
+        st.session_state.clear()
+        st.rerun()
 
 
 def ensure_stauth_cookie_restored() -> None:

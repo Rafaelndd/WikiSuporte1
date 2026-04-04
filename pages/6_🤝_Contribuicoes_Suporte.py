@@ -33,6 +33,7 @@ from modules.utils import inicializar_usuario, calcular_patente
 from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.ui_realtime import render_global_notifications_listener, show_gamification_upgrade_card
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.wiki_authenticator import process_forced_logout_from_url
 from services.ui_avatar import html_avatar_perfil_circular
 
 load_dotenv()
@@ -47,6 +48,9 @@ except ImportError:
 
 # Configuração da página (deve ser a primeira chamada Streamlit)
 st.set_page_config(page_title="WikiSuporte", page_icon="🏆", layout="wide")
+
+if process_forced_logout_from_url():
+    st.rerun()
 
 # Verificação de autenticação com default explícito para False e mensagem de redirecionamento para melhor UX
 if not st.session_state.get('autenticado', False):

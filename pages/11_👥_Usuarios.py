@@ -19,8 +19,12 @@ from modules.database import get_connection
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.wiki_authenticator import process_forced_logout_from_url
 
 st.set_page_config(page_title="WikiSuporte - Utilizadores", page_icon="👥", layout="wide")
+
+if process_forced_logout_from_url():
+    st.rerun()
 
 if not st.session_state.get("autenticado"):
     st.switch_page("app.py")

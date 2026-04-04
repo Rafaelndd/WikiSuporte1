@@ -15,6 +15,8 @@ import streamlit as st
 
 from services.release_notes_banner import RELEASE_NOTES_DATE, RELEASE_NOTES_VERSION
 from services.ui_realtime import render_global_notifications_listener
+from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.wiki_authenticator import process_forced_logout_from_url
 from utils.release_manager import ReleaseRecord, load_catalog
 
 st.set_page_config(
@@ -24,11 +26,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+if process_forced_logout_from_url():
+    st.rerun()
+
 if not st.session_state.get("autenticado", False):
     st.info("Redirecionando para a página de login…")
     st.switch_page("app.py")
 
 render_global_notifications_listener(show_release_banner=False)
+wiki_theme_apply_authenticated()
 
 _BASE = Path(__file__).resolve().parent.parent
 _MD_PATH = _BASE / "releases" / "WIKISUPORTE_NOTAS_DE_VERSAO.md"

@@ -48,6 +48,8 @@ from services.wiki_authenticator import (
     ensure_stauth_cookie_restored,
     get_wiki_authenticator,
     load_credentials_for_stauth,
+    process_forced_logout_from_url,
+    render_wiki_sidebar_logout_button,
     sync_wiki_session_from_stauth,
     wiki_force_logout,
 )
@@ -105,6 +107,10 @@ if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 if 'notificacoes_lidas' not in st.session_state:
     st.session_state['notificacoes_lidas'] = []
+
+# Logout explícito: evita que o cookie restaure a sessão logo após st.session_state.clear()
+if process_forced_logout_from_url():
+    st.rerun()
 
 # Restaura login via cookie do streamlit-authenticator (F5 / nova aba)
 if not st.session_state.get("autenticado"):
@@ -494,7 +500,7 @@ def tela_login() -> None:
 def tela_home() -> None:
 
     render_global_notifications_listener()
-    wiki_theme_apply_authenticated()
+    wiki_theme_apply_authenticated(show_sidebar_logout=False)
 
     # --- DADOS DO USUÁRIO ---
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
@@ -557,12 +563,8 @@ def tela_home() -> None:
 
     st.sidebar.divider()
 
-    # --- BOTÃO DE SAIR (SEMPRE POR ÚLTIMO NA SIDEBAR) ---
-    if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True, type="secondary"):
-        registrar_log_auditoria(usuario_id, "LOGOUT", "Usuário saiu do sistema.")
-        wiki_force_logout()
-        st.session_state.clear()
-        st.rerun()
+    # --- BOTÃO DE SAIR (por último na Home; nas outras páginas: wiki_theme_apply_authenticated) ---
+    render_wiki_sidebar_logout_button()
 
     # ==========================================
     # --- ÁREA PRINCIPAL DA TELA (CONTEÚDO) ---

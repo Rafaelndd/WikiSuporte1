@@ -17,6 +17,8 @@ from typing import Final
 import streamlit as st
 import streamlit.components.v1 as components
 
+from services.wiki_authenticator import render_wiki_sidebar_logout_button
+
 # Chave da escolha do utilizador (claro / escuro)
 SESSION_THEME_KEY: Final[str] = "ws_streamlit_theme"
 # Guarda o valor já processado nesta sessão para detetar mudança no rádio
@@ -205,11 +207,15 @@ def render_theme_sidebar_controls() -> None:
             st.session_state[_SESSION_THEME_SNAPSHOT_KEY] = current
 
 
-def wiki_theme_apply_authenticated() -> None:
+def wiki_theme_apply_authenticated(*, show_sidebar_logout: bool = True) -> None:
     """
     Aplica tema para sessões autenticadas: CSS, ``data-theme`` e controlo na sidebar.
 
     Deve ser chamado depois de ``st.set_page_config`` e da verificação de login.
+
+    ``show_sidebar_logout=False`` na Home: o ``app.py`` desenha o utilizador/ponto antes
+    e chama ``render_wiki_sidebar_logout_button()`` por último. Nas demais páginas,
+    deixe o padrão ``True`` para o Sair aparecer após o tema.
     """
     if not st.session_state.get("autenticado"):
         return
@@ -218,6 +224,9 @@ def wiki_theme_apply_authenticated() -> None:
     inject_theme_markdown_css(theme)
     inject_parent_data_theme_script(theme)
     render_theme_sidebar_controls()
+    if show_sidebar_logout:
+        st.sidebar.divider()
+        render_wiki_sidebar_logout_button()
 
 
 def wiki_theme_apply_login_page() -> None:
