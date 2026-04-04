@@ -1,1 +1,1 @@
-"""Núcleo puro (regras de negócio sem I/O)."""
+"""Núcleo puro: motores e regras de negócio sem I/O."""

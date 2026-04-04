@@ -11,9 +11,12 @@ import pandas as pd
 import streamlit as st
 
 import cadastro_usuarios as cu
+from modules.database import get_connection
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+
+from app.services.penalidades_service import processar_penalidades_contribuicao
 
 st.set_page_config(page_title="WikiSuporte - Utilizadores", page_icon="👥", layout="wide")
 
@@ -66,7 +69,9 @@ else:
     st.subheader("Utilizadores cadastrados")
     st.dataframe(exibir, use_container_width=True, hide_index=True)
 
-tab_novo, tab_editar = st.tabs(["➕ Novo utilizador", "✏️ Editar / inativar"])
+tab_novo, tab_editar, tab_fechamento = st.tabs(
+    ["➕ Novo utilizador", "✏️ Editar / inativar", "📅 Fechamento Semanal"]
+)
 
 with tab_novo:
     st.markdown("#### Cadastrar novo utilizador")
@@ -203,3 +208,39 @@ with tab_editar:
                     st.rerun()
                 else:
                     st.error(msg)
+
+with tab_fechamento:
+    st.markdown("### Rotinas do sistema")
+    st.info(
+        "Esta rotina avalia as contribuições da semana e aplica as regras de XP. "
+        "O processo é seguro e **não duplicará descontos** se for executada mais de uma vez "
+        "(chaves idempotentes por utilizador e semana)."
+    )
+    st.caption(
+        "Apenas utilizadores **analistas** ativos entram na avaliação. Quem está em **férias** ou "
+        "**atendimento externo** é ignorado."
+    )
+
+    if st.button("Rodar Fechamento de Penalidades", type="primary", key="btn_penalidades"):
+        try:
+            engine = get_connection()
+            with st.spinner("Processando penalidades..."):
+                with engine.begin() as conn:
+                    res = processar_penalidades_contribuicao(conn)
+            st.success(
+                "Fechamento concluído.\n\n"
+                f"- **Analistas avaliados (não isentos):** {res['processados']}\n"
+                f"- **Isentos (férias / externo):** {res['isentos']}\n"
+                f"- **Novas penalidades gravadas:** {res['penalizados']}\n"
+                f"- **Já existiam nesta semana (sem novo desconto):** {res['penalidades_ja_existiam']}\n"
+                f"- **Sem penalidade aplicável (motor):** {res['sem_penalidade_motor']}\n"
+                f"- **Total na lista (analistas ativos):** {res['usuarios_listados']}"
+            )
+        except Exception as ex:
+            logging.exception("processar_penalidades_contribuicao painel admin")
+            st.error(
+                "Não foi possível concluir o fechamento. Verifique a ligação ao PostgreSQL e se as "
+                "migrações de `contribution_scoring_rules`, `user_xp_events` e colunas de "
+                "`base_conhecimento` estão aplicadas.\n\n"
+                f"Detalhe: {ex}"
+            )

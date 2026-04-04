@@ -1,5 +1,9 @@
 """
-Rotina de penalidades por contribuição (§11): isenções, métricas reais e eventos idempotentes.
+Rotina de penalidades por contribuição (§11 em docs/regras_contribuicao.md): isenções, métricas
+reais e eventos idempotentes em `user_xp_events`.
+
+Requer migrações: `contribution_scoring_rules` (colunas de penalidade), `user_xp_events`,
+colunas em `base_conhecimento` quando aplicável.
 """
 
 from __future__ import annotations
