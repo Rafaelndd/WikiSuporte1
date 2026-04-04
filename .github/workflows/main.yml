@@ -37,7 +37,15 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Ruff (pasta tests/)
-        run: python -m ruff check tests
+        run: |
+          set -euxo pipefail
+          python -m ruff check tests --fix
+          if ! git diff --quiet -- tests/; then
+            echo "::error::Correções automáticas do Ruff pendentes em tests/. Execute no repositório:"
+            echo "  python -m ruff check tests --fix && git add tests && git commit -m \"style(tests): ruff check --fix\""
+            git diff -- tests/
+            exit 1
+          fi
 
       - name: Pytest
         run: python -m pytest tests -q
