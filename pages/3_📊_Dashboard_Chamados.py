@@ -69,7 +69,7 @@ logging.info("--- Aplicação iniciada e logs configurados  ---")
 try:
     from modules.auditoria import registrar_log_auditoria
 except ImportError:
-    # Fallback caso o ficheiro não exista ainda
+    # Fallback caso o arquivo não exista ainda
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
 # ==========================================
@@ -1290,7 +1290,7 @@ with aba5:
         else:
             multi = multi.sort_values("releases_distintos", ascending=False).head(50)
             st.dataframe(multi, hide_index=True, use_container_width=True)
-            st.caption("Origem: **release_itens** — quantas notas de versão distintas citam o chamado.")
+            st.caption("Origem: **release_itens** — quantos itens de Release da versão distintos citam o chamado.")
 
 # ------------------------------------------
 # ABA 6: FILA ABERTA + RELEASES / REINCIDÊNCIA

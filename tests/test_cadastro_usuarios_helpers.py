@@ -35,10 +35,10 @@ def test_atualizar_usuario_senha_vazia_string():
     assert not ok
 
 
-def test_slug_para_nome_ficheiro_perfil():
-    assert cu.slug_para_nome_ficheiro_perfil("maria.silva", 1) == "maria.silva"
-    assert cu.slug_para_nome_ficheiro_perfil("", 42) == "id42"
-    assert cu.slug_para_nome_ficheiro_perfil("a" * 100, 1).startswith("a")
+def test_slug_para_nome_arquivo_perfil():
+    assert cu.slug_para_nome_arquivo_perfil("maria.silva", 1) == "maria.silva"
+    assert cu.slug_para_nome_arquivo_perfil("", 42) == "id42"
+    assert cu.slug_para_nome_arquivo_perfil("a" * 100, 1).startswith("a")
 
 
 def test_validar_bytes_imagem_perfil_png():

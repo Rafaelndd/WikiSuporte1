@@ -41,7 +41,7 @@ with st.expander("🤔 Como usar esta página?"):
 
 if not pode_gerenciar_release:
     st.error("⛔ Acesso Negado")
-    st.warning("Esta página é exclusiva para utilizadores com perfil **admin**.")
+    st.warning("Esta página é exclusiva para usuários com perfil **admin**.")
 else:
     # -----------------------------
     # 1. Formulário de cadastro

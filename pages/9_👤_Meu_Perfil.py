@@ -1,5 +1,5 @@
 """
-WikiSuporte — Meu perfil: foto e troca de senha (utilizador autenticado).
+WikiSuporte — Meu perfil: foto e troca de senha (usuário autenticado).
 """
 
 from __future__ import annotations
@@ -50,7 +50,9 @@ rel_foto = str(dados.get("caminho_foto_perfil") or "").strip()
 path_foto = (_ROOT / rel_foto.replace("/", os.sep)) if rel_foto else None
 
 st.title("Meu Perfil")
-st.caption("Atualize a sua foto e a palavra-passe. Os dados de nome/login administrativos alteram-se na gestão de utilizadores.")
+st.caption(
+    "Atualize sua foto e sua senha. Nome e login administrativos são alterados na gestão de usuários."
+)
 
 col_foto, col_info = st.columns([1, 2])
 
@@ -82,14 +84,14 @@ with col_info:
 
 st.divider()
 st.subheader("Alterar foto de perfil")
-st.caption("Apenas PNG ou JPEG. Tamanho máximo 2,5 MB. O ficheiro é guardado com nome padronizado.")
+st.caption("Apenas PNG ou JPEG. Tamanho máximo 2,5 MB. O arquivo é salvo com nome padronizado.")
 
 _FOTOS_DIR.mkdir(parents=True, exist_ok=True)
 
 up = st.file_uploader(
     "Escolher imagem",
     type=["png", "jpg", "jpeg"],
-    help="Formatos aceites: .png, .jpg, .jpeg",
+    help="Formatos aceitos: .png, .jpg, .jpeg",
     key="upload_foto_perfil",
 )
 
@@ -99,14 +101,14 @@ if up is not None:
             raw = up.getvalue()
         except Exception as ex:
             logging.exception("getvalue upload")
-            st.error(f"Falha ao ler o ficheiro: {ex}")
+            st.error(f"Falha ao ler o arquivo: {ex}")
         else:
             ok_img, ext_or_err = cu.validar_bytes_imagem_perfil(raw)
             if not ok_img:
                 st.error(ext_or_err)
             else:
                 ext = ext_or_err
-                slug = cu.slug_para_nome_ficheiro_perfil(
+                slug = cu.slug_para_nome_arquivo_perfil(
                     str(dados.get("username") or "") or str(dados.get("nome") or ""),
                     uid,
                 )
@@ -123,7 +125,7 @@ if up is not None:
                     ok_db, msg_db = cu.atualizar_caminho_foto_perfil_usuario(uid, rel_novo)
                 except OSError as ex:
                     logging.exception("gravar foto perfil")
-                    ok_db, msg_db = False, f"Erro ao guardar o ficheiro: {ex}"
+                    ok_db, msg_db = False, f"Erro ao salvar o arquivo: {ex}"
 
                 if ok_db:
                     if (
@@ -146,13 +148,13 @@ if up is not None:
                     st.error(msg_db)
 
 st.divider()
-st.subheader("Alterar palavra-passe")
+st.subheader("Alterar senha")
 
 with st.form("form_trocar_senha"):
     s_atual = st.text_input("Senha atual", type="password")
     s_nova = st.text_input("Nova senha", type="password")
     s_conf = st.text_input("Confirmar nova senha", type="password")
-    sub = st.form_submit_button("Atualizar palavra-passe", type="primary")
+    sub = st.form_submit_button("Atualizar senha", type="primary")
 
     if sub:
         if not (s_atual or "").strip():

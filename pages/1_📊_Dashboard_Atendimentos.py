@@ -54,7 +54,7 @@ logging.info("--- Sistema WikiSuporte - iniciado e logs configurados  ---")
 try:
     from modules.auditoria import registrar_log_auditoria
 except ImportError:
-    # Fallback caso o ficheiro não exista ainda
+    # Fallback caso o arquivo não exista ainda
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão

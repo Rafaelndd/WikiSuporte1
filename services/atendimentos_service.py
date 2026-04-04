@@ -252,7 +252,7 @@ def listar_categorias_atendimento() -> List[str]:
 
 def adicionar_categoria_atendimento(nome_categoria: str, perfil: str) -> Tuple[bool, str]:
     if perfil != "admin":
-        return False, "Somente utilizadores com perfil admin podem adicionar categorias."
+        return False, "Somente usuários com perfil admin podem adicionar categorias."
     nome = str(nome_categoria or "").strip()
     if not nome:
         return False, "Informe o nome da categoria."

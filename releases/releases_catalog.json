@@ -1,12 +1,12 @@
 {
   "releases": [
     {
-      "versao": "v2.1.0",
-      "data_lancamento": "2026-04-02",
-      "como_era": "Versão anterior sem catálogo centralizado de releases na aplicação.",
-      "como_ficou": "Sessão de login mais estável no navegador, nova página de notas de versão e reforço de segurança nos bastidores.",
+      "versao": "v1.0.1",
+      "data_lancamento": "2026-04-04",
+      "como_era": "Ao atualizar a página (F5) ou voltar depois, era comum precisar entrar de novo com usuário e senha. Não havia um lugar único para ver o que mudou no dia a dia.",
+      "como_ficou": "Login mais estável no navegador (sessão segura); logout automático após 50 minutos de inatividade. Nova página **Release da versão** com o que importa para a usabilidade; quando houver mudanças, você é avisado na Home.",
       "dias_notificacao": 14,
-      "notificacao_ate": "2026-04-15"
+      "notificacao_ate": "2026-04-17"
     }
   ]
 }
