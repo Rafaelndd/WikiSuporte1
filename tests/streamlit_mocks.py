@@ -138,20 +138,26 @@ def install_streamlit_stub(session_state: dict | None = None) -> MagicMock:
     st.spinner = MagicMock()
     st.progress = MagicMock()
 
-    comp = MagicMock()
-    # ``streamlit.components.v1`` tem de ser um módulo real: pacotes como
-    # ``extra_streamlit_components`` fazem ``from streamlit.components.v1.components import CustomComponent``.
-    # Um MagicMock em ``sys.modules["streamlit.components.v1"]`` não expõe o submódulo ``.components``.
+    # ``extra_streamlit_components`` faz ``from streamlit.components.v1.components import CustomComponent``.
+    # É preciso cadeia de *pacotes* com ``__path__``; MagicMock em ``streamlit.components`` faz o importlib
+    # dizer que ``v1`` não é um pacote.
+    comp = types.ModuleType("streamlit.components")
+    comp.__path__ = []
     v1 = types.ModuleType("streamlit.components.v1")
+    v1.__path__ = []
     v1.html = MagicMock()
+    # TabBar e outros em ``extra_streamlit_components`` usam ``declare_component``.
+    v1.declare_component = MagicMock(return_value=MagicMock())
     v1_components = types.ModuleType("streamlit.components.v1.components")
     v1_components.CustomComponent = MagicMock()
-    sys.modules["streamlit.components.v1.components"] = v1_components
+    v1.components = v1_components
     comp.v1 = v1
+    sys.modules["streamlit.components.v1.components"] = v1_components
 
     sys.modules["streamlit"] = st
     sys.modules["streamlit.components"] = comp
     sys.modules["streamlit.components.v1"] = v1
+    st.components = comp
     return st
 
 
