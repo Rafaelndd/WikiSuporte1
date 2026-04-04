@@ -25,10 +25,11 @@ import re
 import sys
 
 import bcrypt
+import pandas as pd
 from sqlalchemy import text
 
 from modules.database import get_connection
-from services.usuario_modelo import defaults_novo_usuario
+from services.usuario_modelo import defaults_novo_usuario, normalizar_username
 
 
 def validar_senha_forte(senha: str) -> tuple[bool, str]:
@@ -179,6 +180,126 @@ def atualizar_usuario(
         return True, f"Utilizador '{nome}' atualizado ({', '.join(partes)})."
     except Exception as e:
         return False, f"Erro ao atualizar: {e}"
+
+
+def listar_usuarios_admin() -> tuple[bool, str, pd.DataFrame | None]:
+    """
+    Lista utilizadores para o painel admin (sem `password_hash`).
+    Retorna (sucesso, mensagem_erro_ou_vazia, DataFrame|None).
+    """
+    sql = text(
+        """
+        SELECT
+            id,
+            nome,
+            COALESCE(username, '') AS username,
+            perfil,
+            COALESCE(ramal, '') AS ramal,
+            COALESCE(ativo, TRUE) AS ativo,
+            COALESCE(em_ferias, FALSE) AS em_ferias,
+            COALESCE(em_atendimento_externo, FALSE) AS em_atendimento_externo
+        FROM usuarios
+        ORDER BY nome
+        """
+    )
+    try:
+        engine = get_connection()
+        df = pd.read_sql(sql, engine)
+        return True, "", df
+    except Exception as e:
+        return False, f"Falha ao consultar utilizadores: {e}", None
+
+
+def atualizar_usuario_painel(
+    usuario_id: int,
+    nome: str,
+    username: str,
+    ramal: str,
+    perfil: str,
+    ativo: bool,
+    em_ferias: bool,
+    em_atendimento_externo: bool,
+    nova_senha: str | None = None,
+) -> tuple[bool, str]:
+    """
+    Atualiza campos operacionais e opcionalmente a senha (hash bcrypt). Chave: `id`.
+    """
+    if usuario_id <= 0:
+        return False, "ID de utilizador inválido."
+
+    nome_db = (nome or "").strip()
+    if not nome_db:
+        return False, "Nome é obrigatório."
+
+    user_norm = normalizar_username(username)
+    perfil_db = mapear_perfil_cli(perfil)
+    canon = perfil_db.lower()
+    if canon not in ("admin", "analista"):
+        return False, "Perfil inválido: use apenas admin ou analista."
+
+    sets = [
+        "nome = :nome",
+        "username = :username",
+        "ramal = :ramal",
+        "perfil = :perfil",
+        "ativo = :ativo",
+        "em_ferias = :ferias",
+        "em_atendimento_externo = :ext",
+    ]
+    params: dict = {
+        "id": usuario_id,
+        "nome": nome_db[:150],
+        "username": user_norm[:150] if user_norm else None,
+        "ramal": (ramal or "")[:20],
+        "perfil": canon,
+        "ativo": bool(ativo),
+        "ferias": bool(em_ferias),
+        "ext": bool(em_atendimento_externo),
+    }
+
+    if nova_senha is not None and str(nova_senha).strip() != "":
+        valida, msg = validar_senha_forte(str(nova_senha).strip())
+        if not valida:
+            return False, msg
+        salt = bcrypt.gensalt()
+        params["h"] = bcrypt.hashpw(str(nova_senha).strip().encode("utf-8"), salt).decode(
+            "utf-8"
+        )
+        sets.append("password_hash = :h")
+
+    try:
+        engine = get_connection()
+        sql = text(f"UPDATE usuarios SET {', '.join(sets)} WHERE id = :id")
+        with engine.begin() as conn:
+            res = conn.execute(sql, params)
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Utilizador não encontrado ou ID inválido."
+        return True, "Utilizador atualizado com sucesso."
+    except Exception as e:
+        err = str(e)
+        if "UniqueViolation" in type(e).__name__ or "unique" in err.lower():
+            err += " Verifique se nome ou username já estão em uso."
+        return False, f"Erro ao atualizar utilizador: {err}"
+
+
+def inativar_usuario_por_id(usuario_id: int) -> tuple[bool, str]:
+    """Soft delete: apenas `ativo = FALSE` (preserva histórico)."""
+    if usuario_id <= 0:
+        return False, "ID de utilizador inválido."
+    try:
+        engine = get_connection()
+        with engine.begin() as conn:
+            res = conn.execute(
+                text("UPDATE usuarios SET ativo = FALSE WHERE id = :id"),
+                {"id": usuario_id},
+            )
+            n = res.rowcount if res is not None else 0
+        if not n:
+            return False, "Utilizador não encontrado."
+        return True, "Utilizador inativado (mantido no histórico)."
+    except Exception as e:
+        return False, f"Erro ao inativar utilizador: {e}"
 
 
 def _ler_senha_cli(args: argparse.Namespace) -> str | None:

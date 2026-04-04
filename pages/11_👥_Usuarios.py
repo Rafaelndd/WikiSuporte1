@@ -1,10 +1,16 @@
 """
-WikiSuporte — Gestão de utilizadores (admin).
-A interface completa será evoluída nas fases seguintes; por ora apenas gate de segurança.
+WikiSuporte — Painel de gestão de utilizadores (apenas perfil admin).
+CRUD com soft delete (`ativo = false`). Sem exposição de `password_hash`.
 """
 
+from __future__ import annotations
+
+import logging
+
+import pandas as pd
 import streamlit as st
 
+import cadastro_usuarios as cu
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
 from services.ui_theme_presets import wiki_theme_apply_authenticated
@@ -22,4 +28,178 @@ if not eh_admin(perfil_raw):
     st.error("⛔ Acesso Negado. Apenas utilizadores com perfil **admin**.")
     st.stop()
 
+meu_id = int(st.session_state.get("usuario_id") or 0)
+
 st.title("Gestão de Usuários")
+st.caption(
+    "Consulta e alteração de utilizadores na base PostgreSQL. "
+    "A exclusão lógica apenas desativa o acesso (`ativo = false`), preservando histórico."
+)
+
+try:
+    ok_lista, err_lista, df_users = cu.listar_usuarios_admin()
+except Exception as ex:
+    logging.exception("listar_usuarios_admin")
+    ok_lista = False
+    err_lista = f"Erro inesperado ao listar utilizadores: {ex}"
+    df_users = None
+
+if not ok_lista or df_users is None:
+    st.error(err_lista or "Não foi possível carregar a lista de utilizadores.")
+    st.info("Verifique a ligação ao PostgreSQL e se a migração da tabela `usuarios` está aplicada.")
+    st.stop()
+
+if df_users.empty:
+    st.warning("Não existem utilizadores na tabela `usuarios`.")
+else:
+    exibir = df_users.copy()
+    exibir.columns = [
+        "ID",
+        "Nome",
+        "Username",
+        "Perfil",
+        "Ramal",
+        "Ativo",
+        "Em férias",
+        "Atend. externo",
+    ]
+    st.subheader("Utilizadores cadastrados")
+    st.dataframe(exibir, use_container_width=True, hide_index=True)
+
+tab_novo, tab_editar = st.tabs(["➕ Novo utilizador", "✏️ Editar / inativar"])
+
+with tab_novo:
+    st.markdown("#### Cadastrar novo utilizador")
+    with st.form("form_novo_usuario", clear_on_submit=True):
+        fn_nome = st.text_input("Nome (exibição)", placeholder="Ex.: Maria Silva")
+        fn_user = st.text_input("Username (login)", placeholder="Ex.: maria.silva")
+        fn_ramal = st.text_input("Ramal", placeholder="Opcional")
+        fn_perfil = st.selectbox("Perfil", ["analista", "admin"], index=0)
+        fn_senha = st.text_input("Senha inicial", type="password")
+        fn_ativo = st.toggle("Utilizador ativo", value=True)
+        fn_ferias = st.toggle("Em férias", value=False)
+        fn_ext = st.toggle("Em atendimento externo", value=False)
+        sub_novo = st.form_submit_button("Guardar novo utilizador", type="primary")
+
+        if sub_novo:
+            if not (fn_nome or "").strip() or not (fn_user or "").strip():
+                st.error("Nome e username são obrigatórios.")
+            elif not (fn_senha or "").strip():
+                st.error("Defina uma senha inicial forte para o novo utilizador.")
+            else:
+                try:
+                    ok, msg = cu.criar_usuario(
+                        (fn_user or "").strip(),
+                        fn_senha.strip(),
+                        fn_perfil,
+                        nome_exibicao=(fn_nome or "").strip(),
+                        ramal=(fn_ramal or "").strip(),
+                        ativo=fn_ativo,
+                        em_ferias=fn_ferias,
+                        em_atendimento_externo=fn_ext,
+                    )
+                except Exception as ex:
+                    logging.exception("criar_usuario painel")
+                    ok, msg = False, f"Erro inesperado: {ex}"
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+with tab_editar:
+    if df_users.empty:
+        st.info("Não há utilizadores para editar.")
+    else:
+        st.markdown("#### Alterar dados do utilizador")
+
+        def _label_uid(uid: int) -> str:
+            r = df_users.loc[df_users["id"] == uid].iloc[0]
+            return f"{int(r['id'])} — {r['nome']}"
+
+        uids = [int(x) for x in df_users["id"].tolist()]
+        sel_id = st.selectbox("Utilizador", uids, format_func=_label_uid, key="sel_edit_uid")
+        row = df_users.loc[df_users["id"] == sel_id].iloc[0]
+
+        with st.form("form_editar_usuario"):
+            fe_nome = st.text_input("Nome", value=str(row["nome"] or ""))
+            fe_user = st.text_input("Username", value=str(row["username"] or ""))
+            fe_ramal = st.text_input("Ramal", value=str(row["ramal"] or ""))
+            perfis = ["analista", "admin"]
+            p = str(row.get("perfil", "analista") or "analista").lower()
+            idx_p = perfis.index(p) if p in perfis else 0
+            fe_perfil = st.selectbox("Perfil", perfis, index=idx_p)
+            fe_senha = st.text_input(
+                "Nova senha (deixe vazio para não alterar)",
+                type="password",
+                help="Só preencha para forçar reposição da senha (política de senha forte).",
+            )
+            fe_ativo = st.toggle(
+                "Utilizador ativo",
+                value=bool(row["ativo"]) if pd.notna(row["ativo"]) else True,
+            )
+            fe_ferias = st.toggle(
+                "Em férias",
+                value=bool(row["em_ferias"]) if pd.notna(row["em_ferias"]) else False,
+            )
+            fe_ext = st.toggle(
+                "Em atendimento externo",
+                value=bool(row["em_atendimento_externo"])
+                if pd.notna(row["em_atendimento_externo"])
+                else False,
+            )
+            sub_ed = st.form_submit_button("Guardar alterações", type="primary")
+
+            if sub_ed:
+                pwd = fe_senha.strip() if (fe_senha or "").strip() else None
+                try:
+                    ok, msg = cu.atualizar_usuario_painel(
+                        usuario_id=int(sel_id),
+                        nome=fe_nome,
+                        username=fe_user,
+                        ramal=fe_ramal,
+                        perfil=fe_perfil,
+                        ativo=fe_ativo,
+                        em_ferias=fe_ferias,
+                        em_atendimento_externo=fe_ext,
+                        nova_senha=pwd,
+                    )
+                except Exception as ex:
+                    logging.exception("atualizar_usuario_painel")
+                    ok, msg = False, f"Erro inesperado: {ex}"
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+        st.divider()
+        st.markdown("#### Inativar utilizador (exclusão lógica)")
+        st.caption("O registo permanece na base (histórico, XP, auditoria). Apenas o acesso é bloqueado.")
+
+        sel_inat = st.selectbox(
+            "Utilizador a inativar",
+            uids,
+            format_func=_label_uid,
+            key="sel_inat_uid",
+        )
+        confirma = st.checkbox(
+            "Confirmo que pretendo inativar este utilizador",
+            key="chk_inat",
+        )
+        if st.button("Inativar acesso", type="primary", key="btn_inat"):
+            if not confirma:
+                st.warning("Marque a confirmação para continuar.")
+            elif int(sel_inat) == meu_id:
+                st.error("Não pode inativar a sua própria sessão.")
+            else:
+                try:
+                    ok, msg = cu.inativar_usuario_por_id(int(sel_inat))
+                except Exception as ex:
+                    logging.exception("inativar_usuario_por_id")
+                    ok, msg = False, f"Erro inesperado: {ex}"
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
