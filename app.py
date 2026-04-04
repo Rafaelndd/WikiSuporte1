@@ -612,19 +612,25 @@ def tela_home() -> None:
                 flex-wrap: wrap;
                 justify-content: center;
                 text-decoration: none;
-                background: #0f172a;
-                padding: 0.2em 0.55em 0.26em;
-                border-radius: 0.45em;
+                background: transparent;
+                padding: 0;
+                border-radius: 0;
                 margin-left: 0.1em;
                 vertical-align: middle;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+                box-shadow: none;
             }
             html[data-theme="dark"] .ws-home-hero a.epsy-home-link {
-                background: #020617;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+                background: transparent;
+                box-shadow: none;
             }
-            .ws-home-hero a.epsy-home-link:hover { background: #1e293b; }
-            html[data-theme="dark"] .ws-home-hero a.epsy-home-link:hover { background: #0f172a; }
+            .ws-home-hero a.epsy-home-link:hover {
+                background: transparent;
+                text-decoration: underline;
+                text-underline-offset: 0.12em;
+            }
+            html[data-theme="dark"] .ws-home-hero a.epsy-home-link:hover {
+                background: transparent;
+            }
             .ws-home-hero .epsy-e-mirror {
                 display: inline-block;
                 color: #ea580c;
@@ -634,8 +640,12 @@ def tela_home() -> None:
             }
             .ws-home-hero .epsy-rest,
             .ws-home-hero .epsy-sistemas {
-                color: #ffffff !important;
+                color: #0f172a !important;
                 font-weight: 700;
+            }
+            html[data-theme="dark"] .ws-home-hero .epsy-rest,
+            html[data-theme="dark"] .ws-home-hero .epsy-sistemas {
+                color: #f1f5f9 !important;
             }
             .ws-home-hero .epsy-sistemas { font-weight: 600; }
             .ws-home-hero .ws-home-tagline {
