@@ -1,7 +1,8 @@
 """
-Cálculo de pontos base (XP) para contribuições aprovadas.
+Cálculo de XP para contribuições: pontos base, multiplicador diário e bônus semanal.
 
-Apenas a parcela base por modalidade e atraso; multiplicadores ficam fora deste módulo.
+- Base: modalidade e atraso (`calcular_pontos_base`).
+- Combo na aprovação: multiplicador sobre a base + sinalização de bônus semanal isolado.
 """
 
 from __future__ import annotations
@@ -17,8 +18,11 @@ __all__ = [
     "ContributionXpConfig",
     "ModalidadeContribuicao",
     "PONTOS_MAXIMO_BASE_EVENTO_ATUAL",
+    "ResultadoXpFinal",
     "StatusContribuicao",
+    "XpMultiplicadoresConfig",
     "calcular_pontos_base",
+    "calcular_xp_final_e_bonus",
 ]
 
 
@@ -40,6 +44,35 @@ class ContributionXpConfig:
     """Parâmetros configuráveis da regra de XP base."""
 
     pontos_evento_passado: int = 125
+
+
+@dataclass(frozen=True, slots=True)
+class XpMultiplicadoresConfig:
+    """
+    Parâmetros do multiplicador diário (Regra 5) e meta de bônus semanal ISO.
+
+    Limiares em 0 desativam a regra correspondente (multiplicador diário ou meta semanal).
+    """
+
+    multiplicador_diario_apos_qtd: int = 3
+    multiplicador_diario_valor: float = 2.0
+    bonus_semanal_meta_qtd: int = 15
+    bonus_semanal_meta_pontos: int = 1000
+
+
+@dataclass(frozen=True, slots=True)
+class ResultadoXpFinal:
+    """
+    Resultado do processamento na aprovação.
+
+    ``pontos_contribuicao`` inclui apenas o multiplicador diário sobre a base.
+    ``pontos_bonus_semanal`` é o valor do prémio semanal quando disparado (não somado
+    automaticamente a ``pontos_contribuicao``).
+    """
+
+    pontos_contribuicao: int
+    bonus_semanal_concedido: bool
+    pontos_bonus_semanal: int
 
 
 def _as_date(val: Union[date, datetime]) -> date:
@@ -116,3 +149,59 @@ def calcular_pontos_base(
         return _pontos_evento_atual_por_atraso(dias)
 
     raise ValueError(f"Modalidade não suportada: {modalidade!r}")
+
+
+def _pontos_apos_multiplicador_diario(
+    pontos_base: int,
+    aprovacoes_hoje: int,
+    cfg: XpMultiplicadoresConfig,
+) -> int:
+    """Aplica multiplicador diário se limiar e valor estiverem ativos."""
+    if cfg.multiplicador_diario_apos_qtd <= 0:
+        return int(pontos_base)
+    if cfg.multiplicador_diario_valor <= 1:
+        return int(pontos_base)
+    if (aprovacoes_hoje + 1) >= cfg.multiplicador_diario_apos_qtd:
+        return int(round(float(pontos_base) * float(cfg.multiplicador_diario_valor)))
+    return int(pontos_base)
+
+
+def _bonus_semanal_disparado(
+    aprovacoes_semana_iso: int,
+    cfg: XpMultiplicadoresConfig,
+) -> tuple[bool, int]:
+    """(concedido, pontos do bônus). Meta 0 desativa o bônus."""
+    if cfg.bonus_semanal_meta_qtd <= 0:
+        return False, 0
+    if (aprovacoes_semana_iso + 1) == cfg.bonus_semanal_meta_qtd:
+        return True, int(cfg.bonus_semanal_meta_pontos)
+    return False, 0
+
+
+def calcular_xp_final_e_bonus(
+    pontos_base: int,
+    aprovacoes_hoje: int,
+    aprovacoes_semana_iso: int,
+    *,
+    config: XpMultiplicadoresConfig | None = None,
+) -> ResultadoXpFinal:
+    """
+    Processa multiplicador diário e sinaliza bônus semanal no momento da aprovação.
+
+    ``aprovacoes_hoje`` / ``aprovacoes_semana_iso`` são contagens **antes** desta
+    aprovação; a função usa ``+ 1`` para refletir o combo atual.
+
+    Multiplicador diário: ativo quando ``(aprovacoes_hoje + 1) >= meta`` e
+    ``multiplicador_diario_valor > 1``, salvo se ``multiplicador_diario_apos_qtd == 0``.
+
+    Bônus semanal: dispara quando ``(aprovacoes_semana_iso + 1) == bonus_semanal_meta_qtd``;
+    os pontos do bônus não entram em ``pontos_contribuicao``.
+    """
+    cfg = config or XpMultiplicadoresConfig()
+    pts = _pontos_apos_multiplicador_diario(pontos_base, aprovacoes_hoje, cfg)
+    concedido, bonus_pts = _bonus_semanal_disparado(aprovacoes_semana_iso, cfg)
+    return ResultadoXpFinal(
+        pontos_contribuicao=pts,
+        bonus_semanal_concedido=concedido,
+        pontos_bonus_semanal=bonus_pts,
+    )

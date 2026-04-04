@@ -10,8 +10,11 @@ from app.core.contribution_xp import (
     PONTOS_MAXIMO_BASE_EVENTO_ATUAL,
     ContributionXpConfig,
     ModalidadeContribuicao,
+    ResultadoXpFinal,
     StatusContribuicao,
+    XpMultiplicadoresConfig,
     calcular_pontos_base,
+    calcular_xp_final_e_bonus,
 )
 
 DATA_O = date(2025, 6, 1)
@@ -161,3 +164,77 @@ def test_modalidade_desconhecida_levanta() -> None:
             DATA_O,
             DATA_O,
         )
+
+
+# --- Multiplicador diário e bônus semanal (Regra 5) ---
+
+
+def test_xp_final_sem_multiplicador_abaixo_meta_diaria() -> None:
+    """2 aprovações hoje + esta = 3ª ainda não: 1+1 < 3."""
+    r = calcular_xp_final_e_bonus(100, aprovacoes_hoje=1, aprovacoes_semana_iso=0)
+    assert r == ResultadoXpFinal(
+        pontos_contribuicao=100,
+        bonus_semanal_concedido=False,
+        pontos_bonus_semanal=0,
+    )
+
+
+def test_xp_final_com_multiplicador_atinge_meta_diaria() -> None:
+    """2 + 1 >= 3 → base × 2."""
+    r = calcular_xp_final_e_bonus(100, aprovacoes_hoje=2, aprovacoes_semana_iso=0)
+    assert r.pontos_contribuicao == 200
+    assert r.bonus_semanal_concedido is False
+    assert r.pontos_bonus_semanal == 0
+
+
+def test_xp_final_bonus_semanal_meta_exata() -> None:
+    """14 + 1 == 15 → bônus isolado; sem multiplicador (0+1 < 3)."""
+    r = calcular_xp_final_e_bonus(50, aprovacoes_hoje=0, aprovacoes_semana_iso=14)
+    assert r.pontos_contribuicao == 50
+    assert r.bonus_semanal_concedido is True
+    assert r.pontos_bonus_semanal == 1000
+
+
+def test_xp_final_config_multiplicador_diario_limite_zero_desliga() -> None:
+    cfg = XpMultiplicadoresConfig(multiplicador_diario_apos_qtd=0)
+    r = calcular_xp_final_e_bonus(
+        100,
+        aprovacoes_hoje=99,
+        aprovacoes_semana_iso=14,
+        config=cfg,
+    )
+    assert r.pontos_contribuicao == 100
+    assert r.bonus_semanal_concedido is True
+    assert r.pontos_bonus_semanal == 1000
+
+
+def test_xp_final_config_multiplicador_valor_um_desliga() -> None:
+    cfg = XpMultiplicadoresConfig(multiplicador_diario_valor=1.0)
+    r = calcular_xp_final_e_bonus(100, aprovacoes_hoje=5, aprovacoes_semana_iso=0, config=cfg)
+    assert r.pontos_contribuicao == 100
+
+
+def test_xp_final_config_bonus_semanal_meta_zero_desliga() -> None:
+    cfg = XpMultiplicadoresConfig(bonus_semanal_meta_qtd=0)
+    r = calcular_xp_final_e_bonus(100, aprovacoes_hoje=2, aprovacoes_semana_iso=14, config=cfg)
+    assert r.pontos_contribuicao == 200
+    assert r.bonus_semanal_concedido is False
+    assert r.pontos_bonus_semanal == 0
+
+
+def test_xp_final_multiplicador_e_bonus_semanal_simultaneos() -> None:
+    r = calcular_xp_final_e_bonus(40, aprovacoes_hoje=2, aprovacoes_semana_iso=14)
+    assert r.pontos_contribuicao == 80
+    assert r.bonus_semanal_concedido is True
+    assert r.pontos_bonus_semanal == 1000
+
+
+def test_xp_final_bonus_semanal_nao_dispara_um_antes_da_meta() -> None:
+    r = calcular_xp_final_e_bonus(100, aprovacoes_hoje=2, aprovacoes_semana_iso=13)
+    assert r.bonus_semanal_concedido is False
+    assert r.pontos_bonus_semanal == 0
+
+
+def test_xp_final_bonus_semanal_nao_dispara_um_depois_da_meta() -> None:
+    r = calcular_xp_final_e_bonus(100, aprovacoes_hoje=2, aprovacoes_semana_iso=15)
+    assert r.bonus_semanal_concedido is False
