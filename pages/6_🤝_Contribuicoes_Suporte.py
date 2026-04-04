@@ -2,6 +2,7 @@
 Essa page foi renomeada para 6_🤝_Contribuicoes_Suporte.py para refletir melhor o conteúdo e evitar confusão com a page de dashboard de tickets. O código da antiga page 5_📊_Dashboard_Tickets_EPSY.py foi mantido aqui para referência, mas a nova page 6 terá foco total em contribuições, avaliações e fila de revisão, enquanto a antiga page 5 continuará sendo o dashboard analítico dos tickets EPSY.
 
 """
+import html
 import zipfile
 import streamlit as st
 import pandas as pd
@@ -32,6 +33,7 @@ from modules.utils import inicializar_usuario, calcular_patente
 from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.ui_realtime import render_global_notifications_listener, show_gamification_upgrade_card
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.ui_avatar import html_avatar_perfil_circular
 
 load_dotenv()
 
@@ -208,12 +210,7 @@ def carregar_manuais():
 # ==========================================
 st.title("🧠 Central de Conhecimento")
 st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e conhecimento colaborativo centralizados em um só lugar!")
-with st.expander("🤔 Como usar esta página?"):
-    st.markdown(
-        "**Ranking** — XP por contribuições (regra de prazo nos registros). **Assistente** — perguntas com IA sobre a base. "
-        "**Acervo** — Manuais/ Wikis. **Adicionar** — envie texto/arquivo para revisão. **Explorar** — busca na base. "
-        "Coordenador têm **Fila de avaliação**; demais perfis não tem acesso a essa aba."
-    )
+
 
 # ==========================================
 # 4. DEFINIÇÃO DAS ABAS (Nova Ordem de UX)
@@ -247,46 +244,92 @@ else:
 # ==========================================
 with aba_ranking:
     st.subheader("📊 Ranking de Especialistas")
-    st.info("💡 **Regra de Agilidade:** Registros em até 7 dias valem 100 XP. Acima de 21 dias valem 0 XP.")
 
     # Importamos a lista de níveis para o sumário visual (expander)
-    from modules.utils import NIVEIS_CONHECIMENTO, calcular_patente
+    from modules.utils import NIVEIS_CONHECIMENTO
+
+    def _nome_ranking_com_status(row: pd.Series) -> str:
+        nome = str(row.get("Analista") or "").strip()
+        if bool(row.get("em_ferias")):
+            nome += " 🏖️"
+        if bool(row.get("em_atendimento_externo")):
+            nome += " 🚗"
+        return nome
 
     with engine.connect() as conn:
-        # A query agora busca diretamente as colunas xp_total e medalha_atual do banco
         query_ranking = text("""
-            SELECT u.nome AS "Analista", 
-                   COUNT(b.id) AS "Dicas Aprovadas", 
+            SELECT u.nome AS "Analista",
+                   COUNT(b.id) AS "Dicas Aprovadas",
                    u.xp_total AS "XP Acumulado",
-                   u.medalha_atual AS "Patente"
+                   u.medalha_atual AS "Patente",
+                   NULLIF(TRIM(COALESCE(u.caminho_foto_perfil, '')), '') AS caminho_foto_perfil,
+                   COALESCE(u.em_ferias, FALSE) AS em_ferias,
+                   COALESCE(u.em_atendimento_externo, FALSE) AS em_atendimento_externo
             FROM usuarios u
-            LEFT JOIN base_conhecimento b ON b.id_analista_autor = u.id 
-                 AND b.origem = 'CONHECIMENTO_SUPORTE' 
+            LEFT JOIN base_conhecimento b ON b.id_analista_autor = u.id
+                 AND b.origem = 'CONHECIMENTO_SUPORTE'
                  AND b.status = 'APROVADO'
             WHERE u.xp_total > 0
-            GROUP BY u.nome, u.xp_total, u.medalha_atual
+            GROUP BY u.id, u.nome, u.xp_total, u.medalha_atual,
+                     NULLIF(TRIM(COALESCE(u.caminho_foto_perfil, '')), ''),
+                     COALESCE(u.em_ferias, FALSE),
+                     COALESCE(u.em_atendimento_externo, FALSE)
             ORDER BY u.xp_total DESC
         """)
         df_ranking = pd.read_sql(query_ranking, conn)
-        
-        if not df_ranking.empty:
-            # 1. Adicionamos o ÍCONE dinâmico baseado no XP (vido do utils) 
-            # Isso garante que o emoji mude conforme o XP que o trigger calculou
-            df_ranking.insert(0, "Ícone", df_ranking["XP Acumulado"].apply(lambda x: calcular_patente(x)["icon"]))
 
-            # 2. Exibição da Tabela Principal
+        if not df_ranking.empty:
+            df_ranking.insert(0, "Ícone", df_ranking["XP Acumulado"].apply(lambda x: calcular_patente(x)["icon"]))
+            df_ranking["Analista"] = df_ranking.apply(_nome_ranking_com_status, axis=1)
+
+            trofeus = ("🥇", "🥈", "🥉")
+            st.markdown("##### Pódio")
+            cols_podio = st.columns(3)
+            top_n = min(3, len(df_ranking))
+            for i in range(3):
+                with cols_podio[i]:
+                    if i < top_n:
+                        r = df_ranking.iloc[i]
+                        caminho = r.get("caminho_foto_perfil")
+                        if caminho is None or (isinstance(caminho, float) and pd.isna(caminho)):
+                            caminho = None
+                        else:
+                            caminho = str(caminho).strip() or None
+                        st.markdown(
+                            html_avatar_perfil_circular(caminho, tamanho_px=100),
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(
+                            f"<div style='text-align:center;font-size:2.1rem;line-height:1.2;'>{trofeus[i]}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(
+                            f"<div style='text-align:center;font-weight:600'>"
+                            f"{html.escape(str(r['Analista']))}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        st.caption(str(r.get("Patente") or ""))
+                        st.caption(
+                            f"{int(r['XP Acumulado'])} XP · {int(r['Dicas Aprovadas'])} contribuições"
+                        )
+
+            st.divider()
+
+            df_tabela = df_ranking[
+                ["Ícone", "Analista", "Dicas Aprovadas", "XP Acumulado", "Patente"]
+            ].copy()
+
             st.dataframe(
-                df_ranking, 
-                use_container_width='strech', 
+                df_tabela,
+                width="stretch",
                 hide_index=True,
                 column_config={
-                    "Ícone": st.column_config.TextColumn("徽", width="small"),
+                    "Ícone": st.column_config.TextColumn("Ícone", width="small"),
                     "XP Acumulado": st.column_config.NumberColumn("XP Total", format="%d ⚡"),
-                    "Dicas Aprovadas": st.column_config.NumberColumn("Contribuições", width="medium")
-                }
+                    "Dicas Aprovadas": st.column_config.NumberColumn("Contribuições", width="medium"),
+                },
             )
 
-            # 3. Sumário de Progressão (Para os analistas saberem o que falta)
             with st.expander("🔍 Guia de Patentes (De 1k a 1M XP)"):
                 cols = st.columns(5)
                 # Mostra a jornada do conhecimento

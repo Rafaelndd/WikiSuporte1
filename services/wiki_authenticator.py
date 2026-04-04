@@ -193,7 +193,7 @@ def sync_wiki_session_from_stauth() -> None:
     row = fetch_user_row_by_login_key(str(uname))
     if not row:
         logging.warning(
-            "sync_wiki_session_from_stauth: utilizador '%s' autenticou no stauth mas não há "
+            "sync_wiki_session_from_stauth: usuário '%s' autenticou no stauth mas não há "
             "linha ativa em `usuarios` (nome/username/ativo). Verifique coluna `ativo` e o login.",
             uname,
         )

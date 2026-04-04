@@ -8,7 +8,7 @@ Modo terminal (não interativo):
   python cadastro_usuarios.py meu.login --senha 'MinhaSenh@1'
   echo minhasenha | python cadastro_usuarios.py meu.login --senha-stdin
 
-Atualizar utilizador existente (perfil e/ou senha — não duplica `nome`):
+Atualizar usuário existente (perfil e/ou senha — não duplica `nome`):
   python cadastro_usuarios.py admin --atualizar --perfil admin
   python cadastro_usuarios.py admin --atualizar --senha 'NovaSenh@1'
   python cadastro_usuarios.py admin --atualizar --senha '...' --perfil analista
@@ -95,7 +95,7 @@ def criar_usuario(
         username if (nome_exibicao or "").strip() else None,
     )
     if not nome_db:
-        return False, "Nome de utilizador vazio."
+        return False, "Nome de usuário vazio."
 
     try:
         engine = get_connection()
@@ -138,12 +138,12 @@ def atualizar_usuario(
     perfil: str | None,
 ) -> tuple[bool, str]:
     """
-    Atualiza `password_hash` e/ou `perfil` do utilizador com `nome` = username.
+    Atualiza `password_hash` e/ou `perfil` do usuário com `nome` = username.
     `senha` ou `perfil` deve estar definido (pelo menos um).
     """
     nome = username.strip()
     if not nome:
-        return False, "Nome de utilizador vazio."
+        return False, "Nome de usuário vazio."
 
     sets: list[str] = []
     params: dict[str, str] = {"nome": nome}
@@ -171,20 +171,20 @@ def atualizar_usuario(
             res = conn.execute(sql, params)
             n = res.rowcount if res is not None else 0
         if not n:
-            return False, f"Utilizador '{nome}' não encontrado em `usuarios`."
+            return False, f"Usuário '{nome}' não encontrado em `usuarios`."
         partes = []
         if "h" in params:
             partes.append("senha")
         if "p" in params:
             partes.append(f"perfil='{params['p']}'")
-        return True, f"Utilizador '{nome}' atualizado ({', '.join(partes)})."
+        return True, f"Usuário '{nome}' atualizado ({', '.join(partes)})."
     except Exception as e:
         return False, f"Erro ao atualizar: {e}"
 
 
 def listar_usuarios_admin() -> tuple[bool, str, pd.DataFrame | None]:
     """
-    Lista utilizadores para o painel admin (sem `password_hash`).
+    Lista usuários para o painel admin (sem `password_hash`).
     Retorna (sucesso, mensagem_erro_ou_vazia, DataFrame|None).
     """
     sql = text(
@@ -207,7 +207,7 @@ def listar_usuarios_admin() -> tuple[bool, str, pd.DataFrame | None]:
         df = pd.read_sql(sql, engine)
         return True, "", df
     except Exception as e:
-        return False, f"Falha ao consultar utilizadores: {e}", None
+        return False, f"Falha ao consultar usuários: {e}", None
 
 
 def atualizar_usuario_painel(
@@ -225,7 +225,7 @@ def atualizar_usuario_painel(
     Atualiza campos operacionais e opcionalmente a senha (hash bcrypt). Chave: `id`.
     """
     if usuario_id <= 0:
-        return False, "ID de utilizador inválido."
+        return False, "ID de usuário inválido."
 
     nome_db = (nome or "").strip()
     if not nome_db:
@@ -274,19 +274,19 @@ def atualizar_usuario_painel(
             res = conn.execute(sql, params)
             n = res.rowcount if res is not None else 0
         if not n:
-            return False, "Utilizador não encontrado ou ID inválido."
-        return True, "Utilizador atualizado com sucesso."
+            return False, "Usuário não encontrado ou ID inválido."
+        return True, "Usuário atualizado com sucesso."
     except Exception as e:
         err = str(e)
         if "UniqueViolation" in type(e).__name__ or "unique" in err.lower():
             err += " Verifique se nome ou username já estão em uso."
-        return False, f"Erro ao atualizar utilizador: {err}"
+        return False, f"Erro ao atualizar usuário: {err}"
 
 
 def inativar_usuario_por_id(usuario_id: int) -> tuple[bool, str]:
     """Soft delete: apenas `ativo = FALSE` (preserva histórico)."""
     if usuario_id <= 0:
-        return False, "ID de utilizador inválido."
+        return False, "ID de usuário inválido."
     try:
         engine = get_connection()
         with engine.begin() as conn:
@@ -296,19 +296,19 @@ def inativar_usuario_por_id(usuario_id: int) -> tuple[bool, str]:
             )
             n = res.rowcount if res is not None else 0
         if not n:
-            return False, "Utilizador não encontrado."
-        return True, "Utilizador inativado (mantido no histórico)."
+            return False, "Usuário não encontrado."
+        return True, "Usuário inativado (mantido no histórico)."
     except Exception as e:
-        return False, f"Erro ao inativar utilizador: {e}"
+        return False, f"Erro ao inativar usuário: {e}"
 
 
-# --- Meu Perfil (utilizador autenticado): leitura segura, foto e troca de senha ---
+# --- Meu Perfil (usuário autenticado): leitura segura, foto e troca de senha ---
 
 _MAX_BYTES_FOTO_PERFIL = 2_500_000  # ~2,5 MB
 
 
-def slug_para_nome_ficheiro_perfil(username: str, usuario_id: int) -> str:
-    """Segmento seguro para o nome do ficheiro (sem path traversal)."""
+def slug_para_nome_arquivo_perfil(username: str, usuario_id: int) -> str:
+    """Segmento seguro para o nome do arquivo (sem path traversal)."""
     raw = (username or "").strip().lower()
     raw = re.sub(r"[^a-z0-9._-]+", "_", raw, flags=re.IGNORECASE)
     raw = raw.strip("._")
@@ -323,9 +323,9 @@ def validar_bytes_imagem_perfil(data: bytes) -> tuple[bool, str]:
     Em caso de sucesso devolve (True, '.png'|'.jpg'); em falha (False, mensagem).
     """
     if not data:
-        return False, "Ficheiro vazio."
+        return False, "Arquivo vazio."
     if len(data) > _MAX_BYTES_FOTO_PERFIL:
-        return False, "Ficheiro demasiado grande (máx. 2,5 MB)."
+        return False, "Arquivo muito grande (máx. 2,5 MB)."
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return True, ".png"
     if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
@@ -335,7 +335,7 @@ def validar_bytes_imagem_perfil(data: bytes) -> tuple[bool, str]:
 
 def obter_dados_perfil_meu_perfil(usuario_id: int) -> tuple[bool, str, dict | None]:
     """
-    Dados do próprio utilizador para a página «Meu Perfil» (sem expor `password_hash`).
+    Dados do próprio usuário para a página «Meu Perfil» (sem expor `password_hash`).
     """
     if usuario_id <= 0:
         return False, "Sessão inválida.", None
@@ -382,7 +382,7 @@ def atualizar_caminho_foto_perfil_usuario(
             )
             n = res.rowcount if res is not None else 0
         if not n:
-            return False, "Não foi possível atualizar a foto (utilizador inexistente)."
+            return False, "Não foi possível atualizar a foto (usuário inexistente)."
         return True, "Caminho da foto atualizado."
     except Exception as e:
         return False, f"Erro ao gravar foto na base: {e}"
@@ -430,7 +430,7 @@ def trocar_senha_meu_perfil(
                 {"id": usuario_id},
             ).fetchone()
             if not row:
-                return False, "Utilizador não encontrado."
+                return False, "Usuário não encontrado."
             stored = _password_hash_bytes(row[0])
             if not stored:
                 return False, "Conta sem senha configurada; contacte um administrador."
@@ -482,7 +482,7 @@ def _main_cli() -> int:
         "--senha",
         "-s",
         metavar="TEXTO",
-        help="Senha forte (evite em shells partilhados — fica no histórico)",
+        help="Senha forte (evite em shells compartilhados — fica no histórico)",
     )
     g.add_argument(
         "--senha-stdin",
@@ -499,7 +499,7 @@ def _main_cli() -> int:
         "--atualizar",
         "-u",
         action="store_true",
-        help="Atualiza utilizador existente (use com --perfil e/ou --senha; não insere linha nova)",
+        help="Atualiza usuário existente (use com --perfil e/ou --senha; não insere linha nova)",
     )
     args = parser.parse_args()
 

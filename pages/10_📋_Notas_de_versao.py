@@ -1,5 +1,5 @@
 """
-Página interna: release da versão do WikiSuporte (utilizadores autenticados).
+Página interna: Release da versão do WikiSuporte (usuários autenticados).
 
 Conteúdo principal: catálogo ``releases/releases_catalog.json`` (``utils.release_manager``).
 O Markdown ``releases/WIKISUPORTE_NOTAS_DE_VERSAO.md`` permanece como anexo opcional.
@@ -107,7 +107,7 @@ st.markdown(
 st.divider()
 
 if not catalog:
-    st.warning("Ainda não há releases registadas no sistema.")
+    st.warning("Ainda não há releases registradas no sistema.")
 else:
     st.subheader("Histórico de releases", anchor=False)
     st.caption("Do mais recente para o mais antigo. Abra cada versão para ver o comparativo **Como era** / **Como ficou**.")

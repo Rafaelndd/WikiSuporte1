@@ -1,5 +1,5 @@
 """
-Modelo canônico do utilizador WikiSuporte (tabela `public.usuarios`).
+Modelo canônico do usuário WikiSuporte (tabela `public.usuarios`).
 
 Mapeamento colunas ↔ conceito:
 - nome: nome de exibição / identificador legado (único no sistema).
@@ -24,7 +24,7 @@ PERFIL_ANALISTA = "analista"
 
 @dataclass(frozen=True)
 class UsuarioPersistencia:
-    """Campos esperados para criar/atualizar um utilizador no novo modelo."""
+    """Campos esperados para criar/atualizar um usuário no novo modelo."""
 
     nome: str
     username: str

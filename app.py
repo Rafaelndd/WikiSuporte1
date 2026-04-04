@@ -21,7 +21,6 @@ import pandas as pd
 import requests
 import logging
 import json
-import base64
 import tempfile 
 import openmeteo_requests
 import requests_cache
@@ -51,6 +50,7 @@ from services.wiki_authenticator import (
     wiki_force_logout,
 )
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.ui_avatar import html_avatar_perfil_circular
 from services.release_notes_banner import render_home_release_nudge
 
 #======================================================================================================================#
@@ -84,7 +84,7 @@ logging.info("--- Aplicação iniciada e logs configurados ---")
 try:
     from modules.auditoria import registrar_log_auditoria
 except ImportError:
-    # Fallback caso o ficheiro não exista ainda
+    # Fallback caso o arquivo não exista ainda
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
@@ -316,34 +316,6 @@ def obter_kpis_home(usuario_id):
         logging.exception("Erro crítico em obter_kpis_home para usuario_id=%s: %s", usuario_id, e)
 
     return kpis
-
-
-def _html_avatar_perfil_circular(caminho: str | None, tamanho_px: int = 76) -> str:
-    """Retorna <img> em data-URI para uso em st.markdown, ou string vazia."""
-    if not caminho:
-        return ""
-    p = Path(caminho)
-    if not p.is_file():
-        return ""
-    try:
-        raw = p.read_bytes()
-    except OSError:
-        return ""
-    b64 = base64.b64encode(raw).decode("ascii")
-    ext = p.suffix.lower()
-    mime = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-    }.get(ext, "image/jpeg")
-    return (
-        f'<img src="data:{mime};base64,{b64}" alt="Foto de perfil" '
-        f'style="width:{tamanho_px}px;height:{tamanho_px}px;border-radius:50%;'
-        f'object-fit:cover;border:3px solid #1e5fbf;display:block;margin:0 auto;" />'
-    )
-
 
 
 def obter_saudacao() -> str:
@@ -845,36 +817,23 @@ def renderizar_dashboard_conquistas(kpis):
     nivel_txt = str(kpis.get("nivel_atual", "Iniciante 🌱"))
     partes_nivel = nivel_txt.split()
     icone_nivel = partes_nivel[-1] if partes_nivel else "🌱"
-    avatar_html = _html_avatar_perfil_circular(kpis.get("caminho_foto_perfil"))
+    avatar_html = html_avatar_perfil_circular(kpis.get("caminho_foto_perfil"))
 
     # 1. CABEÇALHO DE NÍVEL E PROGRESSO (UX Gamificada)
     with st.container(border=True):
-        if avatar_html:
-            col_foto, col_rank_icon, col_progress = st.columns([1, 1, 3])
-            with col_foto:
-                st.markdown(avatar_html, unsafe_allow_html=True)
-            with col_rank_icon:
-                st.markdown(
-                    f"<h1 style='text-align: center; margin:0;'>{icone_nivel}</h1>",
-                    unsafe_allow_html=True,
-                )
-            with col_progress:
-                st.markdown(f"**Nível Atual:** {nivel_txt}")
-                st.progress(float(kpis.get("progresso_nivel", 0.0)))
-                proximo_xp = 1000 - (int(kpis.get("meu_xp", 0)) % 1000)
-                st.caption(f"✨ Faltam **{proximo_xp} XP** para o próximo nível")
-        else:
-            col_rank_icon, col_progress = st.columns([1, 4])
-            with col_rank_icon:
-                st.markdown(
-                    f"<h1 style='text-align: center; margin:0;'>{icone_nivel}</h1>",
-                    unsafe_allow_html=True,
-                )
-            with col_progress:
-                st.markdown(f"**Nível Atual:** {nivel_txt}")
-                st.progress(float(kpis.get("progresso_nivel", 0.0)))
-                proximo_xp = 1000 - (int(kpis.get("meu_xp", 0)) % 1000)
-                st.caption(f"✨ Faltam **{proximo_xp} XP** para o próximo nível")
+        col_foto, col_rank_icon, col_progress = st.columns([1, 1, 3])
+        with col_foto:
+            st.markdown(avatar_html, unsafe_allow_html=True)
+        with col_rank_icon:
+            st.markdown(
+                f"<h1 style='text-align: center; margin:0;'>{icone_nivel}</h1>",
+                unsafe_allow_html=True,
+            )
+        with col_progress:
+            st.markdown(f"**Nível Atual:** {nivel_txt}")
+            st.progress(float(kpis.get("progresso_nivel", 0.0)))
+            proximo_xp = 1000 - (int(kpis.get("meu_xp", 0)) % 1000)
+            st.caption(f"✨ Faltam **{proximo_xp} XP** para o próximo nível")
 
     st.write("")
 
@@ -925,7 +884,7 @@ def renderizar_dashboard_conquistas(kpis):
     )
 
     if tem_alertas_xp:
-        with st.expander("🎯 **Missões e Desafios da Semana**", expanded=True):
+        with st.expander("🎯 **Informações importantes sobre seu desempenho**", expanded=True):
             if not em_pausa and dias_sem >= 5:
                 st.markdown(
                     """
@@ -950,22 +909,16 @@ def renderizar_dashboard_conquistas(kpis):
             if bonus_sem:
                 st.success(
                     "🎉 **Bônus da semana!** Você recebeu XP extra pelo desempenho "
-                    "(ex.: meta semanal de aprovações — típico **+1000 XP**). Parabéns!"
+                    "(ex.: meta semanal de aprovações — 5 contribuições **+1000 XP**). Parabéeeeeeens!"
                 )
 
             if pen_sem < 0:
                 st.caption(
-                    f"📉 No último fechamento semanal foi aplicado desconto de **{pen_sem} XP** "
-                    "em eventos de penalidade registados nesta semana ISO."
+                    f"📉 Na  última semana foi aplicado desconto de **{pen_sem} do seu XP**"
                 )
 
-            if tem_missoes:
-                for missao in kpis["missoes_ativas"]:
-                    st.markdown(f"{missao}")
-                st.caption("Complete missões para ganhar bônus de XP e medalhas exclusivas.")
 
     st.divider()
-
     # 4. MINI-RESUMO DE CONTRIBUIÇÕES
     st.subheader("📚 Minhas Estatísticas", anchor=False)
     c1, c2, c3 = st.columns(3)

@@ -1,7 +1,7 @@
 """
-Gestão do catálogo de releases (notas de versão) em ficheiro JSON local.
+Gestão do catálogo de releases (Release da versão) em arquivo JSON local.
 
-Ficheiro: ``releases/releases_catalog.json`` (junto à documentação em Markdown).
+Arquivo: ``releases/releases_catalog.json`` (junto à documentação em Markdown).
 
 Esquema de cada entrada
 ------------------------
@@ -28,10 +28,10 @@ from typing import Any, Final
 _CATALOG_PATH: Final[Path] = Path(__file__).resolve().parent.parent / "releases" / "releases_catalog.json"
 
 # Valores legados (banner estático antigo) — usados só para bootstrap se não existir JSON
-_LEGACY_VERSION: Final[str] = "2.1.0"
-_LEGACY_DATE: Final[str] = "2026-04-02"
+_LEGACY_VERSION: Final[str] = "1.0.1"
+_LEGACY_DATE: Final[str] = "2026-04-04"
 _LEGACY_SUMMARY: Final[str] = (
-    "Sessão de login mais estável no navegador, nova página de notas de versão e reforço de segurança nos bastidores."
+    "Login mais estável no navegador, página Release da versão e reforço de segurança nos bastidores."
 )
 
 
@@ -101,7 +101,7 @@ def _legacy_bootstrap_records() -> list[ReleaseRecord]:
 def load_catalog(*, create_if_missing: bool = True) -> list[ReleaseRecord]:
     """
     Lê todas as releases (mais recente primeiro após normalização).
-    Se o ficheiro não existir e ``create_if_missing``, cria um com entrada legada.
+    Se o arquivo não existir e ``create_if_missing``, cria um com entrada legada.
     """
     if not _CATALOG_PATH.is_file():
         if create_if_missing:
@@ -131,7 +131,7 @@ def load_catalog(*, create_if_missing: bool = True) -> list[ReleaseRecord]:
 
 
 def save_catalog(records: list[ReleaseRecord]) -> None:
-    """Grava o catálogo completo (substitui o ficheiro)."""
+    """Grava o catálogo completo (substitui o arquivo)."""
     _CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {"releases": [r.to_dict() for r in records]}
     _CATALOG_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

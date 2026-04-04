@@ -1,4 +1,4 @@
-# Notas de versão — WikiSuporte
+# Release da versão — WikiSuporte
 
 ---
 
@@ -14,6 +14,6 @@
 
 | Antes | Agora |
 |--------|--------|
-| Não havia um local único, para saber **o que mudou para os usuários do sistema no dia a dia**. | Existe esta página de **Notas de versão**: resumo direto do que afeta a **sua usabilidade**. Quando houver alterações no sistema, você será notificado. E o documento com as alterações estará acessível pelo **aviso no topo** ou pelo menu lateral. |
+| Não havia um local único, para saber **o que mudou para os usuários do sistema no dia a dia**. | Existe esta página de **Release da versão**: resumo direto do que afeta a **sua usabilidade**. Quando houver alterações no sistema, você será notificado. O documento com as alterações fica acessível pelo **aviso no topo** ou pelo menu lateral. |
 
 ---
