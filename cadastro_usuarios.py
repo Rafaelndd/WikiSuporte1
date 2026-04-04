@@ -28,6 +28,7 @@ import bcrypt
 from sqlalchemy import text
 
 from modules.database import get_connection
+from services.usuario_modelo import defaults_novo_usuario
 
 
 def validar_senha_forte(senha: str) -> tuple[bool, str]:
@@ -60,9 +61,24 @@ def mapear_perfil_cli(valor: str) -> str:
     return mapa.get(v, "analista")
 
 
-def criar_usuario(username: str, senha: str, perfil: str) -> tuple[bool, str]:
+def criar_usuario(
+    username: str,
+    senha: str,
+    perfil: str,
+    *,
+    nome_exibicao: str | None = None,
+    ramal: str = "",
+    ativo: bool = True,
+    em_ferias: bool = False,
+    em_atendimento_externo: bool = False,
+    caminho_foto_perfil: str = "",
+) -> tuple[bool, str]:
     """
-    Insere usuário. Retorna (True, mensagem sucesso) ou (False, mensagem erro).
+    Insere usuário no modelo alinhado à gestão (nome, username, hash, perfil, ramal, flags).
+
+    Parâmetro `username` (primeiro argumento posicional): login curto quando `nome_exibicao`
+    é informado; caso contrário mantém o comportamento legado (valor gravado em `nome` e
+    espelhado em `username` em minúsculas).
     """
     valida, msg = validar_senha_forte(senha)
     if not valida:
@@ -71,19 +87,39 @@ def criar_usuario(username: str, senha: str, perfil: str) -> tuple[bool, str]:
     salt = bcrypt.gensalt()
     senha_hash = bcrypt.hashpw(senha.encode("utf-8"), salt).decode("utf-8")
     perfil_db = mapear_perfil_cli(perfil)
+    canon = perfil_db.lower()
+
+    nome_db, user_db = defaults_novo_usuario(
+        nome_exibicao if (nome_exibicao or "").strip() else username,
+        username if (nome_exibicao or "").strip() else None,
+    )
+    if not nome_db:
+        return False, "Nome de utilizador vazio."
 
     try:
         engine = get_connection()
         with engine.begin() as conn:
             query = text(
-                "INSERT INTO usuarios (nome, password_hash, perfil) VALUES (:nome, :h, :p)"
+                "INSERT INTO usuarios (nome, username, password_hash, perfil, ramal, ativo, "
+                "em_ferias, em_atendimento_externo, caminho_foto_perfil) "
+                "VALUES (:nome, :u, :h, :p, :ramal, :ativo, :ferias, :ext, :foto)"
             )
             conn.execute(
                 query,
-                {"nome": username.strip(), "h": senha_hash, "p": perfil_db.lower()},
+                {
+                    "nome": nome_db[:150],
+                    "u": (user_db[:150] if user_db else None),
+                    "h": senha_hash,
+                    "p": canon,
+                    "ramal": (ramal or "")[:20],
+                    "ativo": ativo,
+                    "ferias": em_ferias,
+                    "ext": em_atendimento_externo,
+                    "foto": (caminho_foto_perfil or "")[:500],
+                },
             )
         return True, (
-            f"Usuário '{username.strip()}' criado com perfil '{perfil_db}'."
+            f"Usuário '{nome_db}' criado (login: {user_db or nome_db}) com perfil '{canon}'."
         )
     except Exception as e:
         err = str(e)

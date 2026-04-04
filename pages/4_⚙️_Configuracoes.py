@@ -1,7 +1,7 @@
 """
 WikiSuporte - Página de Configurações.
-Permite controle dos bots de varredura, gestão de usuários/ramais e cadastro de clientes com telefones.
-Acesso restrito ao perfil **admin**. O status dos bots é lido do arquivo `robo_state.json` e pode ser controlado por este painel, mas o motor precisa estar rodando (via `motor_extracao.py`) para processar as solicitações. A gestão de usuários permite alterar perfis e senhas. O cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs de auditoria registram ações importantes.
+Permite controle dos bots de varredura, ramais de analistas e cadastro de clientes com telefones.
+Acesso restrito ao perfil **admin**. O status dos bots é lido do arquivo `robo_state.json` e pode ser controlado por este painel, mas o motor precisa estar rodando (via `motor_extracao.py`) para processar as solicitações. O cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs de auditoria registram ações importantes.
 """
 import json
 import os
@@ -12,7 +12,6 @@ from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
-from sqlalchemy import text
 
 try:
     import psutil
@@ -78,12 +77,11 @@ if not eh_admin(perfil_raw):
 perfil_usuario = "admin"
 
 st.title("⚙️ WikiSuporte - Configurações")
-st.markdown("Controle dos bots, gestão de usuários, clientes e comunicados globais do sistema.")
+st.markdown("Controle dos bots, ramais, clientes e comunicados globais do sistema.")
 
 nomes_abas = [
     "🤖 Bots",
     "📞 Ramais e Analistas",
-    "👥 Usuários",
     "🏢 Clientes e Telefones",
     "📢 Lançar Nova Versão",
 ]
@@ -91,8 +89,8 @@ tem_painel_notifs = True
 if tem_painel_notifs:
     nomes_abas.append("📣 Notificações e Comunicados")
 abas = st.tabs(nomes_abas)
-aba_robo, aba_ramais, aba_usuarios, aba_clientes, aba_release_launch = abas[:5]
-aba_notificacoes = abas[5] if tem_painel_notifs else None
+aba_robo, aba_ramais, aba_clientes, aba_release_launch = abas[:4]
+aba_notificacoes = abas[4] if tem_painel_notifs else None
 
 # ==========================================
 # ABA 1: BOTS DE VARREDURA
@@ -260,128 +258,7 @@ with aba_ramais:
                 st.rerun()
 
 # ==========================================
-# ABA 3: USUÁRIOS
-# ==========================================
-@st.cache_data(ttl=120)
-def _obter_usuarios():
-    engine = get_connection()
-    try:
-        return pd.read_sql("SELECT id, nome, email, perfil, ramal, ativo FROM usuarios ORDER BY nome", engine)
-    except Exception:
-        return pd.DataFrame()
-
-with aba_usuarios:
-    st.subheader("Gestão de Usuários")
-    df_u = _obter_usuarios()
-
-    if df_u.empty:
-        st.warning("Nenhum usuário encontrado.")
-    else:
-        u1, u2 = st.columns(2)
-
-        with u1:
-            st.markdown("#### Alterar utilizador")
-            user_sel = st.selectbox("Usuário", df_u["nome"].tolist())
-            row = df_u[df_u["nome"] == user_sel].iloc[0]
-            perfis_opts = ["analista", "admin"]
-            raw_pf = str(row.get("perfil", "analista")).strip().lower()
-            if raw_pf not in perfis_opts:
-                raw_pf = "analista"
-            idx = perfis_opts.index(raw_pf) if raw_pf in perfis_opts else 0
-            novo_perfil = st.selectbox("Perfil", perfis_opts, index=idx)
-            nova_senha = st.text_input("Nova senha (vazio = manter)", type="password")
-
-            if st.button("Salvar alterações"):
-                import bcrypt
-
-                engine = get_connection()
-                try:
-                    with engine.begin() as conn:
-                        if nova_senha.strip():
-                            salt = bcrypt.gensalt()
-                            h = bcrypt.hashpw(
-                                nova_senha.strip().encode("utf-8"), salt
-                            ).decode("utf-8")
-                            conn.execute(
-                                text(
-                                    "UPDATE usuarios SET perfil = :p, password_hash = :s WHERE nome = :n"
-                                ),
-                                {"p": novo_perfil, "s": h, "n": user_sel},
-                            )
-                        else:
-                            conn.execute(
-                                text("UPDATE usuarios SET perfil = :p WHERE nome = :n"),
-                                {"p": novo_perfil, "n": user_sel},
-                            )
-                    st.success("Alterado. Utilizadores devem voltar a entrar se a senha mudou.")
-                    registrar_log_auditoria(usuario_id, "UPDATE_USER", f"Alterou {user_sel}")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
-
-        with u2:
-            st.markdown("#### Criar utilizador")
-            st.caption("Perfil **admin** ou **analista**; senha forte (8+ caracteres, maiúscula, número, especial).")
-            cn = st.text_input("Nome de login (nome)", key="nu_nome")
-            cu = st.text_input("Username (opcional, se existir na tabela)", key="nu_user")
-            cp = st.text_input("Senha inicial", type="password", key="nu_pass")
-            cper = st.selectbox("Perfil", ["analista", "admin"], key="nu_perfil")
-            if st.button("Cadastrar", key="nu_btn"):
-                import bcrypt
-
-                if not cn.strip() or not cp.strip():
-                    st.warning("Nome e senha são obrigatórios.")
-                else:
-                    from cadastro_usuarios import validar_senha_forte
-
-                    okp, msgp = validar_senha_forte(cp.strip())
-                    if not okp:
-                        st.error(msgp)
-                    else:
-                        salt = bcrypt.gensalt()
-                        h = bcrypt.hashpw(cp.strip().encode("utf-8"), salt).decode("utf-8")
-                        try:
-                            with get_connection().begin() as conn:
-                                if cu.strip():
-                                    try:
-                                        conn.execute(
-                                            text(
-                                                "INSERT INTO usuarios (nome, username, password_hash, perfil) "
-                                                "VALUES (:n, :u, :h, :p)"
-                                            ),
-                                            {
-                                                "n": cn.strip()[:100],
-                                                "u": cu.strip().lower()[:100],
-                                                "h": h,
-                                                "p": cper,
-                                            },
-                                        )
-                                    except Exception:
-                                        conn.execute(
-                                            text(
-                                                "INSERT INTO usuarios (nome, password_hash, perfil) VALUES (:n, :h, :p)"
-                                            ),
-                                            {"n": cn.strip()[:100], "h": h, "p": cper},
-                                        )
-                                else:
-                                    conn.execute(
-                                        text(
-                                            "INSERT INTO usuarios (nome, password_hash, perfil) VALUES (:n, :h, :p)"
-                                        ),
-                                        {"n": cn.strip()[:100], "h": h, "p": cper},
-                                    )
-                            st.success("Utilizador criado.")
-                            registrar_log_auditoria(
-                                usuario_id, "CREATE_USER", f"Criou {cn.strip()}"
-                            )
-                            st.cache_data.clear()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(str(e))
-
-# ==========================================
-# ABA 4: CLIENTES E TELEFONES
+# ABA 3: CLIENTES E TELEFONES
 # ==========================================
 def _apenas_numeros(txt):
     return re.sub(r"\D", "", str(txt)) if txt else ""

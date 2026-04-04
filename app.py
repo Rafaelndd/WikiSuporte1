@@ -236,130 +236,6 @@ def obter_kpis_home(usuario_id):
     return kpis
 
 
-# ==========================================
-# 4. FUNÇÕES DE SEGURANÇA E LOGIN (senha validada via streamlit-authenticator + BD)
-# ==========================================
-
-# --- 1. FUNÇÃO DE CONSUMO DE API (COM CACHE) ---
-# O TTL=3600 significa que o sistema só vai na internet buscar o clima a cada 1 hora (3600 segundos).
-# Nos outros acessos, ele pega da memória RAM do servidor, ficando instantâneo!
-# --- 1. CONFIGURAÇÃO DO CLIENTE OPEN-METEO (GLOBAL) ---
-#cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
-#retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
-#openmeteo = openmeteo_requests.Client(session=retry_session)
-
-# --- MAPEAMENTO DOS CÓDIGOS DE CLIMA ---
-#CODIGOS_CLIMA = {
-#    0: {"texto": "Céu limpo", "icone": "☀️", "alerta": False},
-#    1: {"texto": "Principalmente limpo", "icone": "🌤️", "alerta": False},
-#    2: {"texto": "Parcialmente nublado", "icone": "⛅", "alerta": False},
-#    3: {"texto": "Nublado", "icone": "☁️", "alerta": False},
-#    45: {"texto": "Neblina", "icone": "🌫️", "alerta": False},
-#    48: {"texto": "Neblina com geada", "icone": "🌫️❄️", "alerta": False},
-#    51: {"texto": "Chuvisco leve", "icone": "🌦️", "alerta": False},
-#    53: {"texto": "Chuvisco moderado", "icone": "🌦️", "alerta": False},
-#    55: {"texto": "Chuvisco intenso", "icone": "🌧️", "alerta": True},
-#    61: {"texto": "Chuva leve", "icone": "🌧️", "alerta": False},
-#    63: {"texto": "Chuva moderada", "icone": "🌧️", "alerta": False},
-#    65: {"texto": "Chuva pesada", "icone": "🌧️", "alerta": True},
-#    71: {"texto": "Neve leve", "icone": "🌨️", "alerta": False},
-#    73: {"texto": "Neve moderada", "icone": "🌨️", "alerta": False},
- #   75: {"texto": "Neve pesada", "icone": "🌨️", "alerta": True},
- #   80: {"texto": "Pancadas de chuva leves", "icone": "🌦️", "alerta": False},
- #   81: {"texto": "Pancadas de chuva moderadas", "icone": "🌧️", "alerta": False},
- #   82: {"texto": "Pancadas de chuva violentas", "icone": "🌧️", "alerta": True},
-  #  95: {"texto": "Tempestade", "icone": "⛈️", "alerta": True},
-  #  96: {"texto": "Tempestade com granizo leve", "icone": "⛈️🌨️", "alerta": True},
-   # 99: {"texto": "Tempestade com granizo pesado", "icone": "⛈️🌨️", "alerta": True},
-#}
-
-# --- FUNÇÃO DE CONSUMO À API (COM CACHE DO STREAMLIT) ---
-#@st.cache_data(ttl=3600)   # <-- decorador agora aplicado corretamente
-#def obter_previsao_tempo(lat="-28.935", lon="-49.486"):
-#    """
-#    Obtém dados meteorológicos atuais da API Open-Meteo usando o cliente global.
- #   """
-#   url = "https://api.open-meteo.com/v1/forecast"
-#    params = {
-#        "latitude": float(lat),
- #       "longitude": float(lon),
-#        "current": [
-#            "weather_code", "cloud_cover", "precipitation", "rain",
-#            "showers", "is_day", "apparent_temperature",
-#            "relative_humidity_2m", "temperature_2m", "wind_speed_10m",
-#            "wind_gusts_10m", "wind_direction_10m"
-#        ],
-#        "forecast_days": 1
-#    }
-#
-#    try:
-#        responses = openmeteo.weather_api(url, params=params)
-#        response = responses[0]
-#        current = response.Current()
-#
-#        # Extrai os valores na mesma ordem dos parâmetros
-#        current_weather_code = current.Variables(0).Value()
-#        current_cloud_cover = current.Variables(1).Value()
-#        current_precipitation = current.Variables(2).Value()
-#        current_rain = current.Variables(3).Value()
-#        current_showers = current.Variables(4).Value()
-#        current_is_day = current.Variables(5).Value()
-#        current_apparent_temperature = current.Variables(6).Value()
-#        current_relative_humidity_2m = current.Variables(7).Value()
-#        current_temperature_2m = current.Variables(8).Value()
-#        current_wind_speed_10m = current.Variables(9).Value()
-#        current_wind_gusts_10m = current.Variables(10).Value()
-#        current_wind_direction_10m = current.Variables(11).Value()
-#
-#        info_condicao = CODIGOS_CLIMA.get(int(current_weather_code), {"texto": "Desconhecido", "icone": "❓", "alerta": False})
-#
-#        alertas = [{"event": "Condição severa detectada", "description": info_condicao["texto"]}] if info_condicao["alerta"] else []
-#
-#        return {
-#            "temperature": current_temperature_2m,
-#            "windspeed": current_wind_speed_10m,
-#            "condicao_texto": info_condicao["texto"],
-#            "icone_url": info_condicao["icone"],
-#            "alertas": alertas,
-#            # campos extras (opcionais)
-#            "weather_code": current_weather_code,
-#            "cloud_cover": current_cloud_cover,
-#            "precipitation": current_precipitation,
-#            "rain": current_rain,
-#            "showers": current_showers,
-#            "is_day": current_is_day,
-#            "apparent_temperature": current_apparent_temperature,
-#            "relative_humidity": current_relative_humidity_2m,
-#            "wind_gusts": current_wind_gusts_10m,
-#            "wind_direction": current_wind_direction_10m,
-#        }
-#    except Exception as e:
-#        st.error(f"Erro ao buscar dados do Open-Meteo: {e}")
-#        return None
-
-# INTERFACE DO WIDGET PARA A HOME (adaptada com cache)
-#@st.cache_data(ttl=300)  # Cache de 5 minutos
-#def exibir_widget_clima():
-#    with st.container(border=True):
-#        st.subheader("Temperatura atual - Araranguá - SC")
-#        clima = obter_previsao_tempo()  # usa coordenadas padrão
-#
-#        if clima:
-#            col1, col2 = st.columns(2)
-#            with col1:
-#                st.write(clima["icone_url"])  # Emoji; se usar URL, trocar por st.image
-#                st.metric(label="Temperatura", value=f"{clima['temperature']:.1f} °C")
-#            with col2:
-#                st.metric(label="Velocidade do Vento", value=f"{clima['windspeed']:.1f} km/h")
-#                st.write(f"Condição: {clima['condicao_texto']}")
-#
-#           if clima["alertas"]:
-#               with st.expander("Alertas Meteorológicos", expanded=True):
-#                   for alerta in clima["alertas"]:
-#                       st.warning(f"{alerta['event']}: {alerta['description']}")
-#       else:
-#           st.warning("Não foi possível carregar os dados do clima no momento.")
-
 
 def obter_saudacao() -> str:
     hora_atual = datetime.now().hour
@@ -525,7 +401,7 @@ def tela_home() -> None:
         st.sidebar.divider()
 
     # --- CONTROLE DE PONTO (SEMPRE VISÍVEL) ---
-    st.sidebar.markdown("### 🕒 Ponto Eletrônico")
+    st.sidebar.markdown("### 🕒 Ponto VR")
     
     agora = datetime.now()
     em_dia_util = agora.weekday() < 5  # 0 a 4 = Segunda a Sexta
@@ -702,17 +578,6 @@ def tela_home() -> None:
         
         # --- 3. UI: Cabeçalho e Descrição ---
         st.header(f"{saudacao}, {nome_usuario}! {icone_saudacao}", anchor=False)
-        st.markdown(
-            "Este é o seu painel de controle central do **WikiSuporte**. "
-            "Acompanhe os seus indicadores e os alertas do dia."
-        )
-        
-        with st.expander("🤔 Como usar esta página?"):
-            st.markdown(
-                "**Alertas** incluem plantão, validações de release e avisos **importantes para o dia a dia** "
-                "(release + cobrança 7 em 7 dias).\n\n"
-                "Dúvidas: em todas as rotinas o sistema mostrará a seguinte mensagem ****"
-            )
 
         # --- 4. EXIBIÇÃO: Alertas dinâmicos ---
         total_alertas_reais = len(df_plantao) + len(df_correcoes)
@@ -723,11 +588,6 @@ def tela_home() -> None:
             st.markdown(f"**📅 {data_atual}**")
         
         st.write("")
-#    with col_clima:
-#        obter_previsao_tempo()
-#        exibir_widget_clima()
-#    
-#    st.divider()
 
     # 1. Primeiro recuperamos o ID e os dados (KPIs)
     usuario_id = st.session_state.get('usuario_id')
