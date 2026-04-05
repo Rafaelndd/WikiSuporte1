@@ -74,6 +74,8 @@ if perfil_logado not in PERFIS_VALIDOS:
 
 # Configuração do diretório de upload (sem mudanças significativas, mas com comentário para segurança)
 UPLOAD_DIR = "uploads_wiki"
+MAX_ANEXOS_CONTRIBUICAO = 10
+MAX_BYTES_ANEXO_CONTRIBUICAO = 25_000_000
 os.makedirs(UPLOAD_DIR, exist_ok=True)  # Em produção, considere usar armazenamento em nuvem para maior segurança
 
 engine = get_connection()
@@ -1028,14 +1030,18 @@ with aba_nova:
         st.markdown("📎 **Anexar Evidências**")
         
         arquivo_anexo = st.file_uploader(
-        "Formatos aceitos: PDF, TXT, SQL, Imagens, Vídeos...", 
-        type=["pdf", "txt", "csv", "xlsx", "xls", "xml", "sql", "png", "jpg", "jpeg", "pgz", "fr3", "mp3", "mp4"],
-        accept_multiple_files=True
-    )
+            "Formatos aceitos: PDF, TXT, SQL, Imagens, Vídeos...",
+            type=["pdf", "txt", "csv", "xlsx", "xls", "xml", "sql", "png", "jpg", "jpeg", "pgz", "fr3", "mp3", "mp4"],
+            max_bytes=MAX_BYTES_ANEXO_CONTRIBUICAO,
+            accept_multiple_files=True,
+        )
         
         btn_salvar = st.form_submit_button("💾 Salvar Contribuição", type="primary")
         
         if btn_salvar:
+            if len(arquivo_anexo) > MAX_ANEXOS_CONTRIBUICAO:
+                st.error(f"Máximo de {MAX_ANEXOS_CONTRIBUICAO} anexos por contribuição.")
+                st.stop()
             if not titulo or not menu or not conteudo or not data_evento:
                 st.warning("⚠️ Preencha Título, Menu (categoria), Conteúdo e Data do Ocorrido.")
             else:
@@ -1051,13 +1057,26 @@ with aba_nova:
                         os.makedirs(pasta_contrib, exist_ok=True)
                         arquivos_salvos = []
                         for idx, arquivo in enumerate(arquivo_anexo, start=1):
-                            nome_seguro = f"{idx}_{arquivo.name.replace(' ', '_')}"
+                            try:
+                                if len(arquivo.getvalue()) > MAX_BYTES_ANEXO_CONTRIBUICAO:
+                                    st.error(
+                                        f"Anexo '{arquivo.name}' excede o limite de "
+                                        f"{MAX_BYTES_ANEXO_CONTRIBUICAO / 1024 / 1024:.0f} MB."
+                                    )
+                                    st.stop()
+                            except Exception:
+                                pass
+                            nome_original = os.path.basename(str(arquivo.name or f"anexo_{idx}"))
+                            nome_seguro = re.sub(r"[^A-Za-z0-9._-]", "_", nome_original).strip("._")
+                            if not nome_seguro:
+                                nome_seguro = f"anexo_{idx}"
+                            nome_seguro = f"{idx}_{nome_seguro[:112]}"
                             caminho_fisico = os.path.join(pasta_contrib, nome_seguro)
                             with open(caminho_fisico, "wb") as f:
                                 f.write(arquivo.getbuffer())
                             arquivos_salvos.append((caminho_fisico, arquivo))
                             # Extração de texto (quando aplicável) para enriquecer o conteúdo
-                            ext = arquivo.name.split('.')[-1].lower()
+                            ext = nome_seguro.rsplit(".", 1)[-1].lower()
                             try:
                                 if ext in ['txt', 'sql', 'xml', 'csv']:
                                     texto_extraido += arquivo.getvalue().decode('utf-8', errors='ignore') + "\n\n"

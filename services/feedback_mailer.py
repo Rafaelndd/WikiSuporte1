@@ -13,6 +13,7 @@ SSL no Windows / OpenSSL 3+: o contexto usa o bundle do pacote `certifi`. Se ain
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import smtplib
@@ -25,10 +26,18 @@ from typing import Any, Dict, Optional, Tuple
 def _build_smtp_ssl_context() -> ssl.SSLContext:
     """
     Evita falhas como CERTIFICATE_VERIFY_FAILED / Basic Constraints com o store do SO,
-    usando CA bundle do certifi. Opcional: EMAIL_SMTP_SSL_INSECURE=1 desliga verificação.
+    usando CA bundle do certifi. Opcional: EMAIL_SMTP_SSL_INSECURE=1 desliga verificação
+    apenas em ambiente de desenvolvimento/teste.
     """
-    insecure = os.getenv("EMAIL_SMTP_SSL_INSECURE", "").strip().lower() in ("1", "true", "yes")
+    ambiente = os.getenv("APP_ENV", "").strip().lower() or os.getenv("ENVIRONMENT", "").strip().lower()
+    insecure = (
+        os.getenv("EMAIL_SMTP_SSL_INSECURE", "").strip().lower() in ("1", "true", "yes")
+        and ambiente in {"dev", "development", "localhost", "local", "test"}
+    )
     if insecure:
+        logging.warning(
+            "EMAIL_SMTP_SSL_INSECURE=1 ativo: validação TLS desligada. Use apenas em ambiente local."
+        )
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -251,8 +260,8 @@ def send_feedback_email(
         hint = ""
         if "CERTIFICATE_VERIFY_FAILED" in err_txt or "SSL" in err_txt:
             hint = (
-                " Tente: `pip install -U certifi` e reinicie o app. "
-                "Em rede com inspeção SSL, use `EMAIL_SMTP_SSL_INSECURE=1` no `.env` (menos seguro)."
+                " Verifique rede/proxy e reinstale o pacote `certifi`. "
+                "Para ambientes de desenvolvimento, apenas então, ative `EMAIL_SMTP_SSL_INSECURE=1`."
             )
         return False, f"Erro de rede ou SSL ao contatar o servidor de e-mail: {e}.{hint}"
     except smtplib.SMTPException as e:

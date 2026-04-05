@@ -40,6 +40,8 @@ ensure_schema()
 
 st.title("📝 Registro de Atendimentos")
 st.markdown("Lançamento diário de atendimentos com cliente obrigatório, anexos, filtros e busca semântica.")
+MAX_ANEXOS_ATENDIMENTO = 10
+MAX_BYTES_ANEXO_ATENDIMENTO = 25_000_000
 
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
@@ -427,12 +429,26 @@ with tab_lancar:
         st.markdown("#### 📎 Anexos")
         anexos = st.file_uploader(
             "Selecione arquivos (qualquer formato, múltiplos arquivos)",
+            max_bytes=MAX_BYTES_ANEXO_ATENDIMENTO,
             accept_multiple_files=True,
             key=f"p8_anexos_{st.session_state['p8_uploader_nonce']}",
         )
         salvar = st.form_submit_button("✅ Registrar atendimento", type="primary", use_container_width=True)
 
         if salvar:
+            if len(anexos) > MAX_ANEXOS_ATENDIMENTO:
+                st.error(f"Máximo de {MAX_ANEXOS_ATENDIMENTO} anexos por atendimento.")
+                st.stop()
+            for arq in anexos:
+                try:
+                    if len(arq.getvalue()) > MAX_BYTES_ANEXO_ATENDIMENTO:
+                        st.error(
+                            f"Anexo '{arq.name}' excede o limite de "
+                            f"{MAX_BYTES_ANEXO_ATENDIMENTO / 1024 / 1024:.0f} MB."
+                        )
+                        st.stop()
+                except Exception:
+                    pass
             payload = {
                 "usuario_id": usuario_id,
                 "nome_analista": nome_usuario,

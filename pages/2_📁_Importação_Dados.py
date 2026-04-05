@@ -41,6 +41,12 @@ except Exception:
 # ==========================================
 # 1. CADEADO DE SEGURANÇA E SESSÃO
 # ==========================================
+# Limites para reduzir risco de sobrecarga por lote e arquivo de importação
+MAX_BYTES_UPLOAD_IMPORTACAO = 25_000_000  # 25 MB
+MAX_REGISTROS_POR_IMPORTACAO = 20_000
+MAX_REGISTROS_POR_PLANTAO = 5_000
+MAX_CHUNKS_SQL = 1000
+
 st.set_page_config(page_title="WikiSuporte", page_icon="📊", layout="wide")
 
 # Exige login e restringe ao perfil admin (gestão)
@@ -80,6 +86,11 @@ def _garantir_tabela_goto_agent_calls(conn):
 
 def salvar_no_banco(df, nome_tabela, tipo_arquivo):
     engine = get_connection()
+    total_registros = len(df)
+    if total_registros > MAX_REGISTROS_POR_IMPORTACAO:
+        return False, f"Volume de inserção acima do limite: {total_registros} registros (máximo {MAX_REGISTROS_POR_IMPORTACAO})."
+    if total_registros == 0:
+        return False, "Nenhum registro para inserir."
     try:
         with engine.begin() as conn:
             if tipo_arquivo == "GOTO":
@@ -102,13 +113,34 @@ def salvar_no_banco(df, nome_tabela, tipo_arquivo):
                 if lista_protocolos:
                     query_delete = text("DELETE FROM atendimentos_multi360 WHERE protocolo = ANY(:ids)")
                     conn.execute(query_delete, {"ids": lista_protocolos})
-            df.to_sql(nome_tabela, conn, if_exists='append', index=False)
+            df.to_sql(nome_tabela, conn, if_exists='append', index=False, chunksize=MAX_CHUNKS_SQL)
         return True, "Sucesso"
     except Exception as e:
         return False, str(e)
 
 def apenas_numeros(texto):
     return re.sub(r'\D', '', str(texto))
+
+
+def _tamanho_upload(arquivo):
+    if arquivo is None:
+        return 0
+    tamanho = getattr(arquivo, "size", None)
+    if isinstance(tamanho, int):
+        return max(0, tamanho)
+    try:
+        posicao = arquivo.tell()
+        arquivo.seek(0, io.SEEK_END)
+        tamanho = arquivo.tell()
+        arquivo.seek(posicao, io.SEEK_SET)
+        return max(0, tamanho)
+    except Exception:
+        pass
+    try:
+        conteudo = arquivo.getvalue()
+        return len(conteudo)
+    except Exception:
+        return 0
 
 
 def _obter_mapa_ramal_analista():
@@ -311,6 +343,9 @@ with aba1:
                     st.warning("⚠️ Nenhuma chamada encontrada para o período informado.")
                 else:
                     st.success(f"🎯 **{len(df_api)} chamadas** encontradas para o período selecionado!")
+                    if len(df_api) > MAX_REGISTROS_POR_IMPORTACAO:
+                        st.error(f"⚠️ Foram encontrados {len(df_api)} registros, acima do limite de {MAX_REGISTROS_POR_IMPORTACAO}.")
+                        st.stop()
                     st.session_state['df_goto_api'] = df_api
 
             except (ValueError, ConnectionError) as e:
@@ -325,6 +360,9 @@ with aba1:
     # Exibe e permite salvar os dados buscados via API
     df_goto_api = st.session_state.get('df_goto_api', pd.DataFrame())
     if not df_goto_api.empty:
+        if len(df_goto_api) > MAX_REGISTROS_POR_IMPORTACAO:
+            st.error(f"⚠️ A resposta da API trouxe {len(df_goto_api)} registros, acima do limite de {MAX_REGISTROS_POR_IMPORTACAO}. Refine o período e tente novamente.")
+            st.stop()
         st.divider()
         st.markdown("#### 🔍 Pré-visualização dos Dados Obtidos via API")
 
@@ -397,8 +435,12 @@ with aba2:
             "📂 Selecione o seu arquivo de atendimento (CSV, XLSX ou ZIP com agent-calls):",
             type=['csv', 'xlsx', 'zip'],
             key="up_import_mensal",
+            max_bytes=MAX_BYTES_UPLOAD_IMPORTACAO,
         )
     if arquivo_upload:
+        if _tamanho_upload(arquivo_upload) > MAX_BYTES_UPLOAD_IMPORTACAO:
+            st.error(f"⚠️ O arquivo excede {MAX_BYTES_UPLOAD_IMPORTACAO / 1024 / 1024:.0f} MB. Envie um arquivo menor.")
+            st.stop()
         tipo_identificado, df_processado, erro_processamento = None, None, None
         if arquivo_upload.name.lower().endswith('.zip'):
             zip_bytes = io.BytesIO(arquivo_upload.read())
@@ -407,6 +449,9 @@ with aba2:
                 st.error("❌ O ZIP não contém um arquivo 'agent-calls_*.csv'. Exporte o relatório Agent Calls do GoTo ou anexe o CSV diretamente.")
                 st.stop()
             st.session_state['import_agent_calls_bytes'] = csv_io.read()
+            if len(st.session_state['import_agent_calls_bytes']) > MAX_BYTES_UPLOAD_IMPORTACAO:
+                st.error(f"⚠️ O conteúdo extraído do ZIP excede {MAX_BYTES_UPLOAD_IMPORTACAO / 1024 / 1024:.0f} MB.")
+                st.stop()
             df_preview = pd.read_csv(io.BytesIO(st.session_state['import_agent_calls_bytes']), nrows=15)
         else:
             if 'import_agent_calls_bytes' in st.session_state:
@@ -457,108 +502,119 @@ with aba2:
         if erro_processamento: 
             st.error(f"❌ Erro no processamento: {erro_processamento}")
         elif df_processado is not None and not df_processado.empty:
-            
-            bloqueio_plantao = False
-            if tipo_identificado == "GOTO":
-                if pd.api.types.is_datetime64_any_dtype(df_processado['data_chamada']):
-                    dias_arquivo = (df_processado['data_chamada'].max() - df_processado['data_chamada'].min()).days
-                else:
-                    dt_temp = pd.to_datetime(df_processado['data_chamada'], errors='coerce')
-                    dias_arquivo = (dt_temp.max() - dt_temp.min()).days
-                
-                if pd.isna(dias_arquivo): dias_arquivo = 0
-                
-                if dias_arquivo <= 5:
-                    st.warning(f"**Aviso:** Este arquivo cobre apenas **{int(dias_arquivo)} dia(s)**. Parece um Relatório de Plantão.")
-                    liberar = st.checkbox("Eu confirmo que este é um arquivo MENSAL válido. Desbloquear importação.")
-                    if not liberar: bloqueio_plantao = True
-
-            if not bloqueio_plantao:
+            if len(df_processado) > MAX_REGISTROS_POR_IMPORTACAO:
+                st.error(f"⚠️ O arquivo processado possui {len(df_processado)} registros, acima do limite de {MAX_REGISTROS_POR_IMPORTACAO}.")
+            else:
+                bloqueio_plantao = False
                 if tipo_identificado == "GOTO":
-                    # Vincular atendimentos aos ramais dos analistas (nome_analista_epsy, id_analista_epsy)
-                    mapa_ramal = _obter_mapa_ramal_analista()
-                    if mapa_ramal:
-                        def identificar_analista(row):
-                            texto = (str(row.get("participantes", "")) + " " + str(row.get("telefone_origem", ""))).strip()
-                            for ramal, (uid, nome) in mapa_ramal.items():
-                                if ramal and ramal in texto:
-                                    return (uid, nome)
-                            return (None, None)
-                        aplicado = df_processado.apply(identificar_analista, axis=1)
-                        df_processado["id_analista_epsy"] = aplicado.apply(lambda x: x[0])
-                        df_processado["nome_analista_epsy"] = aplicado.apply(lambda x: x[1])
+                    if pd.api.types.is_datetime64_any_dtype(df_processado['data_chamada']):
+                        dias_arquivo = (df_processado['data_chamada'].max() - df_processado['data_chamada'].min()).days
                     else:
-                        df_processado["id_analista_epsy"] = None
-                        df_processado["nome_analista_epsy"] = None
-                    with st.spinner("🔄 Cruzando telefones com os cadastros dos clientes..."):
-                        try:
-                            from services.clientes_service import obter_mapa_hash_cliente
-                            mapa_hash = obter_mapa_hash_cliente()
-                            df_processado["cliente_nome"] = df_processado["telefone_hash"].map(mapa_hash)
-                            # Sem cadastro: deixar o número em claro (telefone_origem), sem mensagem de tratamento
-                            idx_sem = df_processado["cliente_nome"].isna()
-                            df_processado.loc[idx_sem, "cliente_nome"] = df_processado.loc[idx_sem, "telefone_origem"].astype(str).replace("nan", "").replace("<NA>", "")
-                            df_processado["cliente_nome"] = df_processado["cliente_nome"].fillna("")
-                            st.session_state["import_df_processado"] = df_processado.copy()
-                            st.session_state["import_nome_tabela"] = nome_tabela_bd
-                            st.session_state["import_tipo"] = tipo_identificado
-                            st.session_state["import_arquivo_nome"] = arquivo_upload.name
-                        except ImportError:
-                            df_processado["cliente_nome"] = df_processado.get("telefone_origem", pd.Series(dtype=str)).astype(str).replace("nan", "")
-                            st.session_state["import_df_processado"] = df_processado.copy()
-                            st.session_state["import_nome_tabela"] = nome_tabela_bd
-                            st.session_state["import_tipo"] = tipo_identificado
-                            st.session_state["import_arquivo_nome"] = arquivo_upload.name
-                        except Exception as e:
-                            st.warning(f"⚠️ Erro ao identificar clientes: {e}")
-                            df_processado["cliente_nome"] = df_processado.get("telefone_origem", pd.Series(dtype=str)).astype(str).replace("nan", "")
-                            st.session_state["import_df_processado"] = df_processado.copy()
-                            st.session_state["import_nome_tabela"] = nome_tabela_bd
-                            st.session_state["import_tipo"] = tipo_identificado
-                            st.session_state["import_arquivo_nome"] = arquivo_upload.name
+                        dt_temp = pd.to_datetime(df_processado['data_chamada'], errors='coerce')
+                        dias_arquivo = (dt_temp.max() - dt_temp.min()).days
+                    
+                    if pd.isna(dias_arquivo): dias_arquivo = 0
+                    
+                    if dias_arquivo <= 5:
+                        st.warning(f"**Aviso:** Este arquivo cobre apenas **{int(dias_arquivo)} dia(s)**. Parece um Relatório de Plantão.")
+                        liberar = st.checkbox("Eu confirmo que este é um arquivo MENSAL válido. Desbloquear importação.")
+                        if not liberar:
+                            bloqueio_plantao = True
 
-                if tipo_identificado == "MULTI360":
-                    with st.spinner("🔄 Cruzando com CRM..."):
-                        try:
-                            from services.clientes_service import obter_mapa_hash_cliente
-                            mapa_hash = obter_mapa_hash_cliente()
-                            df_processado['cliente_nome'] = df_processado['telefone_hash'].map(mapa_hash).fillna("Não Identificado")
-                        except Exception:
-                            df_processado['cliente_nome'] = df_processado.get('cliente_nome', "Não Identificado")
+                    if len(df_processado) > MAX_REGISTROS_POR_PLANTAO:
+                        st.error(f"⚠️ Este arquivo contém {len(df_processado)} registros, acima do limite de {MAX_REGISTROS_POR_PLANTAO} para evitar sobrecarga.")
+                        bloqueio_plantao = True
 
-                if tipo_identificado == "GOTO_AGENT_CALLS":
-                    st.success(f"📞 **Relatório Agent Calls:** {len(df_processado)} chamadas atendidas (Contact Resolution = COMPLETED). Salve no banco para o Dashboard usar estes números.")
-                    st.session_state['import_df_processado'] = df_processado.copy()
-                    st.session_state['import_nome_tabela'] = nome_tabela_bd
-                    st.session_state['import_tipo'] = tipo_identificado
-                    st.session_state['import_arquivo_nome'] = arquivo_upload.name
-
-                with st.container(border=True):
-                    st.markdown("### 🔍 Pré-visualização dos Dados (Prontos para o Banco)")
-                    st.dataframe(df_processado.head(5), width='stretch')
-                
-                with st.container(border=True):
-                    st.markdown("#### 📊 Resumo do Arquivo Mensal")
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    col_m1.metric("Total de Registros", len(df_processado))
+                if not bloqueio_plantao:
                     if tipo_identificado == "GOTO":
-                        col_m2.metric("Data Inicial", df_processado['data_chamada'].min().strftime('%d/%m/%Y'))
-                        col_m3.metric("Data Final", df_processado['data_chamada'].max().strftime('%d/%m/%Y'))
-                    else:
-                        col_m2.metric("Data Inicial", df_processado['data_inicio'].min().strftime('%d/%m/%Y'))
-                        col_m3.metric("Data Final", df_processado['data_inicio'].max().strftime('%d/%m/%Y'))
-                
-                if st.button("💾 Salvar", type="primary", width='stretch'):
-                    df_para_salvar = st.session_state.get('import_df_processado', df_processado)
-                    with st.spinner("Gravando dados no WikiSuporte..."):
-                        sucesso, msg = salvar_no_banco(df_para_salvar, nome_tabela_bd, tipo_identificado)
-                        if sucesso:
-                            st.success(f"{len(df_para_salvar)} registros foram salvos com sucesso.")
-                            registrar_log_auditoria(usuario_id, "IMPORT_CSV", f"Importado {arquivo_upload.name}")
-                            for k in ['import_df_processado', 'import_numero_sem_vinculo', 'import_nome_tabela', 'import_tipo', 'import_arquivo_nome', 'import_agent_calls_bytes']:
-                                st.session_state.pop(k, None)
-                            st.rerun()
-                        else: st.error(f"❌ Erro ao salvar o arquivo: {msg}")
+                        # Vincular atendimentos aos ramais dos analistas (nome_analista_epsy, id_analista_epsy)
+                        mapa_ramal = _obter_mapa_ramal_analista()
+                        if mapa_ramal:
+                            def identificar_analista(row):
+                                texto = (str(row.get("participantes", "")) + " " + str(row.get("telefone_origem", ""))).strip()
+                                for ramal, (uid, nome) in mapa_ramal.items():
+                                    if ramal and ramal in texto:
+                                        return (uid, nome)
+                                return (None, None)
+                            aplicado = df_processado.apply(identificar_analista, axis=1)
+                            df_processado["id_analista_epsy"] = aplicado.apply(lambda x: x[0])
+                            df_processado["nome_analista_epsy"] = aplicado.apply(lambda x: x[1])
+                        else:
+                            df_processado["id_analista_epsy"] = None
+                            df_processado["nome_analista_epsy"] = None
+                        with st.spinner("🔄 Cruzando telefones com os cadastros dos clientes..."):
+                            try:
+                                from services.clientes_service import obter_mapa_hash_cliente
+                                mapa_hash = obter_mapa_hash_cliente()
+                                df_processado["cliente_nome"] = df_processado["telefone_hash"].map(mapa_hash)
+                                # Sem cadastro: deixar o número em claro (telefone_origem), sem mensagem de tratamento
+                                idx_sem = df_processado["cliente_nome"].isna()
+                                df_processado.loc[idx_sem, "cliente_nome"] = df_processado.loc[idx_sem, "telefone_origem"].astype(str).replace("nan", "").replace("<NA>", "")
+                                df_processado["cliente_nome"] = df_processado["cliente_nome"].fillna("")
+                                st.session_state["import_df_processado"] = df_processado.copy()
+                                st.session_state["import_nome_tabela"] = nome_tabela_bd
+                                st.session_state["import_tipo"] = tipo_identificado
+                                st.session_state["import_arquivo_nome"] = arquivo_upload.name
+                            except ImportError:
+                                df_processado["cliente_nome"] = df_processado.get("telefone_origem", pd.Series(dtype=str)).astype(str).replace("nan", "")
+                                st.session_state["import_df_processado"] = df_processado.copy()
+                                st.session_state["import_nome_tabela"] = nome_tabela_bd
+                                st.session_state["import_tipo"] = tipo_identificado
+                                st.session_state["import_arquivo_nome"] = arquivo_upload.name
+                            except Exception as e:
+                                st.warning(f"⚠️ Erro ao identificar clientes: {e}")
+                                df_processado["cliente_nome"] = df_processado.get("telefone_origem", pd.Series(dtype=str)).astype(str).replace("nan", "")
+                                st.session_state["import_df_processado"] = df_processado.copy()
+                                st.session_state["import_nome_tabela"] = nome_tabela_bd
+                                st.session_state["import_tipo"] = tipo_identificado
+                                st.session_state["import_arquivo_nome"] = arquivo_upload.name
+
+                    if tipo_identificado == "MULTI360":
+                        with st.spinner("🔄 Cruzando com CRM..."):
+                            try:
+                                from services.clientes_service import obter_mapa_hash_cliente
+                                mapa_hash = obter_mapa_hash_cliente()
+                                df_processado['cliente_nome'] = df_processado['telefone_hash'].map(mapa_hash).fillna("Não Identificado")
+                            except Exception:
+                                df_processado['cliente_nome'] = df_processado.get('cliente_nome', "Não Identificado")
+
+                    if tipo_identificado == "GOTO_AGENT_CALLS":
+                        st.success(f"📞 **Relatório Agent Calls:** {len(df_processado)} chamadas atendidas (Contact Resolution = COMPLETED). Salve no banco para o Dashboard usar estes números.")
+                        st.session_state['import_df_processado'] = df_processado.copy()
+                        st.session_state['import_nome_tabela'] = nome_tabela_bd
+                        st.session_state['import_tipo'] = tipo_identificado
+                        st.session_state['import_arquivo_nome'] = arquivo_upload.name
+
+                    with st.container(border=True):
+                        st.markdown("### 🔍 Pré-visualização dos Dados (Prontos para o Banco)")
+                        st.dataframe(df_processado.head(5), width='stretch')
+                    
+                    with st.container(border=True):
+                        st.markdown("#### 📊 Resumo do Arquivo Mensal")
+                        col_m1, col_m2, col_m3 = st.columns(3)
+                        col_m1.metric("Total de Registros", len(df_processado))
+                        if tipo_identificado == "GOTO":
+                            col_m2.metric("Data Inicial", df_processado['data_chamada'].min().strftime('%d/%m/%Y'))
+                            col_m3.metric("Data Final", df_processado['data_chamada'].max().strftime('%d/%m/%Y'))
+                        else:
+                            col_m2.metric("Data Inicial", df_processado['data_inicio'].min().strftime('%d/%m/%Y'))
+                            col_m3.metric("Data Final", df_processado['data_inicio'].max().strftime('%d/%m/%Y'))
+                    
+                    if st.button("💾 Salvar", type="primary", width='stretch'):
+                        df_para_salvar = st.session_state.get('import_df_processado', df_processado)
+                        if len(df_para_salvar) > MAX_REGISTROS_POR_IMPORTACAO:
+                            st.error(f"⚠️ O lote atual possui {len(df_para_salvar)} registros, acima do limite de {MAX_REGISTROS_POR_IMPORTACAO}.")
+                        else:
+                            with st.spinner("Gravando dados no WikiSuporte..."):
+                                sucesso, msg = salvar_no_banco(df_para_salvar, nome_tabela_bd, tipo_identificado)
+                                if sucesso:
+                                    st.success(f"{len(df_para_salvar)} registros foram salvos com sucesso.")
+                                    registrar_log_auditoria(usuario_id, "IMPORT_CSV", f"Importado {arquivo_upload.name}")
+                                    for k in ['import_df_processado', 'import_numero_sem_vinculo', 'import_nome_tabela', 'import_tipo', 'import_arquivo_nome', 'import_agent_calls_bytes']:
+                                        st.session_state.pop(k, None)
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Erro ao salvar o arquivo: {msg}")
 
 # ------------------------------------------
 # ABA 3: ANÁLISE DE PLANTÕES (GOTO)
@@ -571,9 +627,17 @@ with aba3:
         st.session_state['plantao_uploader_key'] = 0
 
     with st.container(border=True):
-        arquivo_plantao = st.file_uploader("📂 Envie o arquivo GoTo ('Call Reports' ou 'User Activity'):", type=['csv', 'xlsx'], key=f"up_plantao_{st.session_state['plantao_uploader_key']}")
+        arquivo_plantao = st.file_uploader(
+            "📂 Envie o arquivo GoTo ('Call Reports' ou 'User Activity'):",
+            type=['csv', 'xlsx'],
+            key=f"up_plantao_{st.session_state['plantao_uploader_key']}",
+            max_bytes=MAX_BYTES_UPLOAD_IMPORTACAO,
+        )
     
     if arquivo_plantao:
+        if _tamanho_upload(arquivo_plantao) > MAX_BYTES_UPLOAD_IMPORTACAO:
+            st.error(f"⚠️ Arquivo acima de {MAX_BYTES_UPLOAD_IMPORTACAO / 1024 / 1024:.0f} MB. Use um arquivo menor.")
+            st.stop()
         df_preview_p = ler_arquivo_dinamico(arquivo_plantao)
         
         # 🛡️ Suporte Híbrido: Identifica qual é o formato exportado pelo GoTo
@@ -608,6 +672,9 @@ with aba3:
                 dias_arquivo_plantao = (dt_temp.max() - dt_temp.min()).days
             
             if pd.isna(dias_arquivo_plantao): dias_arquivo_plantao = 0
+            if len(df_goto_bruto) > MAX_REGISTROS_POR_PLANTAO:
+                st.error(f"⚠️ O relatório possui {len(df_goto_bruto)} registros, acima do limite de {MAX_REGISTROS_POR_PLANTAO} para esta rotina.")
+                st.stop()
             
             if dias_arquivo_plantao > 5:
                 st.error(f"🤖 **Psy bloqueou a extração:** \n\nEste arquivo abrange **{int(dias_arquivo_plantao)} dias**. Relatórios de plantão costumam ter no máximo 3 ou 4 dias.\n\n👉 Para o mês todo, use a aba '📥 Importar Mensal'.")
@@ -694,6 +761,9 @@ with aba3:
                         
                         mascara_validas = ~df_temp['Atendente'].isin(["Sistema / Sem Ramal"])
                         df_limpo = df_temp[mascara_validas].copy()
+                    if len(df_limpo) > MAX_REGISTROS_POR_PLANTAO:
+                        st.error(f"⚠️ Resultado filtrado excede o limite de {MAX_REGISTROS_POR_PLANTAO} atendimentos.")
+                        st.stop()
                         
                         if df_limpo.empty:
                             st.warning("⚠️ Arquivo analisado, mas nenhum atendimento real encontrado. Verifique se o arquivo está correto ou se o regime selecionado é adequado.")

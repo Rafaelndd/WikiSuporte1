@@ -16,6 +16,7 @@ from modules.html_texto import limpar_html_bruto
 
 # Pasta para salvar arquivos de releases (relativa à raiz do projeto)
 PASTA_RELEASES = "releases_tecnuv"
+MAX_ITENS_POR_RELEASE = 2_000
 
 
 def _emb_to_sql(emb: List[float]) -> str:
@@ -179,6 +180,7 @@ def processar_release_completo(
     caminho_arquivo: Optional[str] = None,
     origem: str = "manual",
     data_liberacao: Optional[datetime] = None,
+    limite_itens: int = MAX_ITENS_POR_RELEASE,
 ) -> tuple[int, int]:
     """
     Processa release: grava um registro em release_itens por linha com (nr_chamado);
@@ -198,6 +200,9 @@ def processar_release_completo(
     )
 
     # Uma entrada por linha que contém (nnnnn) — mesmo chamado pode ter linhas diferentes em releases distintos
+    limite_limpo = int(limite_itens)
+    if limite_limpo <= 0:
+        limite_limpo = MAX_ITENS_POR_RELEASE
     linhas_por_chamado: list[tuple[str, str]] = []
     for line in (texto_completo or "").splitlines():
         clean = line.strip()
@@ -206,6 +211,10 @@ def processar_release_completo(
         for match in re.findall(r"\((\d{4,6})\)", clean):
             linha_limpa = _assunto_release_sem_html(clean[:4000])
             linhas_por_chamado.append((match, linha_limpa))
+            if len(linhas_por_chamado) >= limite_limpo:
+                break
+        if len(linhas_por_chamado) >= limite_limpo:
+            break
 
     modulos_conhecidos = (
         "POSTOGESTOR", "COMERCIAL", "VENDAS", "FISCAL", "PDV", "FINANCEIRO",
@@ -224,6 +233,8 @@ def processar_release_completo(
         pass
 
     for id_chamado_str, linha in linhas_por_chamado:
+        if len(vistos_no_release) >= limite_limpo:
+            break
         nr = int(id_chamado_str)
         key = (nr, linha[:500])
         if key in vistos_no_release:
