@@ -162,6 +162,52 @@ def inject_parent_data_theme_script(theme: str) -> None:
     components.html(html, height=0, width=0)
 
 
+def inject_sidebar_page_nav_labels_pt_br() -> None:
+    """
+    Traduz rótulos nativos do menu de páginas na sidebar (Streamlit multipage).
+
+    O framework não expõe i18n para \"View less\" / \"View N more\"; o script atua
+    no documento pai e reexecuta em mudanças do DOM.
+    """
+    html = """<!DOCTYPE html><html><body><script>
+    (function () {
+      function translateSidebarPageNav(doc) {
+        try {
+          var sidebar = doc.querySelector('[data-testid="stSidebar"]');
+          if (!sidebar) return;
+          var nodes = sidebar.querySelectorAll('button, a, [role="button"]');
+          for (var i = 0; i < nodes.length; i++) {
+            var el = nodes[i];
+            if (!el) continue;
+            var t = (el.textContent || '').trim();
+            if (t === 'View less') {
+              el.textContent = 'Ver menos';
+            } else if (/^View \\d+ more$/.test(t)) {
+              var m = t.match(/^View (\\d+) more$/);
+              if (m) el.textContent = 'Ver mais ' + m[1];
+            }
+          }
+        } catch (e) {}
+      }
+      try {
+        var p = window.parent;
+        var d = p.document;
+        translateSidebarPageNav(d);
+        var sidebar = d.querySelector('[data-testid="stSidebar"]');
+        if (sidebar && typeof MutationObserver !== 'undefined') {
+          var t = null;
+          var obs = new MutationObserver(function () {
+            if (t) clearTimeout(t);
+            t = setTimeout(function () { translateSidebarPageNav(d); }, 50);
+          });
+          obs.observe(sidebar, { childList: true, subtree: true, characterData: true });
+        }
+      } catch (e) {}
+    })();
+    </script></body></html>"""
+    components.html(html, height=0, width=0)
+
+
 def inject_streamlit_native_theme_reload(theme: str) -> None:
     """
     Persiste o tema no ``localStorage`` do Streamlit e recarrega a página.
@@ -223,6 +269,7 @@ def wiki_theme_apply_authenticated(*, show_sidebar_logout: bool = True) -> None:
     theme = normalize_theme(str(st.session_state.get(SESSION_THEME_KEY, "light")))
     inject_theme_markdown_css(theme)
     inject_parent_data_theme_script(theme)
+    inject_sidebar_page_nav_labels_pt_br()
     render_theme_sidebar_controls()
     if show_sidebar_logout:
         st.sidebar.divider()
