@@ -30,4 +30,5 @@ alwaysApply: true
 - **Nenhum PR** sem cobertura de testes alinhada à mudança (rápidos: **AppTest** + **pytest**; E2E: **Selenium** + **pytest**).
 - **Nunca** alterar nem fazer commit direto na branch `main`.
 - Toda alteração em **nova branch** (ex.: `feature/nome`, `fix/nome`).
+- **Commit + push (pedido pelo utilizador):** não enviar alterações a partir de `main`; garantir branch de trabalho adequada antes do commit. Na **mesma interação** em que se faz push, **criar ou indicar o Pull Request** para `main` (preferência: `gh pr create` com título/descrição em pt-BR, ou URL `compare` se a CLI não estiver disponível).
 - Produção apenas após **Pull Request** e **CI/CD** (GitHub Actions) aprovados.
