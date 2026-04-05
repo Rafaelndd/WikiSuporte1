@@ -29,18 +29,21 @@ PONTOS_VR = [
 
 def inject_hide_streamlit_chrome_for_end_users() -> None:
     """
-    Oculta o menu do canto superior direito (tema, impressão, gravar ecrã, etc.)
-    e o rodapé com a marca Streamlit. Complementa ``client.toolbarMode = minimal``
-    no ``config.toml`` para versões em que o menu ainda aparece.
+    Oculta o menu ⋮ nativo, ações extra da barra e o rodapé Streamlit.
+
+    Não ocultar ``stToolbar`` por completo: no Streamlit 1.55+ o mesmo elemento
+    envolve o botão de expandir a sidebar (``stExpandSidebarButton``); escondê-lo
+    removia expandir/recolher na prática quando a barra começava recolhida.
     """
     st.markdown(
         """
         <style>
-        [data-testid="stToolbar"] {
-            display: none !important;
-        }
         [data-testid="stToolbarActions"],
         [data-testid="stToolbarItems"] {
+            display: none !important;
+        }
+        [data-testid="stMainMenu"],
+        [data-testid="stAppDeployButton"] {
             display: none !important;
         }
         /* Rodapé "Made with Streamlit" / versão */

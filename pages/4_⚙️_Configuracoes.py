@@ -34,6 +34,7 @@ from services.system_notifications import (
 from services.perfil_usuario import eh_admin
 from services.ui_realtime import render_global_notifications_listener
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.wiki_authenticator import process_forced_logout_from_url
 from utils.release_manager import append_release, catalog_path, load_catalog
 
 try:
@@ -59,6 +60,9 @@ except ImportError:
     BOT_CONTROL_DISPONIVEL = False
 
 st.set_page_config(page_title="WikiSuporte - Configurações", page_icon="⚙️", layout="wide")
+
+if process_forced_logout_from_url():
+    st.rerun()
 
 if not st.session_state.get("autenticado"):
     st.switch_page("app.py")

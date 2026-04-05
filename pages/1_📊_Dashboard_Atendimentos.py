@@ -18,6 +18,7 @@ from modules.database import get_connection
 from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.ui_realtime import render_global_notifications_listener
 from services.ui_theme_presets import wiki_theme_apply_authenticated
+from services.wiki_authenticator import process_forced_logout_from_url
 from config_ramais import (
     RAMAIS_EXCLUIR,
     RAMAL_NOME_ESPECIAL,
@@ -64,6 +65,9 @@ st.set_page_config(
     layout="wide", 
     initial_sidebar_state="collapsed"
 )
+
+if process_forced_logout_from_url():
+    st.rerun()
 
 # Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
 if "autenticado" not in st.session_state:
