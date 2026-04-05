@@ -399,6 +399,7 @@ if st.session_state.get('autenticado'):   # <-- correção aqui
     if agora - ultimo_acesso > timedelta(minutes=50):
         wiki_force_logout()
         st.session_state.clear()
+        st.session_state["_ws_skip_stauth_restore"] = True
         st.warning("⏱️ Sessão expirada por inatividade (50 min). Por favor, faça login novamente para continuar.")
         st.stop()
     else:

@@ -26,6 +26,7 @@ WIKI_COOKIE_NAME = "wikisuporte_auth"
 CREDENTIALS_CACHE_TTL_SEC = 120
 # Query string para impedir re-login imediato via cookie após logout (multipage / clear()).
 WS_LOGOUT_QUERY_PARAM = "ws_logout"
+WS_SKIP_STAUTH_RESTORE = "_ws_skip_stauth_restore"
 
 # Inclui NULL e valores "ativos" sem misturar boolean com integer (PG falha em `ativo = 1` se `ativo` for boolean).
 _USUARIO_CONSIDERADO_ATIVO = """(
@@ -188,6 +189,7 @@ def sync_wiki_session_from_stauth() -> None:
     """Espelha o estado do streamlit-authenticator para as chaves usadas pelo WikiSuporte."""
     if not st.session_state.get("authentication_status"):
         st.session_state["autenticado"] = False
+        st.session_state[WS_SKIP_STAUTH_RESTORE] = True
         return
     uname = st.session_state.get("username")
     if not uname:
@@ -203,6 +205,7 @@ def sync_wiki_session_from_stauth() -> None:
         wiki_force_logout()
         return
     st.session_state["autenticado"] = True
+    st.session_state[WS_SKIP_STAUTH_RESTORE] = False
     st.session_state["usuario_id"] = int(row[0])
     st.session_state["usuario_nome"] = str(row[1] or "")
     st.session_state["perfil"] = normalizar_perfil_para_sessao(str(row[2] or "analista"))
@@ -222,6 +225,7 @@ def wiki_force_logout() -> None:
     except Exception as e:
         logging.warning("wiki_force_logout: %s", e)
     st.session_state["autenticado"] = False
+    st.session_state[WS_SKIP_STAUTH_RESTORE] = True
     for k in ("usuario_id", "usuario_nome", "perfil", "ultimo_acesso"):
         st.session_state.pop(k, None)
     for k in (
@@ -244,6 +248,7 @@ def _limpar_sessao_stauth_invalida(auth: Authenticate) -> None:
     except Exception as e:
         logging.debug("delete_cookie após token inválido: %s", e)
     st.session_state["autenticado"] = False
+    st.session_state[WS_SKIP_STAUTH_RESTORE] = True
     for k in (
         "authentication_status",
         "username",
@@ -279,6 +284,7 @@ def process_forced_logout_from_url() -> bool:
     except Exception as e:
         logging.warning("Remover %s da URL: %s", WS_LOGOUT_QUERY_PARAM, e)
     st.session_state["autenticado"] = False
+    st.session_state[WS_SKIP_STAUTH_RESTORE] = True
     if "notificacoes_lidas" not in st.session_state:
         st.session_state["notificacoes_lidas"] = []
     return True
@@ -308,11 +314,14 @@ def render_wiki_sidebar_logout_button() -> None:
         except Exception as e:
             logging.warning("Definir ws_logout na URL: %s", e)
         st.session_state.clear()
+        st.session_state[WS_SKIP_STAUTH_RESTORE] = True
         st.rerun()
 
 
 def ensure_stauth_cookie_restored() -> None:
     """Processa cookie de re-login sem desenhar o formulário padrão da biblioteca."""
+    if st.session_state.get(WS_SKIP_STAUTH_RESTORE):
+        return
     auth = get_wiki_authenticator()
     st.session_state["_wiki_authenticator_ref"] = auth
     try:
