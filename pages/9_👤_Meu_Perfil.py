@@ -12,8 +12,6 @@ import streamlit as st
 
 import cadastro_usuarios as cu
 from services.auth_guard import require_login
-from services.ui_realtime import render_global_notifications_listener
-from services.ui_theme_presets import wiki_theme_apply_authenticated
 
 st.set_page_config(
     page_title="WikiSuporte — Meu perfil",
@@ -21,9 +19,8 @@ st.set_page_config(
     layout="wide",
 )
 
+# ``require_login()`` já aplica notificações globais e tema (evita chave duplicada no rádio ``ws_streamlit_theme``).
 require_login()
-render_global_notifications_listener()
-wiki_theme_apply_authenticated()
 
 _ROOT = Path(__file__).resolve().parent.parent
 _FOTOS_DIR = _ROOT / "uploads" / "fotos_perfil"

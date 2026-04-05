@@ -154,7 +154,7 @@ def _bloco_home(styles):
         _p(styles, "Passo", "• Saudação (bom dia / boa tarde / boa noite) e seu nome."),
         _p(styles, "Passo", "• Clima atual (informativo)."),
         _p(styles, "Passo", "• Alertas do dia: por exemplo plantão, validações de release pendentes e avisos de representante."),
-        _p(styles, "Passo", "• Seus indicadores: nível, XP, posição no ranking e missões."),
+        _p(styles, "Passo", "• Seus indicadores: nível, XP e posição no ranking."),
         _p(styles, "Passo", "• Central de notificações: lista de avisos pendentes e histórico dos que você já leu."),
         _p(styles, "Subsec", "Passo a passo: como usar os alertas"),
         _p(styles, "Passo", "1. Leia os alertas na seção <b>Central de Notificações</b>."),

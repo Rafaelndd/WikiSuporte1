@@ -93,7 +93,7 @@ except ImportError:
 
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
 st.set_page_config(
-    page_title="Wiki-Suporte", 
+    page_title="WikiSuporte", 
     page_icon="💡", 
     layout="wide", 
     initial_sidebar_state="collapsed"
@@ -180,13 +180,13 @@ def obter_kpis_home(usuario_id):
         "minhas_dicas": 0,
         "meu_xp": 0,
         "posicao_ranking": "-",
-        "impacto_visualizacoes": 0,
         "upvotes_recebidos": 0,
         "nivel_atual": "Iniciante 🌱",
         "progresso_nivel": 0.0,
-        "missoes_ativas": [],
+       
         "caminho_foto_perfil": None,
         "em_pausa": False,
+        "nunca_contribuiu_aprovado": False,
         "dias_sem_contribuir": 0,
         "penalidade_sofrida_semana": 0,
         "bonus_recebido_semana": False,
@@ -216,29 +216,55 @@ def obter_kpis_home(usuario_id):
                     row_u.get("em_ferias") or row_u.get("em_atendimento_externo")
                 )
 
-            # 1b. Dias desde última contribuição APROVADA (data_avaliacao, UTC)
+            # 1b. Contribuições aprovadas: nunca vs. dias desde a última (data_avaliacao, UTC)
             try:
-                q_dias = text("""
-                    SELECT CASE
-                        WHEN MAX(data_avaliacao) IS NULL THEN 999
-                        ELSE (
-                            DATE(timezone('UTC', CURRENT_TIMESTAMP))
-                            - DATE(timezone('UTC', MAX(data_avaliacao)))
-                        )::integer
-                    END
+                q_contrib = text("""
+                    SELECT
+                        COUNT(*)::integer AS qtd_aprovadas,
+                        MAX(data_avaliacao) AS ultima_avaliacao
                     FROM base_conhecimento
                     WHERE id_analista_autor = :uid
                       AND status = 'APROVADO'
                       AND origem = 'CONHECIMENTO_SUPORTE'
-                      AND data_avaliacao IS NOT NULL
                 """)
-                dval = conn.execute(q_dias, {"uid": usuario_id}).scalar()
-                kpis["dias_sem_contribuir"] = int(dval) if dval is not None else 999
+                row_c = conn.execute(q_contrib, {"uid": usuario_id}).fetchone()
+                if row_c:
+                    qtd_aprov = int(row_c[0] or 0)
+                    ultima = row_c[1]
+                    if qtd_aprov == 0:
+                        kpis["nunca_contribuiu_aprovado"] = True
+                        kpis["dias_sem_contribuir"] = 0
+                    else:
+                        kpis["nunca_contribuiu_aprovado"] = False
+                        if ultima is None:
+                            logging.warning(
+                                "KPI: utilizador %s tem %s aprovações sem data_avaliacao; "
+                                "assumindo dias_sem_contribuir=0",
+                                usuario_id,
+                                qtd_aprov,
+                            )
+                            kpis["dias_sem_contribuir"] = 0
+                        else:
+                            dval = conn.execute(
+                                text(
+                                    """
+                                    SELECT (
+                                        DATE(timezone('UTC', CURRENT_TIMESTAMP))
+                                        - DATE(timezone('UTC', CAST(:ult AS timestamptz)))
+                                    )::integer
+                                    """
+                                ),
+                                {"ult": ultima},
+                            ).scalar()
+                            kpis["dias_sem_contribuir"] = (
+                                int(dval) if dval is not None else 0
+                            )
             except Exception as ex_dias:
                 logging.warning(
                     "KPI dias_sem_contribuir indisponível (migração/coluna?): %s", ex_dias
                 )
                 kpis["dias_sem_contribuir"] = 0
+                kpis["nunca_contribuiu_aprovado"] = False
 
             # 1c. Penalidades e bônus na semana ISO (UTC) — user_xp_events
             try:
@@ -284,8 +310,7 @@ def obter_kpis_home(usuario_id):
             query_stats = text("""
                 SELECT 
                     COUNT(id) as total_posts,
-                    COALESCE(SUM(qtd_upvotes), 0) as total_upvotes,
-                    COALESCE(SUM(qtd_visualizacoes), 0) as total_views
+                    COALESCE(SUM(qtd_upvotes), 0) as total_upvotes
                 FROM base_conhecimento 
                 WHERE id_analista_autor = :uid 
                   AND status = 'APROVADO' 
@@ -296,7 +321,6 @@ def obter_kpis_home(usuario_id):
             if res_stats:
                 kpis["minhas_dicas"] = res_stats.total_posts
                 kpis["upvotes_recebidos"] = res_stats.total_upvotes
-                kpis["impacto_visualizacoes"] = res_stats.total_views
 
             # 3. RANKING (Simplificado)
             query_rank = text("""
@@ -308,38 +332,42 @@ def obter_kpis_home(usuario_id):
             rank_val = conn.execute(query_rank, {"uid": usuario_id}).scalar()
             kpis["posicao_ranking"] = f"{rank_val}º Lugar" if rank_val else "N/A"
 
-            # 4. MISSÕES (Engajamento)
-            if kpis["upvotes_recebidos"] < 10:
-                kpis["missoes_ativas"].append("⭐ **Missão:** Alcance 10 curtidas para subir de nível!")
-            
-            # Verifica voto nas últimas 24h
-            voto_hoje = conn.execute(text("""
-                SELECT EXISTS(
-                    SELECT 1 FROM base_conhecimento_votos 
-                    WHERE id_analista_votante = :uid AND data_voto >= now() - interval '24 hours'
-                )
-            """), {"uid": usuario_id}).scalar()
-            
-            if not voto_hoje:
-                kpis["missoes_ativas"].append("🔍 **Missão:** Avalie a dica de um colega hoje!")
-
     except Exception as e:
         logging.exception("Erro crítico em obter_kpis_home para usuario_id=%s: %s", usuario_id, e)
 
     return kpis
 
 
-def _html_avatar_perfil_circular(caminho: str | None, tamanho_px: int = 76) -> str:
-    """Retorna <img> em data-URI para uso em st.markdown, ou string vazia."""
-    if not caminho:
-        return ""
-    p = Path(caminho)
-    if not p.is_file():
-        return ""
-    try:
-        raw = p.read_bytes()
-    except OSError:
-        return ""
+def _html_avatar_perfil_circular(
+    caminho: str | None,
+    tamanho_px: int = 76,
+    *,
+    placeholder_se_sem_foto: bool = False,
+) -> str:
+    """
+    Retorna <img> em data-URI ou, com ``placeholder_se_sem_foto``, um círculo com ícone
+    quando não há ficheiro válido.
+    """
+    p_ok = False
+    if caminho:
+        p = Path(caminho)
+        if p.is_file():
+            try:
+                raw = p.read_bytes()
+            except OSError:
+                raw = None
+            else:
+                p_ok = True
+    if not p_ok:
+        if not placeholder_se_sem_foto:
+            return ""
+        fs = max(tamanho_px // 3, 28)
+        return (
+            f'<div aria-hidden="true" style="width:{tamanho_px}px;height:{tamanho_px}px;'
+            f"border-radius:50%;background:linear-gradient(145deg,#eef2f7,#e2e8f0);"
+            f"border:3px solid #15789a;display:block;margin:0 auto;"
+            f"text-align:center;line-height:{tamanho_px}px;font-size:{fs}px;\">👤</div>"
+        )
     b64 = base64.b64encode(raw).decode("ascii")
     ext = p.suffix.lower()
     mime = {
@@ -709,38 +737,27 @@ def tela_home() -> None:
 
     st.divider()
 
-    # SAUDAÇÃO E CLIMA USANDO COMPONENTES NATIVOS
-    col_texto = st.container()
-
-    with col_texto:
-        # --- 1. Definição segura e local da data (Sem o import aqui dentro!) ---
-        hoje = datetime.now()
-        dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
-        data_atual = f"{dias_semana[hoje.weekday()]}, {hoje.strftime('%d/%m/%Y')}"
-
-        # --- 2. OTIMIZAÇÃO: Saudação à prova de bugs de formatação ---
-        saudacao = obter_saudacao()
-        saudacao_lower = saudacao.lower() 
-        
-        if "noite" in saudacao_lower:
-            icone_saudacao = "🌕 💻"
-        elif "tarde" in saudacao_lower:
-            icone_saudacao = "🌤️ 💻"
-        else:
-            icone_saudacao = "☀️ 💻"
-        
-        # --- 3. UI: Cabeçalho e Descrição ---
-        st.header(f"{saudacao}, {nome_usuario}! {icone_saudacao}", anchor=False)
-
-        # --- 4. EXIBIÇÃO: Alertas dinâmicos ---
-        total_alertas_reais = len(df_plantao) + len(df_correcoes)
-        
-        if total_alertas_reais > 0:
-            st.markdown(f"**📅 {data_atual}** &nbsp;|&nbsp; ⚡ **{total_alertas_reais}** alerta(s) no sistema")
-        else:
-            st.markdown(f"**📅 {data_atual}**")
-        
-        st.write("")
+    # Data e saudação (reutilizados no painel de KPIs abaixo)
+    hoje = datetime.now()
+    dias_semana = [
+        "Segunda-feira",
+        "Terça-feira",
+        "Quarta-feira",
+        "Quinta-feira",
+        "Sexta-feira",
+        "Sábado",
+        "Domingo",
+    ]
+    data_atual = f"{dias_semana[hoje.weekday()]}, {hoje.strftime('%d/%m/%Y')}"
+    saudacao = obter_saudacao()
+    saudacao_lower = saudacao.lower()
+    if "noite" in saudacao_lower:
+        icone_saudacao = "🌕 💻"
+    elif "tarde" in saudacao_lower:
+        icone_saudacao = "🌤️ 💻"
+    else:
+        icone_saudacao = "☀️ 💻"
+    total_alertas_reais = len(df_plantao) + len(df_correcoes)
 
     # 1. Primeiro recuperamos o ID e os dados (KPIs)
     usuario_id = st.session_state.get('usuario_id')
@@ -757,13 +774,20 @@ def tela_home() -> None:
             )
         st.session_state["ws_last_medalha"] = medalha_atual
 
-        # 2. RENDERIZAÇÃO DOS TROFÉUS (Logo após o divisor, antes das notificações)
+        # 2. Painel gamificado (foto, saudação, patente, XP e posição)
         if kpis:
-            renderizar_dashboard_conquistas(kpis)
+            renderizar_dashboard_conquistas(
+                kpis,
+                nome_usuario=nome_usuario,
+                saudacao=saudacao,
+                icone_saudacao=icone_saudacao,
+                data_atual=data_atual,
+                total_alertas_reais=total_alertas_reais,
+            )
         else:
             st.warning("Não foi possível carregar seus indicadores de desempenho.")
         
-        st.divider()  # Divisor entre o Ranking e as Notificações
+        st.divider()  # Entre o painel e as notificações
 
         # 1. Padronização dos Alertas em uma Lista de Dicionários
         notificacoes_atuais: list[dict] = []
@@ -879,7 +903,15 @@ def tela_home() -> None:
     else:
         st.error("Erro de contexto: Sessão inválida. Por favor, faça login novamente.", icon="🛑")
 #===============================================================================================================================================================#
-def renderizar_dashboard_conquistas(kpis):
+def renderizar_dashboard_conquistas(
+    kpis,
+    *,
+    nome_usuario: str,
+    saudacao: str,
+    icone_saudacao: str,
+    data_atual: str,
+    total_alertas_reais: int,
+) -> None:
     if kpis.get("em_pausa"):
         st.info(
             "🏖️ Seu perfil está em modo de pausa (Férias/Atendimento Externo). "
@@ -887,90 +919,107 @@ def renderizar_dashboard_conquistas(kpis):
         )
 
     nivel_txt = str(kpis.get("nivel_atual", "Iniciante 🌱"))
-    partes_nivel = nivel_txt.split()
-    icone_nivel = partes_nivel[-1] if partes_nivel else "🌱"
-    avatar_html = _html_avatar_perfil_circular(kpis.get("caminho_foto_perfil"))
+    avatar_html = _html_avatar_perfil_circular(
+        kpis.get("caminho_foto_perfil"),
+        tamanho_px=128,
+        placeholder_se_sem_foto=True,
+    )
+    prog = float(kpis.get("progresso_nivel", 0.0))
+    proximo_xp = 1000 - (int(kpis.get("meu_xp", 0)) % 1000)
 
-    # 1. CABEÇALHO DE NÍVEL E PROGRESSO (UX Gamificada)
+    # Topo: foto maior, centrada; saudação e nome por baixo
+    st.markdown(
+        f'<div class="ws-home-user-block" style="text-align:center;margin:0 auto 0.35rem auto;max-width:36rem;">'
+        f"{avatar_html}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<h2 style='text-align:center;margin:0.15rem 0 0.35rem 0;font-weight:700;'>"
+        f"{saudacao}, {nome_usuario}! {icone_saudacao}</h2>",
+        unsafe_allow_html=True,
+    )
+    if total_alertas_reais > 0:
+        st.markdown(
+            f"<p style='text-align:center;margin:0 0 0.75rem 0;color:#4b5563;'>"
+            f"<strong>📅 {data_atual}</strong> &nbsp;|&nbsp; ⚡ <strong>{total_alertas_reais}</strong> alerta(s) no sistema"
+            f"</p>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<p style='text-align:center;margin:0 0 0.75rem 0;color:#4b5563;'>"
+            f"<strong>📅 {data_atual}</strong></p>",
+            unsafe_allow_html=True,
+        )
+
+    # Patente + barra (coluna mais estreita à esquerda) | indicadores alinhados à direita
     with st.container(border=True):
-        if avatar_html:
-            col_foto, col_rank_icon, col_progress = st.columns([1, 1, 3])
-            with col_foto:
-                st.markdown(avatar_html, unsafe_allow_html=True)
-            with col_rank_icon:
-                st.markdown(
-                    f"<h1 style='text-align: center; margin:0;'>{icone_nivel}</h1>",
-                    unsafe_allow_html=True,
+        col_prog, col_ind = st.columns([0.38, 0.62], gap="large")
+        with col_prog:
+            st.caption("Patente")
+            st.markdown(f"**{nivel_txt}**")
+            st.progress(prog)
+            st.caption(f"✨ Faltam **{proximo_xp} XP** para o próximo nível")
+        with col_ind:
+            st.markdown(
+                '<div style="padding-top:0.15rem"></div>',
+                unsafe_allow_html=True,
+            )
+            m1, m2 = st.columns(2, gap="small")
+            with m1:
+                st.metric(
+                    label="Pontuação atual",
+                    value=f"{kpis['meu_xp']} XP",
                 )
-            with col_progress:
-                st.markdown(f"**Nível Atual:** {nivel_txt}")
-                st.progress(float(kpis.get("progresso_nivel", 0.0)))
-                proximo_xp = 1000 - (int(kpis.get("meu_xp", 0)) % 1000)
-                st.caption(f"✨ Faltam **{proximo_xp} XP** para o próximo nível")
-        else:
-            col_rank_icon, col_progress = st.columns([1, 4])
-            with col_rank_icon:
-                st.markdown(
-                    f"<h1 style='text-align: center; margin:0;'>{icone_nivel}</h1>",
-                    unsafe_allow_html=True,
+                st.caption("Baseado em posts e curtidas")
+            with m2:
+                st.metric(
+                    label="Posição na equipe",
+                    value=kpis["posicao_ranking"],
                 )
-            with col_progress:
-                st.markdown(f"**Nível Atual:** {nivel_txt}")
-                st.progress(float(kpis.get("progresso_nivel", 0.0)))
-                proximo_xp = 1000 - (int(kpis.get("meu_xp", 0)) % 1000)
-                st.caption(f"✨ Faltam **{proximo_xp} XP** para o próximo nível")
 
     st.write("")
 
-    # 2. GRID DE KPIs PRINCIPAIS (3 Colunas)
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        with st.container(border=True):
-            st.metric(
-                label="⭐ XP Acumulado",
-                value=f"{kpis['meu_xp']} XP",
-                delta="Pontos Totais",
-            )
-            st.caption("Baseado em Posts + Upvotes")
-
-    with col2:
-        with st.container(border=True):
-            pos = kpis["posicao_ranking"]
-            label_rank = (
-                "🏆 Posição no Ranking"
-                if "1º" in pos or "2º" in pos or "3º" in pos
-                else "🏅 Posição na Equipe"
-            )
-            st.metric(label=label_rank, value=pos)
-            st.caption("Ranking de Qualidade")
-
-    with col3:
-        with st.container(border=True):
-            impacto_total = kpis["impacto_visualizacoes"] + (kpis["upvotes_recebidos"] * 5)
-            st.metric(label="🚀 Impacto Total", value=impacto_total)
-            st.caption(
-                f"👀 {kpis['impacto_visualizacoes']} views | 👍 {kpis['upvotes_recebidos']} úteis"
-            )
-
-    st.write("")
-
-    # 3. SEÇÃO DE ENGAJAMENTO (Missões + alertas XP / penalidades / bônus)
-    tem_missoes = bool(kpis.get("missoes_ativas"))
+    # 3. Alertas de XP (contribuição, penalidades, bônus semanal de aprovações)
+    nunca = bool(kpis.get("nunca_contribuiu_aprovado"))
     dias_sem = int(kpis.get("dias_sem_contribuir", 0))
     em_pausa = bool(kpis.get("em_pausa"))
     pen_sem = int(kpis.get("penalidade_sofrida_semana", 0))
     bonus_sem = bool(kpis.get("bonus_recebido_semana"))
+
+    em_dia_contribuicao = (
+        not nunca
+        and not em_pausa
+        and dias_sem < 5
+    )
+    if em_dia_contribuicao:
+        st.success(
+            "🌟 **Excelente!** Obrigado pela dedicação e constância nas contribuições "
+            "à nossa Base de Conhecimento."
+        )
+
+    risco_penalidade_contrib = (
+        not nunca
+        and not em_pausa
+        and dias_sem >= 5
+    )
     tem_alertas_xp = (
-        (not em_pausa and dias_sem >= 5)
+        nunca
+        or risco_penalidade_contrib
         or bonus_sem
         or (pen_sem < 0)
-        or tem_missoes
     )
 
     if tem_alertas_xp:
-        with st.expander("🎯 **Missões e Desafios da Semana**", expanded=True):
-            if not em_pausa and dias_sem >= 5:
+        with st.expander("📌 **Avisos de XP e contribuição**", expanded=True):
+            if nunca:
+                st.info(
+                    "🌱 **Faça sua primeira contribuição** e ajude a nossa Base de Conhecimento a crescer! "
+                    "Envie uma dica ou artigo em **Contribuições Suporte**."
+                )
+
+            if risco_penalidade_contrib:
                 st.markdown(
                     """
                     <div style="
@@ -1003,32 +1052,16 @@ def renderizar_dashboard_conquistas(kpis):
                     "em eventos de penalidade registados nesta semana ISO."
                 )
 
-            if tem_missoes:
-                for missao in kpis["missoes_ativas"]:
-                    st.markdown(f"{missao}")
-                st.caption("Complete missões para ganhar bônus de XP e medalhas exclusivas.")
-
-            if bonus_sem:
-                st.success(
-                    "🎉 **Bônus da semana!** Você recebeu XP extra pelo desempenho "
-                    "(ex.: meta semanal de aprovações — 5 contribuições **+1000 XP**). Parabéeeeeeens!"
-                )
-
-            if pen_sem < 0:
-                st.caption(
-                    f"📉 Na  última semana foi aplicado desconto de **{pen_sem} do seu XP**"
-                )
-
     # 4. MINI-RESUMO DE CONTRIBUIÇÕES
     st.subheader("📚 Minhas Estatísticas", anchor=False)
     c1, c2, c3 = st.columns(3)
     c1.write(f"📂 **Posts Aprovados:** {kpis['minhas_dicas']}")
-    c2.write(f"👍 **Votos Recebidos:** {kpis['upvotes_recebidos']}")
+    c2.write(f"👍 **Curtidas recebidas:** {kpis['upvotes_recebidos']}")
     dias_u = int(kpis.get("dias_sem_contribuir", 0))
-    if dias_u >= 999:
-        ultima_txt = "Nenhuma contribuição aprovada registada (com data de avaliação)"
+    if kpis.get("nunca_contribuiu_aprovado"):
+        ultima_txt = "Ainda sem contribuições aprovadas — que tal a primeira?"
     elif dias_u <= 0:
-        ultima_txt = "Dados indisponíveis ou migração pendente (`data_avaliacao`)"
+        ultima_txt = "Última aprovação hoje (UTC) ou dados muito recentes"
     else:
         ultima_txt = f"{dias_u} dia(s) desde a última contribuição aprovada"
     c3.write(f"📅 **Última contribuição aprovada:** {ultima_txt}")
