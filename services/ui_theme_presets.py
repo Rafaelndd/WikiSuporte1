@@ -213,8 +213,8 @@ def wiki_theme_apply_authenticated(*, show_sidebar_logout: bool = True) -> None:
 
     Deve ser chamado depois de ``st.set_page_config`` e da verificação de login.
 
-    ``show_sidebar_logout=False`` na Home: o ``app.py`` desenha o utilizador/ponto antes
-    e chama ``render_wiki_sidebar_logout_button()`` por último. Nas demais páginas,
+    ``show_sidebar_logout=False`` na Home: o ``app.py`` desenha ponto VR e chama
+    ``render_wiki_sidebar_logout_button()`` por último. Nas demais páginas,
     deixe o padrão ``True`` para o Sair aparecer após o tema.
     """
     if not st.session_state.get("autenticado"):

@@ -154,8 +154,7 @@ def _formatar_contagem(segundos: int) -> str:
         segundos = 0
     horas = segundos // 3600
     minutos = (segundos % 3600) // 60
-    seg = segundos % 60
-    return f"{horas:02d}:{minutos:02d}:{seg:02d}"
+    return f"{horas:02d}:{minutos:02d}"
 
 
 def _proximo_evento_ponto(now: datetime) -> tuple[datetime, str, str]:

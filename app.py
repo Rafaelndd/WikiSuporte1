@@ -55,8 +55,6 @@ from services.wiki_authenticator import (
 )
 from services.ui_theme_presets import wiki_theme_apply_authenticated, wiki_theme_apply_login_page
 from services.ui_avatar import html_avatar_perfil_circular
-from services.release_notes_banner import render_home_release_nudge
-
 #======================================================================================================================#
 # Variáveis de ambiente: carregadas no topo (antes de database / wiki_authenticator).
 #======================================================================================================================#
@@ -530,20 +528,14 @@ def tela_home() -> None:
     render_global_notifications_listener()
     wiki_theme_apply_authenticated(show_sidebar_logout=False)
 
-    # --- DADOS DO USUÁRIO ---
+    # --- DADOS DO USUÁRIO (nome usado no painel principal; sidebar sem cabeçalho de perfil) ---
     nome_usuario = str(st.session_state.get('usuario_nome', '')).capitalize()
-    perfil_usuario = str(st.session_state.get('perfil', 'analista')).lower()
     usuario_id = st.session_state.get('usuario_id', 0)
 
     # Busca alertas de plantão e correções logo no início
     df_plantao, df_correcoes = obter_alertas_usuario(usuario_id)
-    
-    # --- CONSTRUÇÃO DA BARRA LATERAL (PÓS-LOGIN) ---
-    st.sidebar.markdown(f"## 👤 {nome_usuario}")
-    st.sidebar.markdown(f"### {obter_saudacao()}!")
-    st.sidebar.caption(f"🛡️ Perfil: **{perfil_usuario.title()}**")
-    st.sidebar.divider()
 
+    # --- CONSTRUÇÃO DA BARRA LATERAL (PÓS-LOGIN) ---
     # Aviso de Plantão
     if not df_plantao.empty:
         st.sidebar.error("🚨 Você tem Plantão hoje!")
@@ -597,8 +589,6 @@ def tela_home() -> None:
     # ==========================================
     # --- ÁREA PRINCIPAL DA TELA (CONTEÚDO) ---
     # ==========================================
-    render_home_release_nudge()
-
     st.markdown(
         """
         <style>
