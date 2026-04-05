@@ -17,6 +17,8 @@ from services.notificacao_tipos import TIPOS_VALIDOS, normalizar_tipo_notificaca
         ("erro_critico", "erro_critico"),
         ("Versão Bloqueada", "versao_bloqueada"),
         ("  versão  bloqueada  ", "versao_bloqueada"),
+        ("Release WikiSuporte", "release_wikisuporte"),
+        (" release   wikisuporte ", "release_wikisuporte"),
         ("invalid", None),
         ("", None),
     ],

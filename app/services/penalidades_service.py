@@ -13,6 +13,8 @@ from sqlalchemy import Connection, text
 from app.core.penalidades_xp import ResultadoPenalidade, avaliar_penalidades_usuario
 
 ORIGEM_CONHECIMENTO_SUPORTE = "CONHECIMENTO_SUPORTE"
+JANELA_CARENCIA_DIAS_DEFAULT = 7
+MAX_DESCONTO_SEMANAL_XP_DEFAULT = 100
 
 
 class ResumoPenalidadesDict(TypedDict):
@@ -47,24 +49,32 @@ def resumo_para_dict(r: ResumoProcessamentoPenalidades) -> ResumoPenalidadesDict
     }
 
 
-def carregar_regras_penalidade(conn: Connection) -> tuple[int, int, int]:
+def carregar_regras_penalidade(conn: Connection) -> tuple[int, int, int, int, int]:
     row = conn.execute(
         text(
             """
             SELECT penalidade_sem_7_dias,
                    minimo_semanal_sem_penalidade,
-                   penalidade_semana_insuficiente
+                   penalidade_semana_insuficiente,
+                   COALESCE(janela_carencia_dias, :carencia_default) AS janela_carencia_dias,
+                   COALESCE(max_desconto_semanal_xp, :max_desc_default) AS max_desconto_semanal_xp
             FROM contribution_scoring_rules
             WHERE id = 1
             """
-        )
+        ),
+        {
+            "carencia_default": JANELA_CARENCIA_DIAS_DEFAULT,
+            "max_desc_default": MAX_DESCONTO_SEMANAL_XP_DEFAULT,
+        },
     ).mappings().first()
     if not row:
-        return (0, 0, 0)
+        return (0, 0, 0, JANELA_CARENCIA_DIAS_DEFAULT, MAX_DESCONTO_SEMANAL_XP_DEFAULT)
     return (
         int(row["penalidade_sem_7_dias"]),
         int(row["minimo_semanal_sem_penalidade"]),
         int(row["penalidade_semana_insuficiente"]),
+        int(row["janela_carencia_dias"]),
+        int(row["max_desconto_semanal_xp"]),
     )
 
 
@@ -72,7 +82,7 @@ def listar_analistas_para_penalidade(conn: Connection) -> list[Mapping[str, Any]
     result = conn.execute(
         text(
             """
-            SELECT id, perfil, ativo, em_ferias, em_atendimento_externo
+            SELECT id, perfil, ativo, em_ferias, em_atendimento_externo, data_criacao
             FROM usuarios
             WHERE COALESCE(ativo, FALSE) = TRUE
               AND lower(trim(COALESCE(perfil, ''))) = 'analista'
@@ -81,6 +91,64 @@ def listar_analistas_para_penalidade(conn: Connection) -> list[Mapping[str, Any]
         )
     )
     return list(result.mappings().all())
+
+
+def usuario_em_janela_carencia(
+    conn: Connection,
+    usuario_id: int,
+    data_criacao: Any,
+    *,
+    janela_dias: int = JANELA_CARENCIA_DIAS_DEFAULT,
+) -> bool:
+    """
+    Janela de carência para:
+    - colaborador novo (criado nos últimos N dias), ou
+    - retorno recente de férias/atendimento externo (flag true -> false em auditoria).
+    """
+    dias = max(1, int(janela_dias))
+
+    if data_criacao is not None:
+        try:
+            diff_novo = conn.execute(
+                text(
+                    """
+                    SELECT (
+                        DATE(timezone('UTC', CURRENT_TIMESTAMP))
+                        - DATE(timezone('UTC', CAST(:dc AS timestamptz)))
+                    )::integer AS dias
+                    """
+                ),
+                {"dc": data_criacao},
+            ).mappings().one()
+            if int(diff_novo["dias"]) < dias:
+                return True
+        except Exception:
+            pass
+
+    try:
+        row = conn.execute(
+            text(
+                """
+                SELECT 1
+                FROM log_auditoria_usuarios
+                WHERE operacao = 'UPDATE'
+                  AND data_hora >= (CURRENT_TIMESTAMP - (:dias * INTERVAL '1 day'))
+                  AND COALESCE((dados_novos->>'id')::integer, (dados_anteriores->>'id')::integer) = :uid
+                  AND (
+                    (lower(COALESCE(dados_anteriores->>'em_ferias', 'false')) = 'true'
+                     AND lower(COALESCE(dados_novos->>'em_ferias', 'false')) = 'false')
+                    OR
+                    (lower(COALESCE(dados_anteriores->>'em_atendimento_externo', 'false')) = 'true'
+                     AND lower(COALESCE(dados_novos->>'em_atendimento_externo', 'false')) = 'false')
+                  )
+                LIMIT 1
+                """
+            ),
+            {"uid": int(usuario_id), "dias": dias},
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
 
 
 def obter_semana_iso_utc_referencia(conn: Connection) -> tuple[str, str]:
@@ -215,7 +283,7 @@ def processar_penalidades_contribuicao(conn: Connection) -> ResumoProcessamentoP
     Retorna o resumo estruturado; use `resumo_para_dict` na UI (Streamlit, APIs).
     """
     resumo = ResumoProcessamentoPenalidades()
-    p7, min_sem, p_insuf = carregar_regras_penalidade(conn)
+    p7, min_sem, p_insuf, carencia_dias, max_desc = carregar_regras_penalidade(conn)
     ano_iso, semana_iso = obter_semana_iso_utc_referencia(conn)
 
     analistas = listar_analistas_para_penalidade(conn)
@@ -227,6 +295,15 @@ def processar_penalidades_contribuicao(conn: Connection) -> ResumoProcessamentoP
         if isento:
             resumo.isentos_pulados += 1
             continue
+        em_carencia = usuario_em_janela_carencia(
+            conn,
+            uid,
+            row.get("data_criacao"),
+            janela_dias=carencia_dias,
+        )
+        if em_carencia:
+            resumo.isentos_pulados += 1
+            continue
 
         _, a7, sem = coletar_metricas_contribuicao(conn, uid)
         r = avaliar_penalidades_usuario(
@@ -236,6 +313,7 @@ def processar_penalidades_contribuicao(conn: Connection) -> ResumoProcessamentoP
             minimo_semanal_sem_penalidade=min_sem,
             penalidade_semana_insuficiente=p_insuf,
             isento=False,
+            max_desconto_semanal=max_desc,
         )
 
         if not r.aplicar:

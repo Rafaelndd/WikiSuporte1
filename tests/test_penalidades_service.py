@@ -34,6 +34,8 @@ def test_usuario_em_ferias_e_pulado_sem_insert_penalidade():
                 "penalidade_sem_7_dias": 200,
                 "minimo_semanal_sem_penalidade": 5,
                 "penalidade_semana_insuficiente": 100,
+                "janela_carencia_dias": 7,
+                "max_desconto_semanal_xp": 100,
             }
         elif "to_char(timezone('UTC', CURRENT_TIMESTAMP), 'IYYY')" in s:
             r.mappings.return_value.one.return_value = {"ano_iso": "2026", "semana_iso": "14"}
@@ -74,6 +76,8 @@ def test_penalidade_gravada_com_pontos_negativos():
                 "penalidade_sem_7_dias": 200,
                 "minimo_semanal_sem_penalidade": 5,
                 "penalidade_semana_insuficiente": 100,
+                "janela_carencia_dias": 7,
+                "max_desconto_semanal_xp": 100,
             }
         elif "to_char(timezone('UTC', CURRENT_TIMESTAMP), 'IYYY')" in s and "IW" in s:
             r.mappings.return_value.one.return_value = {"ano_iso": "2026", "semana_iso": "14"}
@@ -87,6 +91,8 @@ def test_penalidade_gravada_com_pontos_negativos():
                     "em_atendimento_externo": False,
                 }
             ]
+        elif "FROM log_auditoria_usuarios" in s:
+            r.fetchone.return_value = None
         elif "INTERVAL '7 days'" in s:
             r.mappings.return_value.one.return_value = {"n": 0}
         elif "IYYY-IW" in s and "COUNT(*)" in s:
@@ -95,7 +101,7 @@ def test_penalidade_gravada_com_pontos_negativos():
             r.mappings.return_value.one.return_value = {"dias": 999}
         elif "INSERT INTO user_xp_events" in s:
             assert params is not None
-            assert params["pts"] == -200
+            assert params["pts"] == -100
             assert params["uid"] == 42
             assert "PENALIDADE_SEMANA_2026_14_USER_42_SEM_7_DIAS" == params["ek"]
             r.scalar_one_or_none.return_value = 9001
@@ -123,6 +129,8 @@ def test_event_key_impede_segundo_desconto_na_mesma_semana():
                 "penalidade_sem_7_dias": 200,
                 "minimo_semanal_sem_penalidade": 5,
                 "penalidade_semana_insuficiente": 100,
+                "janela_carencia_dias": 7,
+                "max_desconto_semanal_xp": 100,
             }
         elif "to_char(timezone('UTC', CURRENT_TIMESTAMP), 'IYYY')" in s and "IW" in s:
             r.mappings.return_value.one.return_value = {"ano_iso": "2026", "semana_iso": "14"}
@@ -136,6 +144,8 @@ def test_event_key_impede_segundo_desconto_na_mesma_semana():
                     "em_atendimento_externo": False,
                 }
             ]
+        elif "FROM log_auditoria_usuarios" in s:
+            r.fetchone.return_value = None
         elif "INTERVAL '7 days'" in s:
             r.mappings.return_value.one.return_value = {"n": 0}
         elif "IYYY-IW" in s and "COUNT(*)" in s:
@@ -180,3 +190,19 @@ def test_avaliar_motor_isento_nunca_aplica():
     )
     assert not r.aplicar
     assert r.pontos == 0
+
+
+def test_motor_cap_desconto_semanal_em_100():
+    from app.core.penalidades_xp import avaliar_penalidades_usuario
+
+    r = avaliar_penalidades_usuario(
+        aprovacoes_ultimos_7_dias=0,
+        aprovacoes_semana_iso_atual=0,
+        penalidade_sem_7_dias=200,
+        minimo_semanal_sem_penalidade=5,
+        penalidade_semana_insuficiente=150,
+        isento=False,
+        max_desconto_semanal=100,
+    )
+    assert r.aplicar
+    assert r.pontos == -100

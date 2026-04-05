@@ -11,11 +11,13 @@ ALTER TABLE base_conhecimento ADD COLUMN IF NOT EXISTS qtd_tentativas INTEGER DE
 -- Configuração singleton de pontuação
 CREATE TABLE IF NOT EXISTS contribution_scoring_rules (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    pontos_evento_passado INTEGER NOT NULL DEFAULT 125,
+    pontos_evento_passado INTEGER NOT NULL DEFAULT 90,
     multiplicador_diario_apos_qtd INTEGER NOT NULL DEFAULT 3,
     multiplicador_diario_valor INTEGER NOT NULL DEFAULT 2,
     bonus_semanal_meta_qtd INTEGER NOT NULL DEFAULT 15,
     bonus_semanal_meta_pontos INTEGER NOT NULL DEFAULT 1000,
+    janela_carencia_dias INTEGER NOT NULL DEFAULT 7,
+    max_desconto_semanal_xp INTEGER NOT NULL DEFAULT 100,
     atualizado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -73,7 +75,7 @@ BEGIN
     FROM user_xp_events ux
     WHERE ux.usuario_id = p_user_id;
 
-    v_xp := COALESCE(v_contrib, 0) + COALESCE(v_ev, 0);
+    v_xp := GREATEST(0, COALESCE(v_contrib, 0) + COALESCE(v_ev, 0));
 
     v_medalha := CASE
         WHEN v_xp >= 1000000 THEN 'Expert'

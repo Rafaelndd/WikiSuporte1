@@ -26,10 +26,10 @@ def test_data_utc_com_tz():
 
 
 def test_evento_passado_base():
-    cfg = ContributionXpConfig(pontos_evento_passado=125)
+    cfg = ContributionXpConfig(pontos_evento_passado=90)
     o = date(2026, 1, 1)
     s = date(2026, 4, 3)
-    assert calcular_pontos_base("EVENTO_PASSADO", o, s, False, cfg) == 125
+    assert calcular_pontos_base("EVENTO_PASSADO", o, s, False, cfg) == 90
 
 
 def test_evento_atual_faixas():
