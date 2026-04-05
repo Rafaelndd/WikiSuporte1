@@ -187,6 +187,7 @@ def obter_kpis_home(usuario_id):
        
         "caminho_foto_perfil": None,
         "em_pausa": False,
+        "nunca_contribuiu_aprovado": False,
         "dias_sem_contribuir": 0,
         "penalidade_sofrida_semana": 0,
         "bonus_recebido_semana": False,
@@ -216,29 +217,55 @@ def obter_kpis_home(usuario_id):
                     row_u.get("em_ferias") or row_u.get("em_atendimento_externo")
                 )
 
-            # 1b. Dias desde última contribuição APROVADA (data_avaliacao, UTC)
+            # 1b. Contribuições aprovadas: nunca vs. dias desde a última (data_avaliacao, UTC)
             try:
-                q_dias = text("""
-                    SELECT CASE
-                        WHEN MAX(data_avaliacao) IS NULL THEN 999
-                        ELSE (
-                            DATE(timezone('UTC', CURRENT_TIMESTAMP))
-                            - DATE(timezone('UTC', MAX(data_avaliacao)))
-                        )::integer
-                    END
+                q_contrib = text("""
+                    SELECT
+                        COUNT(*)::integer AS qtd_aprovadas,
+                        MAX(data_avaliacao) AS ultima_avaliacao
                     FROM base_conhecimento
                     WHERE id_analista_autor = :uid
                       AND status = 'APROVADO'
                       AND origem = 'CONHECIMENTO_SUPORTE'
-                      AND data_avaliacao IS NOT NULL
                 """)
-                dval = conn.execute(q_dias, {"uid": usuario_id}).scalar()
-                kpis["dias_sem_contribuir"] = int(dval) if dval is not None else 999
+                row_c = conn.execute(q_contrib, {"uid": usuario_id}).fetchone()
+                if row_c:
+                    qtd_aprov = int(row_c[0] or 0)
+                    ultima = row_c[1]
+                    if qtd_aprov == 0:
+                        kpis["nunca_contribuiu_aprovado"] = True
+                        kpis["dias_sem_contribuir"] = 0
+                    else:
+                        kpis["nunca_contribuiu_aprovado"] = False
+                        if ultima is None:
+                            logging.warning(
+                                "KPI: utilizador %s tem %s aprovações sem data_avaliacao; "
+                                "assumindo dias_sem_contribuir=0",
+                                usuario_id,
+                                qtd_aprov,
+                            )
+                            kpis["dias_sem_contribuir"] = 0
+                        else:
+                            dval = conn.execute(
+                                text(
+                                    """
+                                    SELECT (
+                                        DATE(timezone('UTC', CURRENT_TIMESTAMP))
+                                        - DATE(timezone('UTC', CAST(:ult AS timestamptz)))
+                                    )::integer
+                                    """
+                                ),
+                                {"ult": ultima},
+                            ).scalar()
+                            kpis["dias_sem_contribuir"] = (
+                                int(dval) if dval is not None else 0
+                            )
             except Exception as ex_dias:
                 logging.warning(
                     "KPI dias_sem_contribuir indisponível (migração/coluna?): %s", ex_dias
                 )
                 kpis["dias_sem_contribuir"] = 0
+                kpis["nunca_contribuiu_aprovado"] = False
 
             # 1c. Penalidades e bônus na semana ISO (UTC) — user_xp_events
             try:
@@ -940,20 +967,45 @@ def renderizar_dashboard_conquistas(kpis):
 
     st.write("")
 
-    # 3. Alertas de XP (penalidades, bônus semanal de aprovações, dias sem contribuir)
+    # 3. Alertas de XP (contribuição, penalidades, bônus semanal de aprovações)
+    nunca = bool(kpis.get("nunca_contribuiu_aprovado"))
     dias_sem = int(kpis.get("dias_sem_contribuir", 0))
     em_pausa = bool(kpis.get("em_pausa"))
     pen_sem = int(kpis.get("penalidade_sofrida_semana", 0))
     bonus_sem = bool(kpis.get("bonus_recebido_semana"))
+
+    em_dia_contribuicao = (
+        not nunca
+        and not em_pausa
+        and dias_sem < 5
+    )
+    if em_dia_contribuicao:
+        st.success(
+            "🌟 **Excelente!** Obrigado pela dedicação e constância nas contribuições "
+            "à nossa Base de Conhecimento."
+        )
+
+    risco_penalidade_contrib = (
+        not nunca
+        and not em_pausa
+        and dias_sem >= 5
+    )
     tem_alertas_xp = (
-        (not em_pausa and dias_sem >= 5)
+        nunca
+        or risco_penalidade_contrib
         or bonus_sem
         or (pen_sem < 0)
     )
 
     if tem_alertas_xp:
         with st.expander("📌 **Avisos de XP e contribuição**", expanded=True):
-            if not em_pausa and dias_sem >= 5:
+            if nunca:
+                st.info(
+                    "🌱 **Faça sua primeira contribuição** e ajude a nossa Base de Conhecimento a crescer! "
+                    "Envie uma dica ou artigo em **Contribuições Suporte**."
+                )
+
+            if risco_penalidade_contrib:
                 st.markdown(
                     """
                     <div style="
@@ -992,10 +1044,10 @@ def renderizar_dashboard_conquistas(kpis):
     c1.write(f"📂 **Posts Aprovados:** {kpis['minhas_dicas']}")
     c2.write(f"👍 **Votos Recebidos:** {kpis['upvotes_recebidos']}")
     dias_u = int(kpis.get("dias_sem_contribuir", 0))
-    if dias_u >= 999:
-        ultima_txt = "Nenhuma contribuição aprovada registada (com data de avaliação)"
+    if kpis.get("nunca_contribuiu_aprovado"):
+        ultima_txt = "Ainda sem contribuições aprovadas — que tal a primeira?"
     elif dias_u <= 0:
-        ultima_txt = "Dados indisponíveis ou migração pendente (`data_avaliacao`)"
+        ultima_txt = "Última aprovação hoje (UTC) ou dados muito recentes"
     else:
         ultima_txt = f"{dias_u} dia(s) desde a última contribuição aprovada"
     c3.write(f"📅 **Última contribuição aprovada:** {ultima_txt}")
