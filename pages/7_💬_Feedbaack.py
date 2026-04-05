@@ -1,8 +1,10 @@
+import logging
+
 import streamlit as st
 
 from services.auth_guard import require_login
 from services.feedback_mailer import resolve_smtp_config, send_feedback_email
-from services.feedback_storage import PASTA_FEEDBACKS, save_feedback_to_disk
+from services.feedback_storage import save_feedback_to_disk
 
 st.set_page_config(page_title="WikiSuporte - Feedback", page_icon="💬", layout="wide")
 
@@ -24,42 +26,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("Canal de Feedback")
+st.title("Canal de feedback")
 st.markdown(
-    "Use este espaço para registrar **experiências com o sistema**, **críticas**, "
-    "**relatos de bug**, **sugestões de melhoria** ou **elogios**. "
-    f"Cada envio é **gravado na pasta `{PASTA_FEEDBACKS}/`** do projeto (data, tipo e assunto no nome da subpasta). "
-    "Se o e-mail estiver configurado, uma cópia também é enviada por SMTP."
+    "Conte como foi sua **experiência** com o WikiSuporte: **sugestões**, **elogios**, "
+    "**críticas** ou **relatos de problema**. Quanto mais detalhes você der, mais fácil fica entender e agir."
 )
 
-with st.expander("Como usar esta página?"):
+with st.expander("Como preencher"):
     st.markdown(
-        "- Preencha **Assunto** e **Descrição** (obrigatórios) e escolha o **tipo**.\n"
-        "- O **e-mail para retorno** é opcional.\n"
-        f"- **Arquivos**: em `{PASTA_FEEDBACKS}/` será criada uma pasta por envio, com `feedback.json` e `feedback.txt`.\n"
-        "- **E-mail (opcional)**: configure `EMAIL_SUPORTE_*` no `.env` ou `[email]` no `secrets.toml`. "
-        "Use `FEEDBACK_TO_EMAIL` se o destino for diferente da conta SMTP.\n"
-        "- **SSL**: `pip install -U certifi`; se necessário, `EMAIL_SMTP_SSL_INSECURE=1` no `.env`.\n"
-        f"- A pasta `{PASTA_FEEDBACKS}/` está no `.gitignore` para não versionar dados de usuários."
-    )
-    st.code(
-        "# .streamlit/secrets.toml (exemplo — e-mail opcional)\n"
-        "[email]\n"
-        'smtp_server = "smtp.gmail.com"\n'
-        "smtp_port = 465\n"
-        'smtp_user = "sua.conta@gmail.com"\n'
-        'smtp_password = "senha-de-app"\n'
-        'from_name = "WikiSuporte"\n'
-        'feedback_to = "caixa.que.recebe@gmail.com"\n',
-        language="toml",
-    )
-
-cfg_preview = resolve_smtp_config()
-if cfg_preview:
-    st.caption("Envio por e-mail **ativado** (além do registro em disco).")
-else:
-    st.info(
-        f"Envio por e-mail **não configurado** — o feedback será apenas salvo em **`{PASTA_FEEDBACKS}/`**."
+        "- **Assunto** e **Descrição** são obrigatórios.\n"
+        "- Escolha o **tipo** que melhor descreve sua mensagem.\n"
+        "- **E-mail para retorno** é opcional — use se quiser facilitar um contato futuro."
     )
 
 with st.container(border=True):
@@ -74,19 +51,19 @@ with st.container(border=True):
 
         assunto = st.text_input(
             "Assunto",
-            placeholder="Resumo curto do tema (ex.: lentidão ao abrir tela de chamados)",
+            placeholder="Resumo curto (ex.: lentidão ao abrir a tela de chamados)",
         )
 
         email_contato = st.text_input(
             "E-mail para retorno",
-            placeholder="Opcional — para você receber resposta direta",
+            placeholder="Opcional",
         )
 
         mensagem = st.text_area(
             "Descrição detalhada",
             height=180,
             placeholder=(
-                "Contexto, o que você esperava, o que ocorreu, passos para reproduzir (bugs) e qualquer detalhe útil."
+                "Contexto, o que você esperava, o que aconteceu e, se for bug, os passos para reproduzir."
             ),
         )
 
@@ -100,7 +77,7 @@ with st.container(border=True):
                 uid = st.session_state.get("usuario_id")
                 uid_int = int(uid) if uid is not None else None
 
-                ok_disk, msg_disk, pasta = save_feedback_to_disk(
+                ok_disk, _msg_disk, _pasta = save_feedback_to_disk(
                     tipo_feedback=tipo_feedback,
                     assunto=(assunto or "").strip(),
                     mensagem=(mensagem or "").strip(),
@@ -110,9 +87,12 @@ with st.container(border=True):
                 )
 
                 if not ok_disk:
-                    st.error(msg_disk)
+                    st.error(
+                        "Não foi possível registrar seu feedback neste momento. "
+                        "Tente de novo em alguns instantes ou fale com o suporte."
+                    )
                 else:
-                    st.success(msg_disk)
+                    st.success("Obrigado! Seu feedback foi registrado.")
 
                     cfg = resolve_smtp_config()
                     if cfg:
@@ -125,10 +105,5 @@ with st.container(border=True):
                             usuario_nome=nome_usuario or None,
                             usuario_id=uid_int,
                         )
-                        if mail_ok:
-                            st.caption(f"E-mail: {mail_detail}")
-                        else:
-                            st.warning(
-                                "O feedback foi salvo em disco, mas o e-mail não foi enviado: "
-                                f"{mail_detail}"
-                            )
+                        if not mail_ok:
+                            logging.warning("Feedback: e-mail não enviado: %s", mail_detail)
