@@ -30,6 +30,8 @@ except Exception:
 
 
 UPLOAD_DIR = "uploads/atendimentos"
+MAX_ANEXOS_POR_ATENDIMENTO = 10
+MAX_BYTES_ANEXO_ATENDIMENTO = 25_000_000
 CANAIS_PADRAO = ["Chat Multi360", "Via Ligação GoTo", "E-mail", "WhatsApp", "Outros"]
 CRITICIDADES = ["Baixa", "Média", "Alta", "Crítica"]
 CATEGORIAS_INICIAIS = [
@@ -544,6 +546,8 @@ def _salvar_anexos(id_atendimento: int, arquivos: List[Any]) -> List[Tuple[str, 
     anexos_ok: List[Tuple[str, str, int]] = []
     if not arquivos:
         return anexos_ok
+    if len(arquivos) > MAX_ANEXOS_POR_ATENDIMENTO:
+        raise ValueError(f"Máximo de {MAX_ANEXOS_POR_ATENDIMENTO} anexos por atendimento.")
 
     dt = datetime.now()
     pasta_rel = f"{UPLOAD_DIR}/{dt.year:04d}/{dt.month:02d}/{dt.day:02d}"
@@ -555,15 +559,17 @@ def _salvar_anexos(id_atendimento: int, arquivos: List[Any]) -> List[Tuple[str, 
         for arq in arquivos:
             if not arq:
                 continue
+            conteudo = arq.getbuffer()
+            tamanho = int(len(conteudo))
+            if tamanho > MAX_BYTES_ANEXO_ATENDIMENTO:
+                raise ValueError(f"Anexo '{arq.name}' excede o limite de {MAX_BYTES_ANEXO_ATENDIMENTO} bytes.")
             nome_original = arq.name or "anexo.bin"
             safe_name = os.path.basename(nome_original).replace("\\", "_").replace("/", "_")
             nome_disco = f"{uuid.uuid4().hex}_{safe_name}"
             caminho_rel = f"{pasta_rel}/{nome_disco}".replace("\\", "/")
             caminho_abs = os.path.join(os.getcwd(), caminho_rel)
-            conteudo = arq.getbuffer()
             with open(caminho_abs, "wb") as f:
                 f.write(conteudo)
-            tamanho = int(len(conteudo))
             mime = getattr(arq, "type", None)
 
             conn.execute(

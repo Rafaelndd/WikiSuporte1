@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
@@ -65,11 +66,11 @@ def credential_login_key(nome: Any, username: Any) -> Tuple[str, str]:
 def _cookie_signing_key() -> str:
     key = (os.getenv("WS_SESSION_SECRET") or os.getenv("LGPD_SECRET_KEY") or "").strip()
     if not key:
+        key = secrets.token_urlsafe(48)
         logging.warning(
-            "Defina WS_SESSION_SECRET ou LGPD_SECRET_KEY para assinar o cookie de login "
-            "(streamlit-authenticator). Em produção use uma chave longa e aleatória."
+            "WS_SESSION_SECRET/LGPD_SECRET_KEY não configurado. "
+            "Usando chave temporária para esta sessão."
         )
-        key = "wikisuporte-dev-only-unsafe-set-ws-session-secret"
     return key
 
 

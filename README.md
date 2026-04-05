@@ -39,7 +39,9 @@ A aplicação abre por omissão em `http://localhost:8501`.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
+python -m pytest --durations=10 -q --junitxml=test-reports/pytest-report.xml
+python -m pytest --durations=10 -q --junitxml=test-reports/pytest-report.xml > test-reports/pytest-console.log 2>&1
+python scripts/test_health_report.py
 ruff check tests
 ```
 

@@ -87,6 +87,14 @@ hist
 docs
 *.bkp
 
+# Relatórios de testes (executados localmente/CI; não versionar)
+test-reports/
+pytest-report/
+pytest-report.xml
+pytest-results.xml
+*pytest-report*.xml
+pytest-console.log
+
 .streamlit/secrets.toml
 update_admin_password.py
 testar_goto.py

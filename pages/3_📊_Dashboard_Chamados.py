@@ -86,7 +86,25 @@ except ImportError:
 def carregar_dados_tecnuv():
     engine = get_connection()
     try:
-        df = pd.read_sql("SELECT * FROM chamados_tecnuv", engine)
+        df = pd.read_sql(
+            """
+            SELECT
+                nr_chamado,
+                data_abertura,
+                data_encerramento,
+                usuario_epsy,
+                nome_analista_epsy,
+                nome_cliente,
+                status_atual,
+                atendente_tecnuv,
+                motivo_abertura_html,
+                assunto_html,
+                versao_sistema,
+                situacao
+            FROM chamados_tecnuv
+            """,
+            engine,
+        )
         if not df.empty:
             df['data_abertura'] = pd.to_datetime(df.get('data_abertura'), errors='coerce')
             df['data_encerramento'] = pd.to_datetime(df.get('data_encerramento'), errors='coerce')
@@ -135,9 +153,33 @@ def carregar_interacoes():
     engine = get_connection()
     try:
         try:
-            df = pd.read_sql("SELECT * FROM historico_interacao", engine)
+            df = pd.read_sql(
+                """
+                SELECT
+                    nr_chamado,
+                    data_interacao,
+                    descricao_html,
+                    origem_interacao,
+                    origem,
+                    usuario
+                FROM historico_interacao
+                """,
+                engine,
+            )
         except Exception:
-            df = pd.read_sql("SELECT * FROM historico_interacoes", engine)
+            df = pd.read_sql(
+                """
+                SELECT
+                    nr_chamado,
+                    data_interacao,
+                    descricao_html,
+                    origem_interacao,
+                    origem,
+                    usuario
+                FROM historico_interacoes
+                """,
+                engine,
+            )
             
         if not df.empty and 'data_interacao' in df.columns:
             df['data_interacao'] = pd.to_datetime(df['data_interacao'], errors='coerce')

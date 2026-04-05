@@ -18,6 +18,11 @@ from services.db_homologacao import (
     salvar_arquivo_release,
 )
 
+# Limites para evitar sobrescrita de lote e conteúdo excessivo em processamentos manuais
+MAX_BYTES_ARQUIVO_RELEASE = 10_000_000  # 10 MB
+MAX_TAMANHO_TEXTO_RELEASE = 2_000_000
+MAX_CHAMADOS_POR_RELEASE = 2_000
+
 st.set_page_config(page_title="WikiSuporte — Releases (cadastro manual)", page_icon="🧩", layout="wide")
 
 perfil = require_login()
@@ -56,6 +61,7 @@ else:
         arquivo_release = st.file_uploader(
             "Arquivo do release",
             type=["txt", "md", "doc", "docx", "rtf", "pdf"],
+            max_bytes=MAX_BYTES_ARQUIVO_RELEASE,
             help="O texto será lido para localizar números de chamado entre parênteses.",
         )
 
@@ -76,6 +82,9 @@ else:
             else:
                 try:
                     raw_bytes = arquivo_release.read()
+                    if len(raw_bytes) > MAX_BYTES_ARQUIVO_RELEASE:
+                        st.error(f"⚠️ O arquivo excede {MAX_BYTES_ARQUIVO_RELEASE / 1024 / 1024:.0f} MB.")
+                        st.stop()
                     text_content = ""
                     nome_arquivo = arquivo_release.name or ""
                     nome_lower = nome_arquivo.lower()
@@ -113,6 +122,14 @@ else:
                     if not text_content:
                         st.error("Não foi possível ler o conteúdo do arquivo. Tente outro formato.")
                     else:
+                        if len(text_content) > MAX_TAMANHO_TEXTO_RELEASE:
+                            st.error(f"⚠️ O texto extraído supera o limite de {MAX_TAMANHO_TEXTO_RELEASE} caracteres.")
+                            st.stop()
+
+                        if len(re.findall(r"\((\d{4,6})\)", text_content)) > MAX_CHAMADOS_POR_RELEASE:
+                            st.error(f"⚠️ Muitos chamados encontrados no texto. Limite por envio: {MAX_CHAMADOS_POR_RELEASE}.")
+                            st.stop()
+
                         first_line = next(
                             (ln.strip() for ln in text_content.splitlines() if ln.strip()),
                             "Release sem título",
@@ -129,6 +146,7 @@ else:
                             caminho_arquivo=caminho,
                             origem="manual",
                             data_liberacao=datetime.combine(data_release, datetime.min.time()),
+                            limite_itens=MAX_CHAMADOS_POR_RELEASE,
                         )
 
                         st.success(
@@ -138,11 +156,16 @@ else:
                         )
                         if qtd_vinculados > 0:
                             chamados_assunto: dict[str, str] = {}
+                            total_chamados = 0
                             for line in text_content.splitlines():
                                 clean = line.strip()
                                 if not clean:
                                     continue
                                 for match in re.findall(r"\((\d{4,6})\)", clean):
+                                    total_chamados += 1
+                                    if total_chamados > MAX_CHAMADOS_POR_RELEASE:
+                                        st.error(f"⚠️ Muitos chamados para exibir no preview. Limite: {MAX_CHAMADOS_POR_RELEASE}.")
+                                        st.stop()
                                     if match not in chamados_assunto:
                                         assunto_exibe = limpar_html_bruto(clean) or clean
                                         chamados_assunto[match] = assunto_exibe

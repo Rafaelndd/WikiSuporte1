@@ -26,6 +26,7 @@ require_login()
 
 _ROOT = Path(__file__).resolve().parent.parent
 _FOTOS_DIR = _ROOT / "uploads" / "fotos_perfil"
+MAX_BYTES_FOTO_PERFIL = cu._MAX_BYTES_FOTO_PERFIL
 
 uid = int(st.session_state.get("usuario_id") or 0)
 if uid <= 0:
@@ -176,6 +177,7 @@ with st.container(border=True):
     up = st.file_uploader(
         "Nova imagem",
         type=["png", "jpg", "jpeg"],
+        max_bytes=MAX_BYTES_FOTO_PERFIL,
         help="Formatos: .png, .jpg, .jpeg",
         key="upload_foto_perfil",
     )

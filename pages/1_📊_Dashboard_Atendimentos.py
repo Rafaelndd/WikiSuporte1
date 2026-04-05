@@ -148,7 +148,19 @@ if perfil_logado != "admin":
 def carregar_dados_goto():
     engine = get_connection()
     try:
-        df = pd.read_sql("SELECT * FROM atendimentos_goto", engine)
+        df = pd.read_sql(
+            """
+            SELECT
+                data_chamada,
+                duracao_ms,
+                resultado,
+                participantes,
+                nome_analista_epsy,
+                telefone_origem
+            FROM atendimentos_goto
+            """,
+            engine,
+        )
         if not df.empty and 'data_chamada' in df.columns:
             df['data_chamada'] = pd.to_datetime(df['data_chamada'], errors='coerce')
         return df
@@ -171,7 +183,19 @@ def carregar_goto_agent_calls():
 def carregar_dados_multi360():
     engine = get_connection()
     try:
-        df = pd.read_sql("SELECT * FROM atendimentos_multi360", engine)
+        df = pd.read_sql(
+            """
+            SELECT
+                data_inicio,
+                data_finalizacao,
+                data_ultima_mensagem,
+                atendente,
+                avaliacao,
+                status
+            FROM atendimentos_multi360
+            """,
+            engine,
+        )
         if not df.empty:
             df['data_inicio'] = pd.to_datetime(df.get('data_inicio'), errors='coerce')
             df['data_finalizacao'] = pd.to_datetime(df.get('data_finalizacao'), errors='coerce')
