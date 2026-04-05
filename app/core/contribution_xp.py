@@ -26,7 +26,7 @@ _MOD_EVENTO_PASSADO: Final = "EVENTO_PASSADO"
 class ContributionXpConfig:
     """Parâmetros de pontos base (espelha colunas úteis de contribution_scoring_rules)."""
 
-    pontos_evento_passado: int = 125
+    pontos_evento_passado: int = 90
 
 
 @dataclass(frozen=True, slots=True)

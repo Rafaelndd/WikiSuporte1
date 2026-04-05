@@ -7,6 +7,7 @@ O Markdown ``releases/WIKISUPORTE_NOTAS_DE_VERSAO.md`` permanece como anexo opci
 
 from __future__ import annotations
 
+import html
 import re
 from datetime import date
 from pathlib import Path
@@ -47,16 +48,46 @@ def _fmt_data(iso: str) -> str:
         return iso
 
 
+def _split_topicos(texto: str) -> list[str]:
+    bruto = (texto or "").strip()
+    if not bruto:
+        return ["—"]
+
+    blocos = [b.strip() for b in re.split(r"\n\s*\n+", bruto) if b.strip()]
+    if len(blocos) == 1 and "\n" in blocos[0]:
+        linhas = [ln.strip(" -•\t") for ln in blocos[0].splitlines() if ln.strip()]
+        if len(linhas) > 1:
+            blocos = linhas
+    return blocos or ["—"]
+
+
+def _formatar_topico_html(topico: str) -> str:
+    esc = html.escape(topico)
+    esc = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", esc)
+    return esc.replace("\n", "<br/>")
+
+
+def _render_coluna_topicos(texto: str, *, tipo: str) -> None:
+    topicos = _split_topicos(texto)
+    emoji = "🔴" if tipo == "era" else "🟢"
+    classe = "ws-release-col ws-release-col-era" if tipo == "era" else "ws-release-col ws-release-col-ficou"
+    itens_html = "".join(
+        f'<div class="ws-release-topic">{emoji} {_formatar_topico_html(t)}</div>'
+        for t in topicos
+    )
+    st.markdown(f'<div class="{classe}">{itens_html}</div>', unsafe_allow_html=True)
+
+
 def _render_release_expander(rec: ReleaseRecord, *, expanded: bool) -> None:
     title = f"{rec.versao} · {_fmt_data(rec.data_lancamento)}"
     with st.expander(title, expanded=expanded):
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("##### Como era")
-            st.markdown(rec.como_era or "—")
+            st.markdown("##### Como era 🔴")
+            _render_coluna_topicos(rec.como_era, tipo="era")
         with c2:
-            st.markdown("##### Como ficou")
-            st.markdown(rec.como_ficou or "—")
+            st.markdown("##### Como ficou 🟢")
+            _render_coluna_topicos(rec.como_ficou, tipo="ficou")
         st.caption(
             f"Aviso na Home: {rec.dias_notificacao} dia(s) a partir do lançamento "
             f"(último dia: {_fmt_data(rec.notificacao_ate)})."
@@ -88,6 +119,35 @@ st.markdown(
         margin: 0;
     }
     html[data-theme="dark"] .ws-notes-hero .meta { color: #9ca3af; }
+    .ws-release-col {
+        border-radius: 12px;
+        padding: 0.35rem 0.75rem;
+        border: 1px solid transparent;
+    }
+    .ws-release-col-era {
+        background: rgba(239, 68, 68, 0.08);
+        border-color: rgba(239, 68, 68, 0.28);
+    }
+    .ws-release-col-ficou {
+        background: rgba(34, 197, 94, 0.13);
+        border-color: rgba(22, 163, 74, 0.35);
+    }
+    html[data-theme="dark"] .ws-release-col-era {
+        background: rgba(127, 29, 29, 0.3);
+        border-color: rgba(248, 113, 113, 0.4);
+    }
+    html[data-theme="dark"] .ws-release-col-ficou {
+        background: rgba(20, 83, 45, 0.45);
+        border-color: rgba(74, 222, 128, 0.45);
+    }
+    .ws-release-topic {
+        padding: 0.6rem 0.2rem;
+        line-height: 1.5;
+        border-bottom: 1px dashed rgba(107, 114, 128, 0.35);
+    }
+    .ws-release-topic:last-child {
+        border-bottom: none;
+    }
     </style>
     """,
     unsafe_allow_html=True,

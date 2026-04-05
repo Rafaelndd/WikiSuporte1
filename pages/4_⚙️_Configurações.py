@@ -375,13 +375,50 @@ with aba_release_launch:
 if aba_notificacoes:
     with aba_notificacoes:
         st.subheader("📣 Painel do Suporte para Notificações")
-        st.caption("Dispare comunicados em tempo real para usuários ativos. Tipos: comunicado, aviso, erro crítico e bloqueio de versão.")
+        st.caption(
+            "Dispare comunicados em tempo real para usuários ativos. "
+            "Tipos: comunicado, aviso, erro crítico, bloqueio de versão e release WikiSuporte."
+        )
+
+        releases_catalog = load_catalog(create_if_missing=True)
+        release_mais_recente = releases_catalog[0] if releases_catalog else None
+        release_titulo_auto = ""
+        release_msg_auto = ""
+        release_meta_auto = ""
+        if release_mais_recente:
+            data_release_fmt = release_mais_recente.data_lancamento
+            try:
+                data_release_fmt = datetime.fromisoformat(
+                    release_mais_recente.data_lancamento
+                ).strftime("%d/%m/%Y")
+            except ValueError:
+                pass
+            resumo_release = " ".join((release_mais_recente.como_ficou or "").split())
+            if len(resumo_release) > 220:
+                resumo_release = resumo_release[:217].rstrip() + "..."
+            release_titulo_auto = f"Novo release WikiSuporte: {release_mais_recente.versao}"
+            release_msg_auto = (
+                f"Nova versão do WikiSuporte disponível ({release_mais_recente.versao} · {data_release_fmt}). "
+                "Acesse a página Notas de versão no menu lateral para ver o comparativo completo de melhorias."
+            )
+            if resumo_release:
+                release_msg_auto += f" Destaque: {resumo_release}"
+            release_meta_auto = (
+                f"Release ativo para comunicado automático: {release_mais_recente.versao} "
+                f"({data_release_fmt})."
+            )
 
         with st.form("form_notificacao_admin"):
             c1, c2, c3 = st.columns(3)
             tipo = c1.selectbox(
                 "Tipo *",
-                ["Comunicado", "Aviso", "Erro Crítico", "Versão Bloqueada"],
+                [
+                    "Comunicado",
+                    "Aviso",
+                    "Erro Crítico",
+                    "Versão Bloqueada",
+                    "Release WikiSuporte",
+                ],
                 help="Erro crítico e versão bloqueada aparecem com destaque no topo.",
             )
             target_role = c2.selectbox("Público-alvo", ["Todos", "Analistas", "Supervisores", "Coordenadores", "Desenvolvedores"])
@@ -394,22 +431,67 @@ if aba_notificacoes:
                 step=1,
                 help="Use horas e minutos. Ex.: 1 hora e 30 minutos.",
             )
-            titulo = st.text_input("Título")
-            mensagem = st.text_area("Mensagem *", height=120)
-            cmod1, cmod2 = st.columns(2)
-            modulo_nome = cmod1.text_input("Módulo com erro de versão (opcional)")
-            versao_prob = cmod2.text_input("Versão problemática (opcional)")
-            motivo_bloqueio = st.text_area("Motivo do bloqueio de versão (opcional)", height=80)
+            tipo_release = tipo == "Release WikiSuporte"
+            tipo_bloqueio = tipo == "Versão Bloqueada"
+
+            if tipo_release:
+                if release_mais_recente is None:
+                    st.error(
+                        "Não foi possível localizar um release no histórico. "
+                        "Publique primeiro em 'Lançar Nova Versão'."
+                    )
+                else:
+                    st.info(f"ℹ️ {release_meta_auto}")
+                    st.markdown("**Último release (sempre usado neste tipo):**")
+                    st.markdown(
+                        f"- **Versão:** {release_mais_recente.versao}\n"
+                        f"- **Data:** {data_release_fmt}\n"
+                        f"- **Como ficou:** {release_mais_recente.como_ficou or '—'}"
+                    )
+                titulo = st.text_input(
+                    "Título",
+                    value=release_titulo_auto,
+                    disabled=True,
+                )
+                mensagem = st.text_area(
+                    "Mensagem *",
+                    value=release_msg_auto,
+                    height=120,
+                    disabled=True,
+                )
+            else:
+                titulo = st.text_input("Título")
+                mensagem = st.text_area("Mensagem *", height=120)
+
+            modulo_nome = ""
+            versao_prob = ""
+            motivo_bloqueio = ""
+            if tipo_bloqueio:
+                cmod1, cmod2 = st.columns(2)
+                modulo_nome = cmod1.text_input("Módulo com erro de versão (opcional)")
+                versao_prob = cmod2.text_input("Versão problemática (opcional)")
+                motivo_bloqueio = st.text_area(
+                    "Motivo do bloqueio de versão (opcional)",
+                    height=80,
+                )
+
             salvar_notif = st.form_submit_button("🚀 Publicar notificação", type="primary", use_container_width=True)
 
             if salvar_notif:
-                if not mensagem.strip():
+                if tipo_release and release_mais_recente is None:
+                    st.error(
+                        "Não há release disponível para este tipo de comunicado. "
+                        "Publique primeiro uma nova versão."
+                    )
+                elif not mensagem.strip():
                     st.error("Mensagem é obrigatória.")
                 else:
                     tipo_norm = normalizar_tipo_notificacao(tipo)
                     if not tipo_norm:
                         st.error("Tipo de notificação inválido.")
                     else:
+                        titulo_publicar = release_titulo_auto if tipo_release else titulo
+                        mensagem_publicar = release_msg_auto if tipo_release else mensagem
                         with st.status("Publicando comunicado...", expanded=False) as status:
                             exp = None
                             total_minutos_exp = (int(horas_expira or 0) * 60) + int(minutos_expira or 0)
@@ -417,9 +499,9 @@ if aba_notificacoes:
                                 exp = datetime.now() + pd.Timedelta(minutes=total_minutos_exp)
                             ok, msg = criar_notificacao(
                                 tipo=tipo_norm,
-                                mensagem=mensagem,
+                                mensagem=mensagem_publicar,
                                 autor=nome_usuario,
-                                titulo=titulo,
+                                titulo=titulo_publicar,
                                 target_role=target_role,
                                 data_expiracao=exp,
                                 dedupe_seconds=120,

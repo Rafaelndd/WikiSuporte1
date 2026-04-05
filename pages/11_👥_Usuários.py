@@ -9,6 +9,7 @@ import logging
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import text
 
 import cadastro_usuarios as cu
 from app.services.penalidades_service import (
@@ -44,6 +45,120 @@ st.caption(
     "Consulta e alteração de usuários na base PostgreSQL. "
     "A exclusão lógica apenas desativa o acesso (`ativo = false`), preservando histórico."
 )
+
+
+def _ensure_scoring_schema() -> None:
+    engine = get_connection()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS contribution_scoring_rules (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    pontos_evento_passado INTEGER NOT NULL DEFAULT 90,
+                    multiplicador_diario_apos_qtd INTEGER NOT NULL DEFAULT 3,
+                    multiplicador_diario_valor INTEGER NOT NULL DEFAULT 2,
+                    bonus_semanal_meta_qtd INTEGER NOT NULL DEFAULT 15,
+                    bonus_semanal_meta_pontos INTEGER NOT NULL DEFAULT 1000,
+                    penalidade_sem_7_dias INTEGER NOT NULL DEFAULT 100,
+                    minimo_semanal_sem_penalidade INTEGER NOT NULL DEFAULT 5,
+                    penalidade_semana_insuficiente INTEGER NOT NULL DEFAULT 100,
+                    janela_carencia_dias INTEGER NOT NULL DEFAULT 7,
+                    max_desconto_semanal_xp INTEGER NOT NULL DEFAULT 100,
+                    atualizado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO contribution_scoring_rules (id) VALUES (1) "
+                "ON CONFLICT (id) DO NOTHING"
+            )
+        )
+        conn.execute(text("ALTER TABLE contribution_scoring_rules ADD COLUMN IF NOT EXISTS janela_carencia_dias INTEGER NOT NULL DEFAULT 7"))
+        conn.execute(text("ALTER TABLE contribution_scoring_rules ADD COLUMN IF NOT EXISTS max_desconto_semanal_xp INTEGER NOT NULL DEFAULT 100"))
+
+
+def _carregar_scoring_rules() -> tuple[bool, str, dict[str, int]]:
+    defaults = {
+        "pontos_evento_passado": 90,
+        "multiplicador_diario_apos_qtd": 3,
+        "multiplicador_diario_valor": 2,
+        "bonus_semanal_meta_qtd": 15,
+        "bonus_semanal_meta_pontos": 1000,
+        "penalidade_sem_7_dias": 100,
+        "minimo_semanal_sem_penalidade": 5,
+        "penalidade_semana_insuficiente": 100,
+        "janela_carencia_dias": 7,
+        "max_desconto_semanal_xp": 100,
+    }
+    try:
+        _ensure_scoring_schema()
+        engine = get_connection()
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT pontos_evento_passado,
+                           multiplicador_diario_apos_qtd,
+                           multiplicador_diario_valor,
+                           bonus_semanal_meta_qtd,
+                           bonus_semanal_meta_pontos,
+                           penalidade_sem_7_dias,
+                           minimo_semanal_sem_penalidade,
+                           penalidade_semana_insuficiente,
+                           COALESCE(janela_carencia_dias, 7) AS janela_carencia_dias,
+                           COALESCE(max_desconto_semanal_xp, 100) AS max_desconto_semanal_xp
+                    FROM contribution_scoring_rules
+                    WHERE id = 1
+                    """
+                )
+            ).mappings().first()
+        if not row:
+            return True, "", defaults
+        cfg = defaults.copy()
+        for k in cfg:
+            cfg[k] = int(row.get(k, cfg[k]))
+        return True, "", cfg
+    except Exception as ex:
+        logging.exception("carregar contribution_scoring_rules")
+        return False, str(ex), defaults
+
+
+def _salvar_scoring_rules(cfg: dict[str, int]) -> tuple[bool, str]:
+    try:
+        _ensure_scoring_schema()
+        payload = dict(cfg)
+        payload["penalidade_sem_7_dias"] = min(max(0, int(payload["penalidade_sem_7_dias"])), 100)
+        payload["penalidade_semana_insuficiente"] = min(max(0, int(payload["penalidade_semana_insuficiente"])), 100)
+        payload["max_desconto_semanal_xp"] = min(max(0, int(payload["max_desconto_semanal_xp"])), 100)
+        engine = get_connection()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE contribution_scoring_rules
+                    SET pontos_evento_passado = :pontos_evento_passado,
+                        multiplicador_diario_apos_qtd = :multiplicador_diario_apos_qtd,
+                        multiplicador_diario_valor = :multiplicador_diario_valor,
+                        bonus_semanal_meta_qtd = :bonus_semanal_meta_qtd,
+                        bonus_semanal_meta_pontos = :bonus_semanal_meta_pontos,
+                        penalidade_sem_7_dias = :penalidade_sem_7_dias,
+                        minimo_semanal_sem_penalidade = :minimo_semanal_sem_penalidade,
+                        penalidade_semana_insuficiente = :penalidade_semana_insuficiente,
+                        janela_carencia_dias = :janela_carencia_dias,
+                        max_desconto_semanal_xp = :max_desconto_semanal_xp,
+                        atualizado_em = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                    """
+                ),
+                payload,
+            )
+        return True, "Parâmetros guardados com sucesso."
+    except Exception as ex:
+        logging.exception("salvar contribution_scoring_rules")
+        return False, f"Erro ao guardar parâmetros: {ex}"
 
 try:
     ok_lista, err_lista, df_users = cu.listar_usuarios_admin()
@@ -216,6 +331,118 @@ with tab_editar:
                     st.error(msg)
 
 with tab_fechamento:
+    st.markdown("### Parâmetros de XP e penalidades")
+    ok_cfg, err_cfg, cfg = _carregar_scoring_rules()
+    if not ok_cfg:
+        st.error(
+            "Não foi possível carregar os parâmetros de pontuação. "
+            f"Detalhe: {err_cfg}"
+        )
+    else:
+        with st.form("form_scoring_rules_admin"):
+            c1, c2, c3 = st.columns(3)
+            pontos_evento_passado = c1.number_input(
+                "Evento passado (XP)",
+                min_value=0,
+                max_value=500,
+                value=int(cfg["pontos_evento_passado"]),
+                step=1,
+            )
+            multiplicador_diario_apos_qtd = c2.number_input(
+                "Multiplicador diário após (qtd aprovações/dia)",
+                min_value=0,
+                max_value=50,
+                value=int(cfg["multiplicador_diario_apos_qtd"]),
+                step=1,
+            )
+            multiplicador_diario_valor = c3.number_input(
+                "Multiplicador diário (valor)",
+                min_value=1,
+                max_value=10,
+                value=int(cfg["multiplicador_diario_valor"]),
+                step=1,
+            )
+
+            c4, c5, c6 = st.columns(3)
+            bonus_semanal_meta_qtd = c4.number_input(
+                "Meta semanal para bônus (aprovações)",
+                min_value=0,
+                max_value=100,
+                value=int(cfg["bonus_semanal_meta_qtd"]),
+                step=1,
+            )
+            bonus_semanal_meta_pontos = c5.number_input(
+                "Bônus semanal (XP)",
+                min_value=0,
+                max_value=5000,
+                value=int(cfg["bonus_semanal_meta_pontos"]),
+                step=10,
+            )
+            minimo_semanal_sem_penalidade = c6.number_input(
+                "Meta mínima semanal sem penalidade",
+                min_value=0,
+                max_value=100,
+                value=int(cfg["minimo_semanal_sem_penalidade"]),
+                step=1,
+            )
+
+            c7, c8, c9 = st.columns(3)
+            penalidade_sem_7_dias = c7.number_input(
+                "Penalidade sem 7 dias (XP)",
+                min_value=0,
+                max_value=100,
+                value=int(min(cfg["penalidade_sem_7_dias"], 100)),
+                step=1,
+                help="Limitado a 100 por regra de segurança.",
+            )
+            penalidade_semana_insuficiente = c8.number_input(
+                "Penalidade por semana insuficiente (XP)",
+                min_value=0,
+                max_value=100,
+                value=int(min(cfg["penalidade_semana_insuficiente"], 100)),
+                step=1,
+                help="Limitado a 100 por regra de segurança.",
+            )
+            janela_carencia_dias = c9.number_input(
+                "Janela de carência (dias)",
+                min_value=0,
+                max_value=30,
+                value=int(cfg["janela_carencia_dias"]),
+                step=1,
+                help="Aplica para novo colaborador e retorno de férias/atendimento externo.",
+            )
+
+            max_desconto_semanal_xp = st.number_input(
+                "Teto de desconto semanal (XP)",
+                min_value=0,
+                max_value=100,
+                value=int(min(cfg["max_desconto_semanal_xp"], 100)),
+                step=1,
+                help="Mesmo com múltiplas regras, o desconto semanal não passa deste valor.",
+            )
+
+            salvar_cfg = st.form_submit_button("💾 Guardar parâmetros", type="primary")
+            if salvar_cfg:
+                payload = {
+                    "pontos_evento_passado": int(pontos_evento_passado),
+                    "multiplicador_diario_apos_qtd": int(multiplicador_diario_apos_qtd),
+                    "multiplicador_diario_valor": int(multiplicador_diario_valor),
+                    "bonus_semanal_meta_qtd": int(bonus_semanal_meta_qtd),
+                    "bonus_semanal_meta_pontos": int(bonus_semanal_meta_pontos),
+                    "penalidade_sem_7_dias": int(penalidade_sem_7_dias),
+                    "minimo_semanal_sem_penalidade": int(minimo_semanal_sem_penalidade),
+                    "penalidade_semana_insuficiente": int(penalidade_semana_insuficiente),
+                    "janela_carencia_dias": int(janela_carencia_dias),
+                    "max_desconto_semanal_xp": int(max_desconto_semanal_xp),
+                }
+                ok_save, msg_save = _salvar_scoring_rules(payload)
+                if ok_save:
+                    st.success(msg_save)
+                    st.rerun()
+                else:
+                    st.error(msg_save)
+
+    st.divider()
     st.markdown("### Rotinas do sistema")
     st.info(
         "Esta rotina avalia as contribuições da semana e aplica as regras de XP. "

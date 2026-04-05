@@ -35,6 +35,7 @@ from services.ui_realtime import render_global_notifications_listener, show_gami
 from services.ui_theme_presets import wiki_theme_apply_authenticated
 from services.wiki_authenticator import process_forced_logout_from_url
 from services.ui_avatar import html_avatar_perfil_circular
+from services.contrib_rules_ui import render_contrib_rules_table
 
 load_dotenv()
 
@@ -124,7 +125,7 @@ def _notificar_email_obsoleto(email_autor: str, nome_autor: str, titulo: str, qu
             f"Olá, {nome_autor or 'analista'}.\n\n"
             f"A contribuição \"{titulo}\" foi marcada como OBSOLETA por {quem}.\n"
             f"Motivo / orientação: {motivo or '(não informado)'}\n\n"
-            "Acesse WikiSuporte → Central de Conhecimento → Minhas Contribuições, "
+            "Acesse WikiSuporte → Base de Conhecimento → Minhas Contribuições, "
             "atualize o texto e reenvie para a fila de avaliação.\n"
         )
         with smtplib.SMTP(smtp_server, smtp_port) as s:
@@ -214,8 +215,11 @@ def carregar_manuais():
 # ==========================================
 # 3. TÍTULO E DESCRIÇÃO
 # ==========================================
-st.title("🧠 Central de Conhecimento")
-st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e conhecimento colaborativo centralizados em um só lugar!")
+st.title("🧠 Base de Conhecimento")
+st.markdown("Respostas rápidas, manuais do PostoGestor, wikis do HelpDesk e a Base de Conhecimento colaborativa em um só lugar!")
+with st.expander("📋 Regras de contribuições e penalidades", expanded=True):
+    st.caption("Guia rápido para pontuação, bônus e descontos semanais.")
+    render_contrib_rules_table(compact=True)
 
 
 # ==========================================
@@ -1032,7 +1036,6 @@ with aba_nova:
         arquivo_anexo = st.file_uploader(
             "Formatos aceitos: PDF, TXT, SQL, Imagens, Vídeos...",
             type=["pdf", "txt", "csv", "xlsx", "xls", "xml", "sql", "png", "jpg", "jpeg", "pgz", "fr3", "mp3", "mp4"],
-            max_bytes=MAX_BYTES_ANEXO_CONTRIBUICAO,
             accept_multiple_files=True,
         )
         

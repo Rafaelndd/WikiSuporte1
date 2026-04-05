@@ -10,7 +10,15 @@ import re
 import unicodedata
 from typing import Optional
 
-TIPOS_VALIDOS = frozenset({"comunicado", "aviso", "erro_critico", "versao_bloqueada"})
+TIPOS_VALIDOS = frozenset(
+    {
+        "comunicado",
+        "aviso",
+        "erro_critico",
+        "versao_bloqueada",
+        "release_wikisuporte",
+    }
+)
 
 
 def normalizar_tipo_notificacao(raw: str) -> Optional[str]:
