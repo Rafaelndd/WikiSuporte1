@@ -1,18 +1,15 @@
 """
-Cadastro manual de releases Tecnuv.
-Utiliza as tabelas chamados, releases e ciclos_homologacao para rastrear
-o ciclo de vida completo dos chamados através de múltiplas releases.
+Cadastro manual de releases quando a coleta automática não estiver disponível.
 """
 import io
+import logging
 import re
 from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
 
-from modules.database import get_connection
 from modules.html_texto import limpar_html_bruto
-
 from services.auth_guard import require_login
 from services.db_homologacao import (
     backfill_embeddings_release_itens,
@@ -21,47 +18,45 @@ from services.db_homologacao import (
     salvar_arquivo_release,
 )
 
-st.set_page_config(page_title="Releases Tecnuv (Manual)", page_icon="🧩", layout="wide")
+st.set_page_config(page_title="WikiSuporte — Releases (cadastro manual)", page_icon="🧩", layout="wide")
 
 perfil = require_login()
 pode_gerenciar_release = perfil == "admin"
 
 
-st.title("🧩 Cadastro Manual de Releases Tecnuv")
+st.title("Cadastro manual de releases")
 st.markdown(
-    "Registre releases no banco (`releases`, `chamados`, `ciclos_homologacao`) e "
-    "vincule os chamados corrigidos."
+    "Use quando o **arquivo de release** não tiver sido obtido automaticamente. "
+    "O sistema lê o texto, identifica **chamados** no formato **(12345)** e registra tudo para "
+    "acompanhamento e **busca por número de chamado ou por assunto**."
 )
 st.markdown("---")
-with st.expander("🤔 Como usar esta página?"):
+
+with st.expander("Como funciona"):
     st.markdown(
-        "Envie o **arquivo do release** (TXT, MD, Word ou PDF). O sistema procura números **(13645)** e cria ciclos de homologação. "
-        "Releases aparecem no Dashboard de Chamados e nos alertas da Home."
+        "- Envie o arquivo do release (**texto, Word ou PDF**).\n"
+        "- Informe **data** e **autor**.\n"
+        "- Chamados devem aparecer **entre parênteses**, por exemplo `(13645)`.\n"
+        "- Depois do envio, use a busca abaixo para ver **em qual versão** cada item aparece."
     )
 
 if not pode_gerenciar_release:
-    st.error("⛔ Acesso Negado")
-    st.warning("Esta página é exclusiva para usuários com perfil **admin**.")
+    st.error("Acesso restrito")
+    st.warning("Esta página é exclusiva para perfil **administrador**.")
 else:
-    # -----------------------------
-    # 1. Formulário de cadastro
-    # -----------------------------
-    st.subheader("📤 Novo release")
+    st.subheader("Novo release")
 
     with st.form("form_novo_release", clear_on_submit=True):
         col1, col2 = st.columns([2, 1])
         with col1:
-            data_release = st.date_input("Data do Release", value=date.today())
+            data_release = st.date_input("Data do release", value=date.today())
         with col2:
-            autor = st.text_input("Autor", placeholder="Ex.: Cristiano Felicidade")
+            autor = st.text_input("Autor", placeholder="Ex.: Nome do responsável")
 
         arquivo_release = st.file_uploader(
-            "Arquivo do release (texto, Word, RTF ou PDF)",
+            "Arquivo do release",
             type=["txt", "md", "doc", "docx", "rtf", "pdf"],
-            help=(
-                "O sistema identifica números de chamados no formato (13645) e cria ciclos "
-                "de homologação com status 'Aguardando'."
-            ),
+            help="O texto será lido para localizar números de chamado entre parênteses.",
         )
 
         colb1, colb2 = st.columns([1, 3])
@@ -69,15 +64,15 @@ else:
             salvar = st.form_submit_button("Processar e salvar", type="primary", use_container_width="stretch")
         with colb2:
             st.caption(
-                "Será criado o release, o arquivo será anexado em `releases_tecnuv/` e "
-                "os chamados/ciclos registrados com status 'Aguardando'."
+                "Será criado o registro do release, o arquivo será guardado com segurança e "
+                "cada chamado encontrado entrará no fluxo de acompanhamento."
             )
 
         if salvar:
             if not autor.strip():
-                st.error("Informe o **Autor** do release.")
+                st.error("Informe o **autor** do release.")
             elif not arquivo_release:
-                st.error("Carregue o **arquivo do release**.")
+                st.error("Selecione o **arquivo do release**.")
             else:
                 try:
                     raw_bytes = arquivo_release.read()
@@ -88,6 +83,7 @@ else:
                     if nome_lower.endswith((".doc", ".docx")):
                         try:
                             import docx  # type: ignore
+
                             doc = docx.Document(io.BytesIO(raw_bytes))
                             text_content = "\n".join(p.text for p in doc.paragraphs)
                         except Exception:
@@ -95,6 +91,7 @@ else:
                     elif nome_lower.endswith(".rtf"):
                         try:
                             from striprtf.striprtf import rtf_to_text  # type: ignore
+
                             text_content = rtf_to_text(raw_bytes.decode("latin-1", errors="ignore"))
                         except Exception:
                             s = raw_bytes.decode("latin-1", errors="ignore")
@@ -104,6 +101,7 @@ else:
                     elif nome_lower.endswith(".pdf"):
                         try:
                             from pypdf import PdfReader  # type: ignore
+
                             reader = PdfReader(io.BytesIO(raw_bytes))
                             text_content = "\n".join((p.extract_text() or "") for p in reader.pages)
                         except Exception:
@@ -113,7 +111,7 @@ else:
 
                     text_content = (text_content or "").strip()
                     if not text_content:
-                        st.error("Não foi possível extrair texto do arquivo.")
+                        st.error("Não foi possível ler o conteúdo do arquivo. Tente outro formato.")
                     else:
                         first_line = next(
                             (ln.strip() for ln in text_content.splitlines() if ln.strip()),
@@ -121,12 +119,8 @@ else:
                         )
                         versao = first_line[:50].strip()
 
-                        # Salva o arquivo em disco e obtém o caminho
-                        caminho = salvar_arquivo_release(
-                            raw_bytes, nome_arquivo, versao
-                        )
+                        caminho = salvar_arquivo_release(raw_bytes, nome_arquivo, versao)
 
-                        # ETL: release + chamados + ciclos (com anexo)
                         qtd_vinculados, qtd_ciclos = processar_release_completo(
                             versao=versao,
                             texto_completo=text_content,
@@ -138,11 +132,12 @@ else:
                         )
 
                         st.success(
-                            f"Release **{versao}** registrado e arquivo anexado em `{caminho}`. "
-                            f"{qtd_vinculados} chamado(s) vinculado(s), {qtd_ciclos} novo(s) ciclo(s)."
+                            f"Release **{versao}** registrado com sucesso. "
+                            f"**{qtd_vinculados}** chamado(s) vinculado(s) e **{qtd_ciclos}** "
+                            "novo(s) registro(s) de acompanhamento."
                         )
                         if qtd_vinculados > 0:
-                            chamados_assunto = {}
+                            chamados_assunto: dict[str, str] = {}
                             for line in text_content.splitlines():
                                 clean = line.strip()
                                 if not clean:
@@ -151,37 +146,37 @@ else:
                                     if match not in chamados_assunto:
                                         assunto_exibe = limpar_html_bruto(clean) or clean
                                         chamados_assunto[match] = assunto_exibe
-                            df_prev = pd.DataFrame({
-                                "Chamado": list(chamados_assunto.keys()),
-                                "Assunto": [str(v)[:150] for v in chamados_assunto.values()],
-                            })
+                            df_prev = pd.DataFrame(
+                                {
+                                    "Chamado": list(chamados_assunto.keys()),
+                                    "Trecho do release": [str(v)[:150] for v in chamados_assunto.values()],
+                                }
+                            )
+                            st.caption("Chamados reconhecidos neste envio:")
                             st.dataframe(df_prev, hide_index=True, use_container_width="stretch")
-                except Exception as e:
-                    st.error(f"Erro ao processar release: {e}")
+                except Exception:
+                    logging.exception("cadastro manual release")
+                    st.error("Não foi possível concluir o cadastro. Tente novamente ou fale com o suporte.")
 
     st.markdown("---")
 
-    # -----------------------------
-    # 2. Busca semântica / filtro por chamado nos itens de release
-    # -----------------------------
-    st.subheader("🔎 Busca nos releases")
-    st.caption(
-        "Combina **busca por sentido** (embeddings + pgvector, se a migração "
-        "`database/migracao_release_itens_embedding.sql` estiver aplicada e a API configurada) "
-        "com **filtro opcional pelo número do chamado**. Sem vetor disponível, usa busca por texto (ILIKE)."
+    st.subheader("Buscar chamado ou assunto nos releases")
+    st.markdown(
+        "Digite um **número de chamado**, um **tema** (ex.: NF-e, SPED) ou **os dois** para combinar. "
+        "O resultado mostra **em qual versão** do release cada ocorrência aparece."
     )
     bc1, bc2, bc3 = st.columns([2, 1, 1])
     with bc1:
         q_release = st.text_input(
-            "Assunto ou tema",
+            "Palavras ou tema",
             key="busca_release_assunto",
-            placeholder="Ex.: NF-e, SPED, cadastro de produto",
+            placeholder="Ex.: nota fiscal, cadastro, erro ao salvar",
         )
     with bc2:
         nr_release_filtro = st.text_input(
-            "Nº chamado (opcional)",
+            "Nº do chamado (opcional)",
             key="busca_release_nr",
-            placeholder="Somente dígitos",
+            placeholder="Somente números",
         )
     with bc3:
         st.write("")
@@ -194,11 +189,11 @@ else:
             if nr_release_filtro.strip().isdigit():
                 nr_parse = int(nr_release_filtro.strip())
             else:
-                st.error("Número do chamado deve conter apenas dígitos.")
+                st.error("O número do chamado deve conter apenas dígitos.")
                 nr_parse = -1
         if nr_parse != -1:
             if not (q_release or "").strip() and nr_parse is None:
-                st.warning("Informe o assunto/tema **ou** o número do chamado.")
+                st.warning("Informe o **tema** ou o **número do chamado** (ou ambos).")
             else:
                 try:
                     df_br = buscar_release_itens_semantico(
@@ -207,66 +202,35 @@ else:
                         limite=50,
                     )
                     if df_br.empty:
-                        st.info("Nenhum item de release encontrado com esses critérios.")
+                        st.info("Nenhum resultado para essa busca. Confira o número ou tente outras palavras.")
                     else:
-                        df_show = df_br.rename(
+                        df_show = df_br.drop(columns=["id_item"], errors="ignore").rename(
                             columns={
-                                "id_item": "ID item",
                                 "nr_chamado": "Chamado",
-                                "linha_nota": "Assunto / linha",
+                                "linha_nota": "Descrição no release",
                                 "versao_release": "Versão",
-                                "data_liberacao": "Data release",
-                                "score_semantico": "Score (semântico)",
+                                "data_liberacao": "Data do release",
+                                "score_semantico": "Relevância",
                             }
                         )
+                        if "Relevância" in df_show.columns and df_show["Relevância"].notna().any():
+                            df_show = df_show.copy()
+                            rel = df_show["Relevância"]
+                            df_show["Relevância"] = rel.apply(
+                                lambda x: f"{int(float(x) * 100)}%" if pd.notna(x) and x == x else "—"
+                            )
                         st.dataframe(df_show, hide_index=True, use_container_width=True)
-                except Exception as ex:
-                    st.error(f"Erro na busca: {ex}")
+                except Exception:
+                    st.error("A busca não pôde ser concluída. Tente novamente.")
 
-    with st.expander("Manutenção: gerar embeddings para itens antigos"):
+    with st.expander("Atualizar busca em registros antigos", expanded=False):
         st.markdown(
-            "Itens cadastrados antes desta melhoria podem não ter vetor. "
-            "Use o lote abaixo após aplicar a migração e configurar `EMBEDDING_MODEL` / chaves de API."
+            "Itens cadastrados há mais tempo podem precisar de uma **atualização única** "
+            "para aparecer melhor na busca por tema. Use o botão abaixo somente quando necessário."
         )
-        if st.button("Indexar até 200 itens sem embedding", key="btn_backfill_rel_emb"):
+        if st.button("Processar até 200 itens pendentes", key="btn_backfill_rel_emb"):
             try:
                 n_ok = backfill_embeddings_release_itens(200)
-                st.success(f"Registros atualizados com embedding: **{n_ok}**")
-            except Exception as ex:
-                st.error(f"Falha ao indexar: {ex}")
-
-    st.markdown("---")
-
-    # -----------------------------
-    # 3. Releases recentes
-    # -----------------------------
-    st.subheader("📋 Releases cadastrados recentemente")
-
-    try:
-        engine = get_connection()
-        df_rel = pd.read_sql(
-            """
-            SELECT
-                r.id_release,
-                r.versao_release AS versao,
-                r.data_liberacao AS data_lancamento
-            FROM releases r
-            ORDER BY r.data_liberacao DESC, r.id_release DESC
-            LIMIT 20
-            """,
-            engine,
-        )
-        if df_rel.empty:
-            st.info("Nenhum release cadastrado na tabela `releases`.")
-        else:
-            df_rel.rename(
-                columns={
-                    "id_release": "ID",
-                    "versao": "Versão",
-                    "data_lancamento": "Data",
-                },
-                inplace=True,
-            )
-            st.dataframe(df_rel, hide_index=True, use_container_width='stretch')
-    except Exception as e:
-        st.error(f"Erro ao carregar releases: {e}")
+                st.success(f"Atualização concluída: **{n_ok}** registro(s).")
+            except Exception:
+                st.error("Não foi possível concluir a atualização.")
