@@ -58,6 +58,59 @@ except ImportError:
     # Fallback caso o arquivo não exista ainda
     def registrar_log_auditoria(user_id: int, acao: str, detalhe: str) -> None: pass
 
+
+def _css_media_nota_0_10(val: object) -> str:
+    """Cores tipo semáforo 0–10 sem matplotlib (evita Styler.background_gradient)."""
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return ""
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return ""
+    v = max(0.0, min(10.0, v))
+    if v >= 8.5:
+        return "background-color: #c8e6c9; color: #1b5e20;"
+    if v >= 7.0:
+        return "background-color: #dcedc8; color: #33691e;"
+    if v >= 5.5:
+        return "background-color: #fff9c4; color: #5d4037;"
+    if v >= 4.0:
+        return "background-color: #ffe0b2; color: #4e342e;"
+    return "background-color: #ffcdd2; color: #b71c1c;"
+
+
+def _apply_style_media_nota_col(s: pd.Series) -> list[str]:
+    if s.name != "Media_Nota":
+        return [""] * len(s)
+    return [_css_media_nota_0_10(v) for v in s]
+
+
+def _css_perdidas(val: object, vmax: float) -> str:
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return ""
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if v <= 0:
+        return "background-color: #e8f5e9; color: #1b5e20;"
+    top = max(float(vmax), 1.0)
+    t = min(1.0, v / top)
+    if t < 0.34:
+        return "background-color: #fffde7; color: #5d4037;"
+    if t < 0.67:
+        return "background-color: #ffcc80; color: #4e342e;"
+    return "background-color: #ffcdd2; color: #b71c1c;"
+
+
+def _apply_style_perdidas_col(s: pd.Series) -> list[str]:
+    col = "Não Atendeu (Perdidas)"
+    if s.name != col:
+        return [""] * len(s)
+    vmax = float(s.max()) if len(s) and s.notna().any() else 1.0
+    return [_css_perdidas(v, vmax) for v in s]
+
+
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
 st.set_page_config(
     page_title="WikiSuporte", 
@@ -731,8 +784,8 @@ with sub_indiv:
 
                     st.dataframe(
                         casos_criticos.style.format({'Tempo Total (Horas)': '{:.1f}h'}),
-                        use_container_width='strech',
-                        hide_index=True
+                        use_container_width='stretch',
+                        hide_index=True,
                     )
 
                     st.caption("Esta lista destaca os atendimentos que mais impactaram negativamente a média de agilidade deste analista.")
@@ -754,17 +807,19 @@ with sub_qual:
             st.markdown("#### 🏆 Ranking de Notas")
             # UX: Background gradient calibrado para escala 10 (Vermelho a Verde)
             st.dataframe(
-                ranking_nota.style.format({'Media_Nota': "{:.1f}"})
-                .background_gradient(subset=['Media_Nota'], cmap='RdYlGn', vmin=0, vmax=10),
-                use_container_width='stretch', 
+                ranking_nota.style.format({"Media_Nota": "{:.1f}"}).apply(
+                    _apply_style_media_nota_col,
+                    axis=0,
+                ),
+                use_container_width="stretch",
                 hide_index=True,
                 column_config={
                     "atendente": "Analista",
                     "Media_Nota": "Nota Média (0-10)",
-                    "Total_Votos": "Avaliações"
-                }
+                    "Total_Votos": "Avaliações",
+                },
             )
-            st.caption("💡 O gradiente de cor destaca quem está mais próximo da nota máxima (10.0).")
+            st.caption("💡 As cores indicam a faixa da nota média (verde = melhor, vermelho = atenção).")
 
         with col_q2:
             # 2. Gráfico Horizontal com limite fixo em 10
@@ -1074,10 +1129,16 @@ with aba_telefonia:
                     df_exibicao_equipe = df_exibicao_equipe.rename(columns={'setor_epsy': 'Setor'})
                 df_exibicao_equipe['Horas Totais na Linha'] = df_exibicao_equipe['Horas Totais na Linha'] / 60
                 
-                st.dataframe(df_exibicao_equipe.style.format({
-                    'Duração Média (Min)': "{:.1f}", 
-                    'Horas Totais na Linha': "{:.1f}h"
-                }).background_gradient(subset=['Não Atendeu (Perdidas)'], cmap='Reds'), width='stretch', hide_index=True)
+                st.dataframe(
+                    df_exibicao_equipe.style.format(
+                        {
+                            "Duração Média (Min)": "{:.1f}",
+                            "Horas Totais na Linha": "{:.1f}h",
+                        }
+                    ).apply(_apply_style_perdidas_col, axis=0),
+                    width="stretch",
+                    hide_index=True,
+                )
 
                 # ----------------------------------------------------
                 # BLOCO 2: APENAS SISTEMA E TRANSFERÊNCIAS

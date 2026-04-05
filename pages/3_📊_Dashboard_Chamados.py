@@ -263,6 +263,35 @@ def _styler_status_col(series):
     return [f"color: {STATUS_COLOR_MAP.get(str(v), '#333333')}; font-weight: 600" for v in series]
 
 
+def _css_dias_aberto_escala(val: object, vmax: float) -> str:
+    """Destaque por dias em aberto sem matplotlib (substitui background_gradient Reds)."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    try:
+        d = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if d <= 0:
+        return "background-color: #fafafa; color: #333333;"
+    top = max(float(vmax), 1.0)
+    t = min(1.0, d / top)
+    if t < 0.25:
+        return "background-color: #fff3e0; color: #4e342e;"
+    if t < 0.5:
+        return "background-color: #ffccbc; color: #4e342e;"
+    if t < 0.75:
+        return "background-color: #ff8a65; color: #1a1a1a;"
+    return "background-color: #e53935; color: #ffffff;"
+
+
+def _apply_style_dias_aberto_col(s: pd.Series) -> list[str]:
+    col = "Dias em Aberto"
+    if s.name != col:
+        return [""] * len(s)
+    vmax = float(s.max()) if len(s) and s.notna().any() else 1.0
+    return [_css_dias_aberto_escala(v, vmax) for v in s]
+
+
 def limpar_html(html_text):
     """Compatível com código antigo; preferir modules.html_texto.html_para_exibicao."""
     try:
@@ -773,7 +802,7 @@ with aba2:
         df_abertos_view = df_abertos_view.sort_values(by="Dias em Aberto", ascending=False)
         styled = (
             df_abertos_view.style.format({"Dias em Aberto": "{:.0f}"})
-            .background_gradient(cmap="Reds", subset=["Dias em Aberto"])
+            .apply(_apply_style_dias_aberto_col, axis=0)
             .apply(_styler_status_col, subset=["Status"])
         )
         st.dataframe(styled, hide_index=True, width="stretch", height=600)

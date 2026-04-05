@@ -71,9 +71,16 @@ st.markdown(
     }
     .ws-perfil-welcome-wrap {
         text-align: center;
-        margin: 3rem auto 1.5rem;
+        margin: 0.85rem auto 0.5rem;
         max-width: 48rem;
-        padding: 0 1rem 0.5rem;
+        padding: 0 1rem;
+    }
+    .ws-perfil-dados-wrap {
+        max-width: 36rem;
+        margin: 0.35rem 0 0 0;
+        margin-right: auto;
+        padding: 0;
+        text-align: left;
     }
     .ws-perfil-welcome-italic {
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -138,20 +145,22 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    f'<p class="ws-perfil-dado-linha">'
-    f'<span class="ws-perfil-rotulo">Usuário:</span>'
-    f'<span class="ws-perfil-valor">{nome_safe}</span></p>',
-    unsafe_allow_html=True,
-)
-st.markdown(
-    f'<p class="ws-perfil-dado-linha">'
-    f'<span class="ws-perfil-rotulo">Meu Ramal:</span>'
-    f'<span class="ws-perfil-valor">{ramal_safe}</span></p>',
-    unsafe_allow_html=True,
-)
-st.markdown(
     f'<div class="ws-perfil-welcome-wrap">'
     f'<p class="ws-perfil-welcome-italic">{msg_safe}</p></div>',
+    unsafe_allow_html=True,
+)
+
+st.divider()
+
+st.markdown(
+    f'<div class="ws-perfil-dados-wrap">'
+    f'<p class="ws-perfil-dado-linha">'
+    f'<span class="ws-perfil-rotulo">Usuário:</span>'
+    f'<span class="ws-perfil-valor">{nome_safe}</span></p>'
+    f'<p class="ws-perfil-dado-linha">'
+    f'<span class="ws-perfil-rotulo">Meu Ramal:</span>'
+    f'<span class="ws-perfil-valor">{ramal_safe}</span></p>'
+    f"</div>",
     unsafe_allow_html=True,
 )
 
