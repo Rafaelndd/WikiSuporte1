@@ -93,7 +93,7 @@ except ImportError:
 
 # Configura a página: título, ícone, layout expandido e barra lateral recolhida por padrão
 st.set_page_config(
-    page_title="Wiki-Suporte", 
+    page_title="WikiSuporte", 
     page_icon="💡", 
     layout="wide", 
     initial_sidebar_state="collapsed"
@@ -184,7 +184,7 @@ def obter_kpis_home(usuario_id):
         "upvotes_recebidos": 0,
         "nivel_atual": "Iniciante 🌱",
         "progresso_nivel": 0.0,
-        "missoes_ativas": [],
+       
         "caminho_foto_perfil": None,
         "em_pausa": False,
         "dias_sem_contribuir": 0,
@@ -307,21 +307,6 @@ def obter_kpis_home(usuario_id):
             """)
             rank_val = conn.execute(query_rank, {"uid": usuario_id}).scalar()
             kpis["posicao_ranking"] = f"{rank_val}º Lugar" if rank_val else "N/A"
-
-            # 4. MISSÕES (Engajamento)
-            if kpis["upvotes_recebidos"] < 10:
-                kpis["missoes_ativas"].append("⭐ **Missão:** Alcance 10 curtidas para subir de nível!")
-            
-            # Verifica voto nas últimas 24h
-            voto_hoje = conn.execute(text("""
-                SELECT EXISTS(
-                    SELECT 1 FROM base_conhecimento_votos 
-                    WHERE id_analista_votante = :uid AND data_voto >= now() - interval '24 hours'
-                )
-            """), {"uid": usuario_id}).scalar()
-            
-            if not voto_hoje:
-                kpis["missoes_ativas"].append("🔍 **Missão:** Avalie a dica de um colega hoje!")
 
     except Exception as e:
         logging.exception("Erro crítico em obter_kpis_home para usuario_id=%s: %s", usuario_id, e)
@@ -955,8 +940,7 @@ def renderizar_dashboard_conquistas(kpis):
 
     st.write("")
 
-    # 3. SEÇÃO DE ENGAJAMENTO (Missões + alertas XP / penalidades / bônus)
-    tem_missoes = bool(kpis.get("missoes_ativas"))
+    # 3. Alertas de XP (penalidades, bônus semanal de aprovações, dias sem contribuir)
     dias_sem = int(kpis.get("dias_sem_contribuir", 0))
     em_pausa = bool(kpis.get("em_pausa"))
     pen_sem = int(kpis.get("penalidade_sofrida_semana", 0))
@@ -965,11 +949,10 @@ def renderizar_dashboard_conquistas(kpis):
         (not em_pausa and dias_sem >= 5)
         or bonus_sem
         or (pen_sem < 0)
-        or tem_missoes
     )
 
     if tem_alertas_xp:
-        with st.expander("🎯 **Missões e Desafios da Semana**", expanded=True):
+        with st.expander("📌 **Avisos de XP e contribuição**", expanded=True):
             if not em_pausa and dias_sem >= 5:
                 st.markdown(
                     """
@@ -1001,22 +984,6 @@ def renderizar_dashboard_conquistas(kpis):
                 st.caption(
                     f"📉 No último fechamento semanal foi aplicado desconto de **{pen_sem} XP** "
                     "em eventos de penalidade registados nesta semana ISO."
-                )
-
-            if tem_missoes:
-                for missao in kpis["missoes_ativas"]:
-                    st.markdown(f"{missao}")
-                st.caption("Complete missões para ganhar bônus de XP e medalhas exclusivas.")
-
-            if bonus_sem:
-                st.success(
-                    "🎉 **Bônus da semana!** Você recebeu XP extra pelo desempenho "
-                    "(ex.: meta semanal de aprovações — 5 contribuições **+1000 XP**). Parabéeeeeeens!"
-                )
-
-            if pen_sem < 0:
-                st.caption(
-                    f"📉 Na  última semana foi aplicado desconto de **{pen_sem} do seu XP**"
                 )
 
     # 4. MINI-RESUMO DE CONTRIBUIÇÕES
