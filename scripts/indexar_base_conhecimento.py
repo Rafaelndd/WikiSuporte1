@@ -37,21 +37,28 @@ def main():
         default=10,
         help="Imprime progresso a cada N documentos (0 desativa).",
     )
+    parser.add_argument(
+        "--sem-gemini",
+        action="store_true",
+        help="Não chama API do Gemini; usa fallback local para gerar vetores.",
+    )
     args = parser.parse_args()
 
     # Indexa apenas manuais e wikis por padrão; ajuste se quiser outras origens.
     origens = [o.strip() for o in str(args.origens).split(",") if o.strip()]
     logging.info(
-        "Iniciando indexação vetorial | origens=%s | limit=%s | after_id=%s",
+        "Iniciando indexação vetorial | origens=%s | limit=%s | after_id=%s | usar_gemini=%s",
         origens,
         args.limit,
         args.after_id,
+        (not args.sem_gemini),
     )
     total_chunks = indexar_base_conhecimento(
         origens=origens,
         limite=max(1, int(args.limit)),
         after_id=max(0, int(args.after_id)),
         progress_step=max(0, int(args.progress_step)),
+        usar_gemini=(not args.sem_gemini),
     )
     logging.info("Indexação concluída. Chunks indexados/atualizados: %s", total_chunks)
     print(f"Chunks indexados/atualizados: {total_chunks}")
