@@ -61,7 +61,6 @@ else:
         arquivo_release = st.file_uploader(
             "Arquivo do release",
             type=["txt", "md", "doc", "docx", "rtf", "pdf"],
-            max_bytes=MAX_BYTES_ARQUIVO_RELEASE,
             help="O texto será lido para localizar números de chamado entre parênteses.",
         )
 

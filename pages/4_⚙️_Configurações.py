@@ -1,10 +1,8 @@
 """
 WikiSuporte - Página de Configurações.
-Permite controle dos bots de varredura, ramais de analistas e cadastro de clientes com telefones.
+Permite controle dos bots de varredura e cadastro de clientes com telefones.
 Acesso restrito ao perfil **admin**. O status dos bots é lido do arquivo `robo_state.json` e pode ser controlado por este painel, mas o motor precisa estar rodando (via `motor_extracao.py`) para processar as solicitações. O cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs de auditoria registram ações importantes.
 """
-import json
-import os
 import re
 import time
 import urllib.request
@@ -19,8 +17,13 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-from modules.database import get_connection
 from modules.utils import ler_estado_robo, salvar_estado_robo
+from services.clientes_service import (
+    buscar_clientes_autocomplete,
+    garantir_indices_clientes_busca,
+    listar_clientes_telefones_resumo,
+    vincular_telefone_cliente,
+)
 from services.system_notifications import (
     bloqueios_versao_ativos,
     criar_notificacao,
@@ -81,11 +84,10 @@ if not eh_admin(perfil_raw):
 perfil_usuario = "admin"
 
 st.title("⚙️ WikiSuporte - Configurações")
-st.markdown("Controle dos bots, ramais, clientes e comunicados globais do sistema.")
+st.markdown("Controle dos bots, clientes e comunicados globais do sistema.")
 
 nomes_abas = [
     "🤖 Bots",
-    "📞 Ramais e Analistas",
     "🏢 Clientes e Telefones",
     "📢 Lançar Nova Versão",
 ]
@@ -93,8 +95,8 @@ tem_painel_notifs = True
 if tem_painel_notifs:
     nomes_abas.append("📣 Notificações e Comunicados")
 abas = st.tabs(nomes_abas)
-aba_robo, aba_ramais, aba_clientes, aba_release_launch = abas[:4]
-aba_notificacoes = abas[4] if tem_painel_notifs else None
+aba_robo, aba_clientes, aba_release_launch = abas[:3]
+aba_notificacoes = abas[3] if tem_painel_notifs else None
 
 # ==========================================
 # ABA 1: BOTS DE VARREDURA
@@ -202,108 +204,146 @@ with aba_robo:
                     st.info("Serviço de controle de bot não disponível.")
 
 # ==========================================
-# ABA 2: RAMAIS E ANALISTAS
-# ==========================================
-ARQUIVO_RAMAIS = "ramais_config.json"
-
-def _ler_ramais():
-    if os.path.exists(ARQUIVO_RAMAIS):
-        try:
-            with open(ARQUIVO_RAMAIS, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def _salvar_ramais(dados):
-    with open(ARQUIVO_RAMAIS, "w", encoding="utf-8") as f:
-        json.dump(dados, f, indent=4, ensure_ascii=False)
-
-@st.cache_data(ttl=120)
-def _obter_analistas_ativos():
-    engine = get_connection()
-    try:
-        df = pd.read_sql("SELECT DISTINCT usuario_epsy FROM chamados_tecnuv WHERE usuario_epsy IS NOT NULL AND usuario_epsy != ''", engine)
-        return [a for a in df["usuario_epsy"].tolist() if a and a != "Não Informado"]
-    except Exception:
-        return []
-
-with aba_ramais:
-    st.subheader("Ramais e Analistas EPSY")
-    st.caption("Os analistas cadastrados aqui são os mesmos que abrem chamados, estão nos plantões, contribuições e dashboards. Cadastre/altere ramais.")
-
-    ramais = _ler_ramais()
-    analistas = _obter_analistas_ativos()
-
-    col_r1, col_r2 = st.columns([1, 1.5])
-    with col_r1:
-        with st.form("form_ramal"):
-            sel = st.selectbox("Analista", ["-- Novo --"] + analistas)
-            nome = st.text_input("Nome") if sel == "-- Novo --" else sel
-            ramal = st.text_input("Número do Ramal")
-            if st.form_submit_button("Vincular"):
-                if nome and ramal:
-                    ramais[nome.strip()] = ramal.strip()
-                    _salvar_ramais(ramais)
-                    st.success(f"Ramal vinculado a {nome}.")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.warning("Preencha nome e ramal.")
-
-    with col_r2:
-        if ramais:
-            df_r = pd.DataFrame(list(ramais.items()), columns=["Analista", "Ramal"]).sort_values("Analista")
-            st.dataframe(df_r, hide_index=True, use_container_width="stretch")
-            remover = st.selectbox("Remover", [""] + list(ramais.keys()))
-            if st.button("Remover") and remover:
-                del ramais[remover]
-                _salvar_ramais(ramais)
-                st.rerun()
-
-# ==========================================
-# ABA 3: CLIENTES E TELEFONES
+# ABA 2: CLIENTES E TELEFONES
 # ==========================================
 def _apenas_numeros(txt):
     return re.sub(r"\D", "", str(txt)) if txt else ""
 
 with aba_clientes:
-    st.subheader("Clientes e Telefones")
-    st.caption("Um CNPJ = uma Razão Social. Cadastre vários telefones por cliente. Usado para cruzar Goto/Multi360 e identificar quem mais consome suporte.")
+    st.subheader("Cadastre e Vincule números de Telefone/Celular ao cadastro dos clientes cadastrados")
 
-    with st.form("form_cliente"):
-        razao = st.text_input("Razão Social *", placeholder="Ex: Posto Avenida LTDA")
-        cnpj = _apenas_numeros(st.text_input("CNPJ", placeholder="00.000.000/0000-00"))
-        tel = _apenas_numeros(st.text_input("Telefone/Celular *", placeholder="48999999999"))
-        if st.form_submit_button("Salvar e vincular"):
-            if razao and tel:
-                try:
-                    from services.clientes_service import vincular_telefone_cliente
+    ok_idx, msg_idx = garantir_indices_clientes_busca()
+    if not ok_idx:
+        st.warning(f"Não foi possível validar os índices de busca agora: {msg_idx}")
 
-                    ok, msg = vincular_telefone_cliente(
-                        razao_social=razao.strip(),
-                        numero_raw=tel,
-                        cnpj=cnpj or None,
-                    )
-                    if ok:
-                        st.success(f"Cliente {razao} vinculado ao telefone.")
-                        st.rerun()
-                    else:
-                        st.error(msg)
-                except Exception as e:
-                    st.error(str(e))
+    if "cfg_cli_razao_social" not in st.session_state:
+        st.session_state["cfg_cli_razao_social"] = ""
+    if "cfg_cli_cnpj" not in st.session_state:
+        st.session_state["cfg_cli_cnpj"] = ""
+    if "cfg_cli_telefone" not in st.session_state:
+        st.session_state["cfg_cli_telefone"] = ""
+    if "cfg_cli_last_sel_razao" not in st.session_state:
+        st.session_state["cfg_cli_last_sel_razao"] = ""
+    if "cfg_cli_last_sel_cnpj" not in st.session_state:
+        st.session_state["cfg_cli_last_sel_cnpj"] = ""
+
+    def _aplicar_sugestao_cliente(label_escolhido: str, opcoes: dict[str, dict]) -> None:
+        escolhido = opcoes.get(label_escolhido)
+        if not escolhido:
+            return
+        st.session_state["cfg_cli_razao_social"] = str(escolhido.get("razao_social") or "")
+        st.session_state["cfg_cli_cnpj"] = str(escolhido.get("cnpj") or "")
+        st.rerun()
+
+    st.markdown("#### Busca inteligente em tempo real")
+    b1, b2 = st.columns(2)
+    with b1:
+        busca_razao = st.text_input(
+            "Buscar por razão social/nome/CNPJ",
+            key="cfg_cli_busca_razao",
+            placeholder="Digite parte do nome, razão social ou CNPJ",
+        )
+        if (busca_razao or "").strip():
+            df_sug_razao = buscar_clientes_autocomplete(busca_razao, limite=12)
+            if not df_sug_razao.empty:
+                opcoes_razao = {"": {}}
+                for _, row in df_sug_razao.iterrows():
+                    label = f"{row['razao_social']} | CNPJ: {row['cnpj'] or 'não informado'}"
+                    opcoes_razao[label] = {
+                        "razao_social": str(row["razao_social"] or ""),
+                        "cnpj": str(row["cnpj"] or ""),
+                    }
+                escolha_razao = st.selectbox(
+                    "Sugestões da busca por razão social",
+                    list(opcoes_razao.keys()),
+                    key="cfg_cli_sug_razao",
+                )
+                if escolha_razao and escolha_razao != st.session_state.get("cfg_cli_last_sel_razao", ""):
+                    st.session_state["cfg_cli_last_sel_razao"] = escolha_razao
+                    _aplicar_sugestao_cliente(escolha_razao, opcoes_razao)
+                elif not escolha_razao:
+                    st.session_state["cfg_cli_last_sel_razao"] = ""
             else:
-                st.warning("Preencha Razão Social e Telefone.")
+                st.caption("Nenhuma correspondência encontrada para essa busca.")
+    with b2:
+        busca_cnpj = st.text_input(
+            "Buscar por CNPJ (com ou sem máscara)",
+            key="cfg_cli_busca_cnpj",
+            placeholder="Ex.: 12.345.678/0001-90 ou 12345678000190",
+        )
+        if (busca_cnpj or "").strip():
+            df_sug_cnpj = buscar_clientes_autocomplete(busca_cnpj, limite=12)
+            if not df_sug_cnpj.empty:
+                opcoes_cnpj = {"": {}}
+                for _, row in df_sug_cnpj.iterrows():
+                    label = f"{row['cnpj'] or 'não informado'} | {row['razao_social']}"
+                    opcoes_cnpj[label] = {
+                        "razao_social": str(row["razao_social"] or ""),
+                        "cnpj": str(row["cnpj"] or ""),
+                    }
+                escolha_cnpj = st.selectbox(
+                    "Sugestões da busca por CNPJ",
+                    list(opcoes_cnpj.keys()),
+                    key="cfg_cli_sug_cnpj",
+                )
+                if escolha_cnpj and escolha_cnpj != st.session_state.get("cfg_cli_last_sel_cnpj", ""):
+                    st.session_state["cfg_cli_last_sel_cnpj"] = escolha_cnpj
+                    _aplicar_sugestao_cliente(escolha_cnpj, opcoes_cnpj)
+                elif not escolha_cnpj:
+                    st.session_state["cfg_cli_last_sel_cnpj"] = ""
+            else:
+                st.caption("Nenhuma correspondência encontrada para esse CNPJ.")
+
+    st.markdown("#### Vincular telefone")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        razao = st.text_input(
+            "Razão Social *",
+            key="cfg_cli_razao_social",
+            placeholder="Ex.: Posto Avenida LTDA",
+        )
+    with c2:
+        cnpj_in = st.text_input(
+            "CNPJ",
+            key="cfg_cli_cnpj",
+            placeholder="00.000.000/0000-00",
+        )
+    with c3:
+        tel_in = st.text_input(
+            "Telefone/Celular *",
+            key="cfg_cli_telefone",
+            placeholder="48999999999",
+        )
+
+    if st.button("Salvar e vincular", type="primary", key="cfg_cli_btn_salvar", use_container_width=True):
+        razao_limpa = (razao or "").strip()
+        cnpj_limpo = _apenas_numeros(cnpj_in)
+        tel_limpo = _apenas_numeros(tel_in)
+        if not razao_limpa or not tel_limpo:
+            st.warning("Preencha Razão Social e Telefone/Celular.")
+        else:
+            ok, msg = vincular_telefone_cliente(
+                razao_social=razao_limpa,
+                numero_raw=tel_limpo,
+                cnpj=cnpj_limpo or None,
+            )
+            if ok:
+                st.success("Vínculo salvo com sucesso. Os dados já ficam disponíveis na página de Registro de Atendimentos.")
+                st.session_state["cfg_cli_telefone"] = ""
+                st.rerun()
+            else:
+                st.error(msg)
 
     try:
-        df_cli = pd.read_sql("""
-            SELECT c.id_cliente, c.razao_social, c.cnpj, COUNT(t.id_cliente) as qtd_telefones
-            FROM clientes_crm c
-            LEFT JOIN clientes_telefones t ON t.id_cliente = c.id_cliente
-            GROUP BY c.id_cliente, c.razao_social, c.cnpj
-            ORDER BY c.razao_social
-        """, get_connection())
+        df_cli = listar_clientes_telefones_resumo(limite=2000)
         if not df_cli.empty:
+            df_cli = df_cli.rename(
+                columns={
+                    "razao_social": "Razão Social",
+                    "cnpj": "CNPJ",
+                    "qtd_telefones": "Qtd. Telefones",
+                }
+            )
             st.dataframe(df_cli, hide_index=True, use_container_width="stretch")
     except Exception as e:
         st.caption(f"Listagem indisponível: {e}")
@@ -314,10 +354,10 @@ with aba_clientes:
 with aba_release_launch:
     st.subheader("📢 Lançar Nova Versão")
     st.caption(
-        "Os dados são guardados em **`releases/releases_catalog.json`**. "
-        "O aviso na **Home** fica visível até ao último dia da janela (dia de lançamento conta como dia 1)."
+        "Publique novidades do sistema de forma simples. "
+        "O aviso na Home ficará visível pelo período que você definir."
     )
-    st.caption(f"Caminho: `{catalog_path()}`")
+    st.caption("Use esta área para comunicar melhorias e mudanças importantes para toda a equipe.")
 
     existentes = load_catalog(create_if_missing=True)
     if existentes:
