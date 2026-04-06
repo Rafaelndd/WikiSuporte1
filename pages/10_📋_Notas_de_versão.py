@@ -176,7 +176,7 @@ if not catalog:
     st.warning("Ainda não há releases registadas no sistema.")
 else:
     st.subheader("Histórico de releases", anchor=False)
-    st.caption("Do mais recente para o mais antigo. Abra cada versão para ver o comparativo **Como era** / **Como ficou**.")
+    st.caption("Do mais recente para o mais antigo. Abra cada versão para ver o comparativo **Como era** / **Como ficou** no Release.")
     for i, rec in enumerate(catalog):
         _render_release_expander(rec, expanded=(i == 0))
 
