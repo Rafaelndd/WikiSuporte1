@@ -36,6 +36,12 @@ from services.ui_theme_presets import wiki_theme_apply_authenticated
 from services.wiki_authenticator import process_forced_logout_from_url
 from services.ui_avatar import html_avatar_perfil_circular
 from services.contrib_rules_ui import render_contrib_rules_table
+from services.vector_db import (
+    EMBEDDING_DIM,
+    buscar_similares,
+    criar_extensao_e_tabela,
+    indexar_base_conhecimento,
+)
 
 load_dotenv()
 
@@ -228,7 +234,7 @@ with st.expander("📋 Regras de contribuições e penalidades", expanded=True):
 if perfil_logado == "admin":
     abas = st.tabs([
         "🏅 Inicio & Ranking", 
-        "🤖 Assistente Virtual", 
+        "🔎 WikiSuporte - Busque na Base", 
         "📘 Acervo Digital", 
         "📖 Histórico de Buscas", 
         "📝 Adicionar Contribuição", 
@@ -240,7 +246,7 @@ if perfil_logado == "admin":
 else:
     abas = st.tabs([
         "🏅 Home & Ranking", 
-        "🤖 Assistente Virtual", 
+        "🔎 WikiSuporte - Busque na Base", 
         "📘 Acervo Digital", 
         "📖 Histórico de Buscas", 
         "📝 Adicionar Contribuição", 
@@ -356,263 +362,215 @@ with aba_ranking:
             st.warning("Nenhum analista pontuou ainda. Hora de minerar conhecimento! ⛏️")
 
 # ==========================================
-# ABA 2: MOTOR DE BUSCA HÍBRIDO (Com IA Inteligente)
+# ABA 2: BUSCA SEMÂNTICA RAG (IA TEMPORARIAMENTE DESATIVADA)
 # ==========================================
 with aba_gemini:
-    st.subheader("🤖 Pesquisar")
-    pergunta = st.text_input("Informe sua dúvida: ", placeholder="Ex: Como configurar o e-mail no PostoGestor?", key="input_psy")
-    
-    if st.button("🔍 Buscar", type="primary"):
-        if not pergunta.strip():
-            st.warning("⚠️ Insira uma dúvida válida.")
-        else:
-            with st.spinner("Analisando base e comparando com o histórico recente..."):
-                tem_no_cache = False
+    st.markdown(
+        """
+        <style>
+        .ws-busca-hero {
+            text-align: center;
+            margin: 0 auto 1rem auto;
+            max-width: 56rem;
+        }
+        .ws-busca-hero h1 {
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            font-weight: 800;
+            font-size: clamp(1.9rem, 4.8vw, 2.8rem);
+            margin: 0;
+            letter-spacing: -0.03em;
+        }
+        .ws-busca-hero .wiki { color: #f85001; }
+        .ws-busca-hero .suporte { color: #15789a; }
+        html[data-theme="dark"] .ws-busca-hero .wiki { color: #ff9a6b; }
+        html[data-theme="dark"] .ws-busca-hero .suporte { color: #5eb8d9; }
+        .ws-busca-hero p {
+            color: #4b5563;
+            font-size: 1rem;
+            margin: 0.45rem 0 0 0;
+        }
+        html[data-theme="dark"] .ws-busca-hero p { color: #d1d5db; }
+        </style>
+        <div class="ws-busca-hero">
+            <h1><span class="wiki">Wiki</span><span class="suporte">Suporte</span></h1>
+            <p><strong>Está com dúvidas, precisa de alguma informação?</strong><br/>Busque na nossa Base de Conhecimento.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-                # --- Aviso semântico: mesmo assunto já buscado (embedding) ---
-                if _busca_sem_ok and listar_buscas_mesmo_assunto:
+    try:
+        criar_extensao_e_tabela(EMBEDDING_DIM)
+    except Exception:
+        pass
+
+    dim_atual = None
+    try:
+        with engine.connect() as conn:
+            row_dim = conn.execute(
+                text(
+                    """
+                    SELECT format_type(a.atttypid, a.atttypmod) AS tipo
+                    FROM pg_attribute a
+                    JOIN pg_class c ON c.oid = a.attrelid
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = 'base_conhecimento_embeddings'
+                      AND a.attname = 'embedding'
+                      AND a.attnum > 0
+                      AND NOT a.attisdropped
+                    LIMIT 1
+                    """
+                )
+            ).fetchone()
+        if row_dim and row_dim[0]:
+            m = re.search(r"vector\((\d+)\)", str(row_dim[0]).lower())
+            if m:
+                dim_atual = int(m.group(1))
+    except Exception:
+        dim_atual = None
+
+    if dim_atual and dim_atual != EMBEDDING_DIM:
+        st.warning(
+            f"⚠️ Dimensão vetorial atual: {dim_atual}. Recomendada para Gemini neste projeto: {EMBEDDING_DIM}. "
+            "Considere alinhar para manter a precisão da busca semântica."
+        )
+
+    origem_opts = ["CONHECIMENTO_SUPORTE", "WIKI_HELPDESK", "MANUAL_HELPDESK"]
+    try:
+        with engine.connect() as conn:
+            rows_origem = conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT origem
+                    FROM base_conhecimento
+                    WHERE status = 'APROVADO'
+                    ORDER BY origem
+                    """
+                )
+            ).fetchall()
+        origem_db = [str(r[0]) for r in rows_origem if r and r[0]]
+        if origem_db:
+            origem_opts = origem_db
+    except Exception:
+        pass
+
+    colf1, colf2 = st.columns([2, 1])
+    with colf1:
+        origem_sel = st.multiselect(
+            "Fontes da busca",
+            options=origem_opts,
+            default=[o for o in ["CONHECIMENTO_SUPORTE", "WIKI_HELPDESK", "MANUAL_HELPDESK"] if o in origem_opts] or origem_opts,
+            help="Escolha onde pesquisar para deixar os resultados mais precisos.",
+        )
+    with colf2:
+        top_k = st.slider("Precisão (top resultados)", min_value=3, max_value=15, value=8, step=1)
+
+    with st.form("form_busca_rag_semantica", clear_on_submit=False):
+        pergunta = st.text_input(
+            "Digite sua dúvida",
+            placeholder="Ex.: Como configuro o e-mail no PostoGestor para envio automático?",
+            key="input_psy_rag",
+        )
+        buscar = st.form_submit_button("🔍 Buscar na Base de Conhecimento", type="primary", use_container_width=True)
+
+    if perfil_logado == "admin":
+        with st.expander("⚙️ Administração da busca vetorial", expanded=False):
+            st.caption(
+                f"Dimensão recomendada para Gemini no cenário atual: **{EMBEDDING_DIM}**. "
+                "Esta dimensão é um bom equilíbrio entre precisão e velocidade para o volume atual."
+            )
+            if st.button("♻️ Reindexar Base de Conhecimento (RAG)", key="btn_reindex_rag"):
+                with st.spinner("Reindexando embeddings da Base de Conhecimento..."):
+                    total_chunks = indexar_base_conhecimento(origens=origem_sel or None, limite=1500)
+                st.success(f"Reindexação concluída. Chunks indexados/atualizados: {total_chunks}")
+
+    # IA desativada por decisão operacional (manter código de referência)
+    # from services.llm_router import gerar_resposta
+    # resposta_ia = gerar_resposta(pergunta=pergunta, contexto=texto_contexto)
+    # st.markdown(resposta_ia.texto)
+
+    if buscar:
+        if not (pergunta or "").strip():
+            st.warning("⚠️ Insira uma dúvida para pesquisar.")
+        else:
+            with st.spinner("Executando busca semântica RAG na Base de Conhecimento..."):
+                resultados = buscar_similares(
+                    pergunta.strip(),
+                    top_k=int(top_k),
+                    origens=origem_sel or None,
+                    usar_embedding_query=True,
+                )
+                resultados = [r for r in resultados if float(r.get("similaridade", 0.0)) >= 0.45]
+
+                if not resultados:
+                    with engine.connect() as conn:
+                        rows = conn.execute(
+                            text(
+                                """
+                                SELECT id, titulo, origem, conteudo
+                                FROM base_conhecimento
+                                WHERE status = 'APROVADO'
+                                  AND origem = ANY(:origens)
+                                  AND (titulo ILIKE :q OR conteudo ILIKE :q)
+                                ORDER BY atualizado_em DESC NULLS LAST, criado_em DESC
+                                LIMIT :lim
+                                """
+                            ),
+                            {
+                                "origens": origem_sel or origem_opts,
+                                "q": f"%{pergunta.strip()}%",
+                                "lim": int(top_k),
+                            },
+                        ).fetchall()
+                    resultados = [
+                        {
+                            "id_conhecimento": int(r[0]),
+                            "titulo": str(r[1] or "Sem título"),
+                            "origem": str(r[2] or "BASE"),
+                            "texto_chunk": str(r[3] or "")[:1600],
+                            "similaridade": 0.30,
+                        }
+                        for r in rows
+                    ]
+
+            if not resultados:
+                st.error("Nenhum resultado relevante foi encontrado para a sua dúvida.")
+            else:
+                st.success(f"Foram encontrados {len(resultados)} resultado(s) relevantes.")
+                st.info("🤖 IA de resposta está temporariamente desativada. Exibindo resultados semânticos da Base.")
+
+                resumo_linhas = []
+                for i, item in enumerate(resultados[:3], start=1):
+                    trecho = " ".join(str(item["texto_chunk"]).split())
+                    trecho = trecho[:220].rstrip() + ("..." if len(trecho) > 220 else "")
+                    resumo_linhas.append(
+                        f"{i}. **{item['titulo']}** ({item['origem']}) — {trecho}"
+                    )
+                st.markdown("### 🧠 Resumo semântico")
+                st.markdown("\n".join(resumo_linhas))
+
+                st.markdown("### 📚 Fontes encontradas")
+                for item in resultados:
+                    sim_pct = int(float(item.get("similaridade", 0.0)) * 100)
+                    with st.expander(
+                        f"📄 {item['titulo']} · {item['origem']} · Similaridade {sim_pct}%"
+                    ):
+                        st.write(item["texto_chunk"])
+
+                if _busca_sem_ok and registrar_busca_com_topico:
                     try:
-                        colegas = listar_buscas_mesmo_assunto(
-                            engine, pergunta.strip(), usuario_logado_id, "ASSISTENTE", limite=12
+                        registrar_busca_com_topico(
+                            engine,
+                            usuario_logado_id,
+                            pergunta.strip(),
+                            "Busca semântica RAG (IA desativada)",
+                            "ASSISTENTE",
+                            0,
+                            0,
+                            0,
                         )
                     except Exception:
-                        colegas = []
-                    if len(colegas) >= 1:
-                        outros = [c for c in colegas if c.get("nome") and True]
-                        st.warning(
-                            "**Este tema já foi pesquisado antes** (busca semântica — variações como "
-                            "\"CertificadoDigital\", \"instalar certificado\", etc. contam como o mesmo assunto)."
-                        )
-                        st.info(
-                            "Na aba **📖 Histórico de Buscas** você vê **quem** buscou e **dia/hora**. "
-                            "Abaixo, últimas buscas neste mesmo assunto:"
-                        )
-                        for c in colegas[:8]:
-                            quem = c.get("nome") or "Colega"
-                            st.caption(f"**{quem}** — {c.get('quando', '')} — _{str(c.get('pergunta', ''))[:100]}…_")
-                
-                def normalizar_texto_completo(texto):
-                    t = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
-                    return re.sub(r'[^a-z0-9\s]', '', t.lower()).strip()
-                
-                def obter_fatias(texto):
-                    stopwords = {'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'no', 'na', 'em', 'para', 'com', 'como', 'qual', 'quais', 'que', 'e', 'sobre', 'por', 'ou', 'onde', 'quando', 'fazer', 'eu', 'me', 'meu', 'minha', 'instalar', 'instalo', 'configurar', 'configuro'}
-                    norm = normalizar_texto_completo(texto)
-                    return set([p for p in norm.split() if p not in stopwords and len(p) > 2])
-
-                pergunta_norm = normalizar_texto_completo(pergunta)
-                pergunta_glued = pergunta_norm.replace(" ", "")
-                fatias_nova = obter_fatias(pergunta)
-                match_encontrado = None
-
-                with engine.connect() as conn:
-                    query_historico = text("SELECT id, pergunta, resposta_ia, to_char(criado_em, 'DD/MM/YYYY HH24:MI') FROM historico_buscas_psy ORDER BY criado_em DESC LIMIT 50")
-                    historico_recente = conn.execute(query_historico).fetchall()
-                
-                for hist in historico_recente:
-                    hist_id, hist_pergunta_original, resposta_cache, data_cache = hist
-                    hist_norm = normalizar_texto_completo(hist_pergunta_original)
-                    hist_glued = hist_norm.replace(" ", "")
-                    fatias_hist = obter_fatias(hist_pergunta_original)
-                    
-                    if SequenceMatcher(None, pergunta_norm, hist_norm).ratio() > 0.8: match_encontrado = hist; break
-                    if len(pergunta_glued) > 5 and len(hist_glued) > 5 and (pergunta_glued in hist_glued or hist_glued in pergunta_glued): match_encontrado = hist; break
-                    if fatias_nova and fatias_hist:
-                        intersecao = fatias_nova.intersection(fatias_hist)
-                        min_len = min(len(fatias_nova), len(fatias_hist))
-                        if min_len > 0 and (len(intersecao) / min_len) >= 0.6: match_encontrado = hist; break
-
-                if match_encontrado:
-                    hist_id, hist_pergunta_original, resposta_cache, data_cache = match_encontrado
-                    st.success(f"⚠️ **Sua dúvida já foi pesquisada recentemente!** Semelhança com: *'{hist_pergunta_original}'*.")
-                    with st.expander("📖 Ver resumo resgatado do histórico", expanded=True):
-                        st.markdown(resposta_cache)
-                        st.caption("⚡ **Motor Elétrico:** Resposta resgatada do cache.")
-                    tem_no_cache = True
-                    try:
-                        if _busca_sem_ok and registrar_busca_com_topico:
-                            registrar_busca_com_topico(
-                                engine,
-                                usuario_logado_id,
-                                hist_pergunta_original,
-                                resposta_cache or "",
-                                "ASSISTENTE",
-                            )
-                        else:
-                            with engine.begin() as conn_log:
-                                conn_log.execute(
-                                    text(
-                                        "INSERT INTO historico_buscas_psy (usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) VALUES (:u, :p, :r, 0, 0, 0)"
-                                    ),
-                                    {"u": usuario_logado_id, "p": hist_pergunta_original, "r": resposta_cache},
-                                )
-                    except Exception as e:
-                        st.error(f"Erro ranking: {e}")
-                
-                if not tem_no_cache:
-                    contextos_db = []
-                    resultados_puros = []
-                    if fatias_nova:
-                        with engine.connect() as conn:
-                            clausulas_or, clausulas_score = [], []
-                            params = {}
-                            mapa_origem = 'áàâãäéèêëíìîïóòôõöúùûüçñ'
-                            mapa_destino = 'aaaaaeeeeiiiiooooouuuucn'
-                            for i, p in enumerate(fatias_nova):
-                                param_name = f"p{i}"
-                                params[param_name] = f"%{p}%"
-                                clausula_like = f"(translate(lower(titulo), '{mapa_origem}', '{mapa_destino}') LIKE :{param_name} OR translate(lower(conteudo), '{mapa_origem}', '{mapa_destino}') LIKE :{param_name})"
-                                clausulas_or.append(clausula_like)
-                                clausulas_score.append(f"(CASE WHEN translate(lower(titulo), '{mapa_origem}', '{mapa_destino}') LIKE :{param_name} THEN 2 ELSE 0 END) + (CASE WHEN translate(lower(conteudo), '{mapa_origem}', '{mapa_destino}') LIKE :{param_name} THEN 1 ELSE 0 END)")
-                            
-                            filtros_sql = " OR ".join(clausulas_or)
-                            score_sql = " + ".join(clausulas_score)
-                            query_rag = text(f"SELECT titulo, origem, conteudo, caminho_anexo, ({score_sql}) as pontuacao_relevancia FROM base_conhecimento WHERE status = 'APROVADO' AND ({filtros_sql}) ORDER BY pontuacao_relevancia DESC LIMIT 5")
-                            resultados = conn.execute(query_rag, params).fetchall()
-                            for r in resultados:
-                                contextos_db.append(f"📚 FONTE: {r[0]}\nCONTEÚDO: {r[2]}")
-                                resultados_puros.append({"titulo": r[0], "origem": r[1], "conteudo": r[2], "anexo": r[3], "score": r[4]})
-                    
-                    texto_contexto = "\n\n---\n\n".join(contextos_db)
-                    # --- LIBERA IA PARA TODOS OS PERFIS ---
-                    # Antes: acesso_ia_liberado = perfil_logado in ['coordenador', 'dev']
-                    acesso_ia_liberado = True
-                    if acesso_ia_liberado:
-                            from google import genai
-                            import requests
-
-                            from dotenv import load_dotenv
-                            load_dotenv()
-
-                            api_key_gemini = os.getenv("GEMINI_API_KEY")
-                            api_key_deepseek = os.getenv("DEEPSEEK_API_KEY")
-
-                            resposta_texto = None
-                            erro_ia = None
-
-                            # 1ª TENTATIVA: GEMINI
-                            try:
-                                if not api_key_gemini:
-                                    raise RuntimeError("GEMINI_API_KEY não configurada.")
-
-                                client = genai.Client(api_key=api_key_gemini)
-                                prompt = (
-                                    f"Responda diretamente. DÚVIDA: {pergunta}\n\nCONTEXTO:\n{texto_contexto}"
-                                    if texto_contexto
-                                    else f"Diga que não achou manuais para: {', '.join(fatias_nova)}."
-                                )
-                                resposta_ia = client.models.generate_content(
-                                    model="gemini-2.5-flash",
-                                    contents=prompt,
-                                )
-                                usage = getattr(resposta_ia, "usage_metadata", None)
-                                t_prompt = getattr(usage, "input_tokens", None) if usage else None
-                                t_resp = getattr(usage, "output_tokens", None) if usage else None
-                                t_total = getattr(usage, "total_tokens", None) if usage else None
-
-                                resposta_texto = resposta_ia.text
-
-                            except Exception as e_gemini:
-                                erro_ia = e_gemini
-
-                                # 2ª TENTATIVA: DEEPSEEK (se chave existir)
-                                try:
-                                    if not api_key_deepseek:
-                                        raise RuntimeError("DEEPSEEK_API_KEY não configurada.")
-
-                                    headers = {
-                                        "Content-Type": "application/json",
-                                        "Authorization": f"Bearer {api_key_deepseek}",
-                                    }
-                                    prompt = (
-                                        f"Responda diretamente. DÚVIDA: {pergunta}\n\nCONTEXTO:\n{texto_contexto}"
-                                        if texto_contexto
-                                        else f"Diga que não achou manuais para: {', '.join(fatias_nova)}."
-                                    )
-                                    payload = {
-                                        "model": "deepseek-chat",
-                                        "messages": [
-                                            {"role": "system", "content": "Você é um assistente técnico do WikiSuporte."},
-                                            {"role": "user", "content": prompt},
-                                        ],
-                                    }
-                                    resp = requests.post(
-                                        "https://api.deepseek.com/v1/chat/completions",
-                                        headers=headers,
-                                        data=json.dumps(payload),
-                                        timeout=30,
-                                    )
-                                    resp.raise_for_status()
-                                    data = resp.json()
-                                    resposta_texto = data["choices"][0]["message"]["content"]
-                                    # DeepSeek não retorna tokens no mesmo formato; usamos zeros por compatibilidade
-                                    t_prompt = t_resp = t_total = 0
-
-                                except Exception as e_deepseek:
-                                    erro_ia = e_deepseek
-                                    resposta_texto = None  # força fallback sem IA
-
-                            # --- SE CONSEGUIU RESPOSTA POR GEMINI OU DEEPSEEK ---
-                            if resposta_texto:
-                                st.success("⚡ Resposta gerada!")
-                                st.markdown(resposta_texto)
-                                if t_total is not None:
-                                    st.caption(f"🔋 Tokens: {t_total}")
-
-                                try:
-                                    if _busca_sem_ok and registrar_busca_com_topico:
-                                        registrar_busca_com_topico(
-                                            engine,
-                                            usuario_logado_id,
-                                            pergunta.strip(),
-                                            resposta_texto or "",
-                                            "ASSISTENTE",
-                                            t_prompt or 0,
-                                            t_resp or 0,
-                                            t_total or 0,
-                                        )
-                                    else:
-                                        with engine.begin() as conn_log:
-                                            conn_log.execute(
-                                                text(
-                                                    "INSERT INTO historico_buscas_psy "
-                                                    "(usuario_id, pergunta, resposta_ia, tokens_prompt, tokens_resposta, total_tokens) "
-                                                    "VALUES (:u, :p, :r, :tp, :tr, :tt)"
-                                                ),
-                                                {
-                                                    "u": usuario_logado_id,
-                                                    "p": pergunta.strip(),
-                                                    "r": resposta_texto,
-                                                    "tp": t_prompt or 0,
-                                                    "tr": t_resp or 0,
-                                                    "tt": t_total or 0,
-                                                },
-                                            )
-                                except Exception as db_e:
-                                    st.error(f"Erro BD: {db_e}")
-
-                            else:
-                                # FALHA NAS CHAMADAS DE IA (limite diário ou erro): FALLBACK PARA BUSCA NO BANCO
-                                if erro_ia:
-                                    st.warning(
-                                        "O motor de IA atingiu o limite diário ou apresentou erro. "
-                                        "Usando apenas a busca semântica direta na base de conhecimento."
-                                    )
-
-                                if resultados_puros:
-                                    st.markdown("### Sugestões encontradas na base de conhecimento")
-                                    for doc in resultados_puros:
-                                        with st.expander(f"📄 {doc['titulo']} - Score: {doc['score']}"):
-                                            st.write(doc['conteudo'])
-                                else:
-                                            st.info("Nenhum documento relevante foi encontrado na base para esta dúvida.")
-                    else:
-                                # NUNCA deve cair aqui, pois acesso_ia_liberado = True, mas mantemos por segurança
-                                st.info("⚡ Motor a Combustão: IA desativada para este perfil. Veja manuais abaixo:")
-                        
-                    if resultados_puros:
-                        for doc in resultados_puros:
-                            with st.expander(f"📄 {doc['titulo']} - Score: {doc['score']}"): st.write(doc['conteudo'])
+                        pass
 
 # ==========================================
 # ABA UNIFICADA: ACERVO DIGITAL (WIKIS E MANUAIS)

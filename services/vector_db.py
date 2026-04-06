@@ -32,6 +32,21 @@ CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 
 
+def _ajustar_dimensao_embedding(emb: List[float], dim: int = EMBEDDING_DIM) -> List[float]:
+    """
+    Garante que o embedding fique exatamente na dimensão esperada pelo pgvector.
+    - Se maior: corta.
+    - Se menor: completa com zeros.
+    """
+    if not emb:
+        return [0.0] * dim
+    if len(emb) == dim:
+        return emb
+    if len(emb) > dim:
+        return emb[:dim]
+    return emb + [0.0] * (dim - len(emb))
+
+
 def _engine():
     if get_connection is None:
         raise RuntimeError("modules.database.get_connection não disponível.")
@@ -99,26 +114,61 @@ def criar_extensao_e_tabela(dimensao: int = EMBEDDING_DIM) -> bool:
         return False
 
 
-def _chunk_texto(texto: str, tamanho: int = CHUNK_SIZE, sobreposicao: int = CHUNK_OVERLAP) -> List[str]:
-    """Divide o texto em chunks por tamanho, com sobreposição, respeitando parágrafos quando possível."""
-    if not texto or len(texto) <= tamanho:
-        return [texto] if texto else []
-    chunks = []
+def _chunk_texto(
+    texto: str,
+    tamanho: int = CHUNK_SIZE,
+    sobreposicao: int = CHUNK_OVERLAP,
+    max_chunks: int = 10_000,
+) -> List[str]:
+    """
+    Divide o texto em chunks com sobreposição.
+
+    Proteções incluídas:
+    - Garante avanço mínimo do cursor (evita loop infinito em separadores no início).
+    - Limite de chunks para evitar explosão de memória em conteúdo anômalo.
+    """
+    if not texto:
+        return []
+
+    texto = str(texto)
+    tamanho = max(100, int(tamanho))
+    sobreposicao = max(0, min(int(sobreposicao), tamanho - 1))
+
+    if len(texto) <= tamanho:
+        return [texto]
+
+    chunks: List[str] = []
     inicio = 0
-    while inicio < len(texto):
-        fim = inicio + tamanho
-        if fim < len(texto):
-            # Tenta quebrar em fim de parágrafo ou linha
+    n = len(texto)
+
+    while inicio < n and len(chunks) < max_chunks:
+        fim = min(inicio + tamanho, n)
+
+        if fim < n:
+            # Tenta quebrar em fim de parágrafo/linha/frase sem recuar demais.
             trecho = texto[inicio:fim]
             for sep in ("\n\n", "\n", ". "):
                 idx = trecho.rfind(sep)
-                if idx != -1:
+                if idx > 50:
                     fim = inicio + idx + len(sep)
                     break
-        chunks.append(texto[inicio:fim].strip())
-        inicio = fim - sobreposicao
-        if inicio >= len(texto):
-            break
+
+        if fim <= inicio:
+            # Fallback de segurança para nunca travar.
+            fim = min(inicio + tamanho, n)
+            if fim <= inicio:
+                break
+
+        chunk = texto[inicio:fim].strip()
+        if chunk:
+            chunks.append(chunk)
+
+        # Próximo início com sobreposição, garantindo avanço mínimo.
+        proximo_inicio = max(fim - sobreposicao, inicio + 1)
+        if proximo_inicio <= inicio:
+            proximo_inicio = inicio + 1
+        inicio = proximo_inicio
+
     return chunks
 
 
@@ -158,9 +208,16 @@ def gerar_embedding_gemini(texto: str) -> Optional[List[float]]:
 def _embedding_placeholder(texto: str, dim: int = EMBEDDING_DIM) -> List[float]:
     """Placeholder quando a API de embedding não está disponível (não usar em produção para RAG)."""
     import hashlib
-    h = hashlib.sha256(texto.encode("utf-8")).hexdigest()
-    # Gera vetor determinístico de dimensão fixa (apenas para testes)
-    return [((int(h[i : i + 2], 16) / 255.0) - 0.5) for i in range(0, min(dim * 2, len(h) - 1), 2)][:dim]
+
+    # Expande o hash em blocos para obter dimensão arbitrária de forma determinística.
+    vals: List[float] = []
+    seed = (texto or "").encode("utf-8")
+    rodada = 0
+    while len(vals) < dim:
+        digest = hashlib.sha256(seed + str(rodada).encode("ascii")).digest()
+        vals.extend(((b / 255.0) - 0.5) for b in digest)
+        rodada += 1
+    return vals[:dim]
 
 
 def indexar_documento(
@@ -190,6 +247,7 @@ def indexar_documento(
         emb = gerar_embedding_gemini(chunk) if usar_gemini else None
         if emb is None:
             emb = _embedding_placeholder(chunk)
+        emb = _ajustar_dimensao_embedding(emb, EMBEDDING_DIM)
         # Formato pgvector: lista como string '[0.1, 0.2, ...]'
         emb_str = "[" + ",".join(str(round(x, 6)) for x in emb) + "]"
         with engine.begin() as conn:
@@ -214,7 +272,12 @@ def indexar_documento(
     return count
 
 
-def indexar_base_conhecimento(origens: Optional[List[str]] = None, limite: int = 500) -> int:
+def indexar_base_conhecimento(
+    origens: Optional[List[str]] = None,
+    limite: int = 500,
+    after_id: int = 0,
+    progress_step: int = 0,
+) -> int:
     """
     Percorre base_conhecimento (status APROVADO) e indexa em vetores.
     origens: ex. ['WIKI_HELPDESK', 'MANUAL_HELPDESK'] ou None para todas.
@@ -226,8 +289,9 @@ def indexar_base_conhecimento(origens: Optional[List[str]] = None, limite: int =
             SELECT id, titulo, origem, conteudo
             FROM base_conhecimento
             WHERE status = 'APROVADO' AND conteudo IS NOT NULL AND LENGTH(TRIM(conteudo)) > 0
+              AND id > :after_id
         """
-        params = {}
+        params = {"after_id": max(0, int(after_id))}
         if origens:
             q += " AND origem = ANY(:origens)"
             params["origens"] = origens
@@ -235,8 +299,11 @@ def indexar_base_conhecimento(origens: Optional[List[str]] = None, limite: int =
         params["lim"] = limite
         rows = conn.execute(text(q), params).fetchall()
     total = 0
-    for row in rows:
+    total_docs = len(rows)
+    for i, row in enumerate(rows, start=1):
         total += indexar_documento(row[0], row[1], row[2], row[3] or "", usar_gemini=True)
+        if progress_step > 0 and (i % progress_step == 0 or i == total_docs):
+            print(f"[indexacao] documentos processados: {i}/{total_docs}")
     return total
 
 
@@ -263,6 +330,7 @@ def buscar_similares(
         emb = gerar_embedding_gemini(query)
         if emb is None:
             emb = _embedding_placeholder(query)
+        emb = _ajustar_dimensao_embedding(emb, EMBEDDING_DIM)
         emb_str = "[" + ",".join(str(round(x, 6)) for x in emb) + "]"
         params["query_emb"] = emb_str
         sql = f"""
