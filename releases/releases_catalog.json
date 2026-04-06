@@ -1,12 +1,12 @@
 {
   "releases": [
     {
-      "versao": "v1.0.23",
-      "data_lancamento": "2026-04-05",
-      "como_era": "**Visual e sessão:** Aspecto mais genérico; barra lateral às vezes sem expandir/recolher bem; **Sair** podia parecer que não fechava a sessão ao mudar de página ou voltava a entrar sozinho após sair pela barra lateral.\n\n**Equipe:** Gestão de usuários dentro de **Configurações**; **Meu perfil** mais limitado.\n\n**Home e ranking:** Muitos indicadores de uma vez (impacto, ranking de qualidade, missões semanais na Home); ranking só em lista, sem pódio nem fotos; VR com segundos sempre mudando.\n\n**Contribuições:** Pontos pela aprovação não integrados de forma visível no fluxo; rotinas semanais de XP menos transparentes para quem usa o sistema.\n\n**Mensagens:** Feedback e cadastro manual de releases com **termos técnicos** na tela.",
-      "como_ficou": "**Visual e sessão:** Identidade **EPSY**, tema **claro/escuro**; barra lateral com **expandir/recolher** confiável; **Sair** consistente em todas as páginas e **sem reabrir sessão** logo após logout pela barra lateral.\n\n**Equipe:** Página **Utilizadores** para administradores; **Meu perfil** reorganizado com **foto** e **troca de senha** em linguagem simples.\n\n**Home e ranking:** Home mais limpa (foto, patente, pontuação, posição, curtidas); **missões semanais** fora da Home; **pódio** no top 3 com avatares; ícones de **férias**/**externo**; VR só **HH:MM**.\n\n**Contribuições:** **XP na aprovação**; **fechamento semanal** no painel admin quando aplicável; analistas com regras semanais e **isenção** em férias/atendimento externo.\n\n**Mensagens:** **Feedback** e **Releases Tecnuv (manual)** sem jargão técnico; busca clara; item de menu reposicionado.\n\n**Notas de versão:** Histórico em **Notas de versão** no menu lateral.",
+      "versao": "v1.0.27",
+      "data_lancamento": "2026-04-06",
+      "como_era": "🔴 Tela inicial com muita informação ao mesmo tempo.\n\n🔴 Regras de pontos e descontos pouco visíveis para o time.\n\n🔴 Busca da Base de Conhecimento trazia respostas menos precisas e sem foco.\n\n🔴 Cadastro e indexação de manuais podiam travar em arquivos grandes.\n\n🔴 Mensagens em alguns pontos ainda estavam mais técnicas do que o ideal.",
+      "como_ficou": "🟢 Home mais limpa e fácil de entender no dia a dia.\n\n🟢 Regras de contribuição e penalidade mais claras, com limites para evitar distorções.\n\n🟢 Busca semântica da Base de Conhecimento mais objetiva para achar o que você precisa.\n\n🟢 Processo de ingestão e indexação de manuais mais estável, com retomada por lote e acompanhamento de progresso.\n\n🟢 Comunicação mais simples, direta e amigável para todos os perfis.",
       "dias_notificacao": 14,
-      "notificacao_ate": "2026-04-18"
+      "notificacao_ate": "2026-04-19"
     },
     {
       "versao": "v1.0.1",

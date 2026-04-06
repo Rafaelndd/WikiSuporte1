@@ -48,6 +48,22 @@ def _fmt_data(iso: str) -> str:
         return iso
 
 
+def _normalizar_versao_para_md(versao_catalogo: str) -> str:
+    v = (versao_catalogo or "").strip().lower()
+    return v[1:] if v.startswith("v") else v
+
+
+def _extrair_detalhes_md_por_versao(versao_catalogo: str) -> str:
+    """Extrai do markdown apenas a seção da versão correspondente."""
+    if not _MD_PATH.is_file():
+        return ""
+    raw = _MD_PATH.read_text(encoding="utf-8")
+    alvo = re.escape(_normalizar_versao_para_md(versao_catalogo))
+    padrao = rf"(?ims)^##\s+Versão\s+{alvo}\b.*?(?=^\s*##\s+Versão\s+|\Z)"
+    m = re.search(padrao, raw)
+    return (m.group(0).strip() if m else "")
+
+
 def _split_topicos(texto: str) -> list[str]:
     bruto = (texto or "").strip()
     if not bruto:
@@ -62,14 +78,17 @@ def _split_topicos(texto: str) -> list[str]:
 
 
 def _formatar_topico_html(topico: str) -> str:
-    esc = html.escape(topico)
+    # Remove bolinhas antigas no início para padronizar com o novo layout.
+    limpo = re.sub(r"^\s*[🔴🟢🟡🟠🔵]+\s*", "", topico or "")
+    esc = html.escape(limpo)
     esc = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", esc)
     return esc.replace("\n", "<br/>")
 
 
 def _render_coluna_topicos(texto: str, *, tipo: str) -> None:
     topicos = _split_topicos(texto)
-    emoji = "🔴" if tipo == "era" else "🟢"
+    # Um emoji por alteração, com visual mais moderno.
+    emoji = "⚠️" if tipo == "era" else "✨"
     classe = "ws-release-col ws-release-col-era" if tipo == "era" else "ws-release-col ws-release-col-ficou"
     itens_html = "".join(
         f'<div class="ws-release-topic">{emoji} {_formatar_topico_html(t)}</div>'
@@ -81,17 +100,26 @@ def _render_coluna_topicos(texto: str, *, tipo: str) -> None:
 def _render_release_expander(rec: ReleaseRecord, *, expanded: bool) -> None:
     title = f"{rec.versao} · {_fmt_data(rec.data_lancamento)}"
     with st.expander(title, expanded=expanded):
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("##### Como era 🔴")
-            _render_coluna_topicos(rec.como_era, tipo="era")
-        with c2:
-            st.markdown("##### Como ficou 🟢")
-            _render_coluna_topicos(rec.como_ficou, tipo="ficou")
-        st.caption(
-            f"Aviso na Home: {rec.dias_notificacao} dia(s) a partir do lançamento "
-            f"(último dia: {_fmt_data(rec.notificacao_ate)})."
-        )
+        _render_release_corpo(rec)
+
+
+def _render_release_corpo(rec: ReleaseRecord) -> None:
+    """Renderiza o corpo do release no layout atual."""
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("##### Como era ⚠️")
+        _render_coluna_topicos(rec.como_era, tipo="era")
+    with c2:
+        st.markdown("##### Como ficou ✨")
+        _render_coluna_topicos(rec.como_ficou, tipo="ficou")
+    st.caption(
+        f"Aviso na Home: {rec.dias_notificacao} dia(s) a partir do lançamento "
+        f"(último dia: {_fmt_data(rec.notificacao_ate)})."
+    )
+    detalhes_md = _extrair_detalhes_md_por_versao(rec.versao)
+    if detalhes_md:
+        with st.expander("📎 Mais detalhes deste release", expanded=False):
+            st.markdown(detalhes_md)
 
 
 st.markdown(
@@ -175,18 +203,25 @@ st.divider()
 if not catalog:
     st.warning("Ainda não há releases registadas no sistema.")
 else:
-    st.subheader("Histórico de releases", anchor=False)
-    st.caption("Do mais recente para o mais antigo. Abra cada versão para ver o comparativo **Como era** / **Como ficou**.")
-    for i, rec in enumerate(catalog):
-        _render_release_expander(rec, expanded=(i == 0))
+    aba_ultimo, aba_historico = st.tabs(
+        ["🚀 Último Release", "🗂️ Histórico de releases"]
+    )
 
-st.divider()
-st.subheader("Documentação adicional", anchor=False)
+    with aba_ultimo:
+        if latest:
+            st.subheader("Último Release", anchor=False)
+            st.caption("Aqui fica o conteúdo completo da versão atual do sistema.")
+            st.markdown(f"**{latest.versao} · {_fmt_data(latest.data_lancamento)}**")
+            _render_release_corpo(latest)
+        else:
+            st.info("Nenhum release disponível.")
 
-if not _MD_PATH.is_file():
-    st.caption("Não existe arquivo.")
-else:
-    raw = _MD_PATH.read_text(encoding="utf-8")
-    raw = re.sub(r"^#\s+Release da versão[^\n]*\n+", "", raw.strip(), count=1)
-    with st.expander("Detalhes", expanded=False):
-        st.markdown(raw)
+    with aba_historico:
+        historico = catalog[1:] if len(catalog) > 1 else []
+        st.subheader("Histórico de releases", anchor=False)
+        if not historico:
+            st.caption("Ainda não há versões anteriores ao último release.")
+        else:
+            st.caption("Aqui ficam as versões anteriores, da mais recente para a mais antiga.")
+            for rec in historico:
+                _render_release_expander(rec, expanded=False)

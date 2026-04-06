@@ -2,59 +2,43 @@
 
 ---
 
-## Versão 1.0.23 · 5 de abril de 2026
+## Versão 1.0.27 · 6 de abril de 2026
 
-*Nessa versão foram efetuadas diversas alterações no sistema, tanto nos arquivos fonte (Backend) quanto no visual do sistema (Frontend), esse release tem objetivo de resumir e mostrar as alterações que irão impactar a usabilidade dos usuários finais.*
+*Esse release resume de forma simples o que mudou para facilitar a rotina de quem usa o WikiSuporte todos os dias.*
 
-### Visual, tema e navegação
+### Home e experiência no dia a dia
 
+| Como era 🔴 | Como ficou 🟢 |
+| --- | --- |
+| A Home mostrava muitas informações de uma vez e cansava a leitura. | A Home ficou mais limpa e direta, com foco no que importa. |
+| Algumas telas ainda passavam sensação de excesso de informação. | A navegação está mais simples e agradável para o uso diário. |
 
-| Antes                                                                                                                                                    | Agora                                                                                                                                                                                       |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| O aspecto visual de alguns componentes não estavam de acordo com a identidade visual do sistema e as opções de temas claro e escuro apresentavam falhas. | O WikiSuporte usa as **cores e o estilo EPSY** (Wiki em laranja, Suporte em azul), com tema **claro** ou **escuro** — escolha sua na barra lateral, alinhada ao modo do navegador.          |
-| Em algumas telas, a **barra lateral** não mostrava bem o botão para **expandir** ou **recolher**, o que atrapalhava em monitores pequenos.               | O botão de **expandir/recolher** a barra lateral voltou a funcionar de forma correta.                                                                                                       |
-| Ao clicar em **Sair** e mudar de página, por vezes o sistema **voltava a mostrar sessão iniciada** sem pedir login de novo.                              | O **encerramento de sessão** foi corrigido em **todas as páginas**: ao sair, fica mesmo na área de login. **Sair pela barra lateral** já **não reabre** a sessão sozinha no mesmo instante. |
-|                                                                                                                                                          |                                                                                                                                                                                             |
+### Contribuições, pontos e penalidades
 
+| Como era 🔴 | Como ficou 🟢 |
+| --- | --- |
+| As regras de pontos e descontos não estavam tão claras para todos. | As regras ficaram mais visíveis, com leitura simples e objetiva. |
+| Havia risco de distorção em alguns cenários de ajuste semanal. | Agora existem limites e proteções para manter a pontuação equilibrada. |
 
-### Quem gerencia usuários e o “Meu perfil”
+### Busca na Base de Conhecimento
 
+| Como era 🔴 | Como ficou 🟢 |
+| --- | --- |
+| A busca podia trazer resultados menos certeiros em algumas dúvidas. | A busca semântica ficou mais inteligente para encontrar respostas com mais precisão. |
+| Encontrar o conteúdo certo podia exigir mais tentativas. | A experiência de busca ficou mais rápida e direta. |
 
-| Antes                                                                                                                                 | Agora                                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A gestão de contas de usuário estava misturada com as **Configurações**, o que tornava mais difícil gerenciar os usuários do sistema. | Quem é **administrador** passa a usar a página **Usuários**: Onde podem **listar**, **criar**, **editar**, marcar **férias** ou **atendimento externo**, e **desativar** contas com confirmação — tudo num lugar dedicado. |
-| O Menu Meu Perfil foi criado.                                                                                                         | **Meu perfil** foi **criado**: Nele os usuários podem inserir sua **foto de perfil** , e **troca de senha**. Algo simples mas que irá ser melhorado nas próximas versões.                                                  |
+### Manuais e atualização de conteúdo
 
+| Como era 🔴 | Como ficou 🟢 |
+| --- | --- |
+| Em arquivos grandes, a ingestão e indexação podiam travar. | O processo está mais estável para grandes volumes de conteúdo. |
+| Quando parava no meio, era difícil retomar de onde ficou. | Agora é possível retomar por lote e acompanhar melhor o progresso. |
 
-### Home, pontos e ranking
+### Comunicação com o usuário
 
-
-| Antes                                                                                                                                                                            | Agora                                                                                                                                                                                                                                                                                                                               |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Na **área inicial** após login, havia **muitos blocos ao mesmo tempo** (incluindo indicadores como impacto total e ranking de qualidade) e **missões semanais** ocupavam espaço. | A **Home** foi **simplificada**: destaque para **foto de perfil** (maior e centrada), **patente**, barra de experiência, **pontuação atual**, **posição na equipe** e texto de **curtidas** nas estatísticas; **missões semanais** deixaram de aparecer na Home; alguns indicadores antigos foram **retirados** para reduzir ruído. |
-| O **tempo até ao próximo registro de ponto** (VR) mostrava segundos o que custava muito para o streamlit reinderizar os segundos constantemente.                                 | A contagem mostra só **horas e minutos** (por exemplo `08:00`).                                                                                                                                                                                                                                                                     |
-| O **ranking** de quem mais contribui era somente uma **tabela**, sem destaque visual para os primeiros lugares nem fotos.                                                        | Os **três primeiros** aparecem num **pódio** com **troféus**, **nome**, **patente** e **resumo**; na lista geral, **ícones** indicam quem está de **férias** ou em **atendimento externo**; **foto** ou imagem de substituição quando não há retrato.                                                                               |
-| A **saudação**, o **nome** e o **tipo de perfil** repetiam-se na barra lateral na Home, juntamente com o cabeçalho principal.                                                    | Na Home, a **barra lateral** ficou mais **enxuta** (menos repetição de nome e perfil), mantendo o que você precisa para navegar e sair.                                                                                                                                                                                             |
-
-
-### Contribuições, XP e aprovações
-
-
-| Antes                                                                                                                   | Agora                                                                                                                                                                                     |
-| ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Aprovar uma contribuição **não ligava** de forma clara à **experiência de pontos** que o usuário vê no dia a dia.       | Ao **aprovar** contribuições, o sistema **registra pontos** de forma alinhada às regras de contribuição (incluindo **bônus** quando aplicável).                                           |
-| Não havia um quadro visível para a equipe técnica fechar o ciclo semanal de **ajustes de XP** no painel administrativo. | Existe **interface no painel admin** para o **fechamento semanal** relacionado com XP, quando a sua função o exige.                                                                       |
-| Regras de **acompanhamento semanal** para analistas existiam nos bastidores sem ficar tão explícito na experiência.     | **Analistas** podem ser alvo de **ajustes semanais** quando as metas não são cumpridas; quem está em **férias** ou **atendimento externo** fica **isenção** desses ajustes nesse período. |
-
-
-### Feedback, releases manuais e onde ler as notas
-
-
-| Antes                                                                                                                        | Agora                                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A página de **Feedback** podia mostrar **mensagens técnicas** (arquivos, e-mail interno, configurações) quando algo falhava. | Mensagens de **sucesso** ou **erro** são em **linguagem para usuário final**; detalhes técnicos ficam nos registros internos, não na tela.                                                                                             |
-| O **cadastro manual de releases** misturava termos de banco de dados e listagens que assustam quem não é de TI.              | A mesma função foi reescrita em **linguagem do dia a dia**, com **pesquisa** por **versão**, **chamado**, **descrição** e **relevância**; o item mudou de posição no menu lateral (**Releases Tecnuv (manual)** mais abaixo na lista). |
-| (Na versão 1.0.1) combinava **aviso no topo** da Home com o menu.                                                            | O histórico **Release da versão** continua acessível pelo **menu lateral** (**Notas de versão**), com comparativos **Como era** / **Como ficou** por versão; a Home foi **descomprimida** no topo para focar no conteúdo principal.    |
+| Como era 🔴 | Como ficou 🟢 |
+| --- | --- |
+| Alguns textos ainda tinham linguagem mais técnica. | A comunicação ficou mais humana, simples e clara. |
 
 
 ---

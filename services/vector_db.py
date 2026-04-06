@@ -31,6 +31,10 @@ TABELA_EMBEDDINGS = "base_conhecimento_embeddings"
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 
+# Circuit breaker para evitar repetir chamadas Gemini quando a chave está inválida.
+_GEMINI_EMBEDDING_DESATIVADO: bool = False
+_GEMINI_MOTIVO_DESATIVADO: str = ""
+
 
 def _ajustar_dimensao_embedding(emb: List[float], dim: int = EMBEDDING_DIM) -> List[float]:
     """
@@ -178,6 +182,11 @@ def gerar_embedding_gemini(texto: str) -> Optional[List[float]]:
     Configure GEMINI_API_KEY no .env.
     Retorna lista de floats ou None em caso de falha.
     """
+    global _GEMINI_EMBEDDING_DESATIVADO, _GEMINI_MOTIVO_DESATIVADO
+
+    if _GEMINI_EMBEDDING_DESATIVADO:
+        return None
+
     try:
         from google import genai
         from google.genai import types
@@ -186,6 +195,9 @@ def gerar_embedding_gemini(texto: str) -> Optional[List[float]]:
         load_dotenv()
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
+            _GEMINI_EMBEDDING_DESATIVADO = True
+            _GEMINI_MOTIVO_DESATIVADO = "GEMINI_API_KEY não configurada"
+            print("[vector_db] Gemini desativado: GEMINI_API_KEY não configurada. Usando fallback local.")
             return None
 
         client = genai.Client(api_key=api_key)
@@ -200,7 +212,22 @@ def gerar_embedding_gemini(texto: str) -> Optional[List[float]]:
         embeddings = getattr(result, "embeddings", None) or []
         if embeddings and getattr(embeddings[0], "values", None):
             return list(embeddings[0].values)
+    except KeyboardInterrupt:
+        raise
     except Exception as e:
+        msg = str(e)
+        msg_norm = msg.lower()
+
+        # Em caso de chave inválida/expirada, desativa Gemini nesta execução para evitar spam de erro.
+        if any(token in msg_norm for token in ("api key expired", "api_key_invalid", "invalid api key")):
+            _GEMINI_EMBEDDING_DESATIVADO = True
+            _GEMINI_MOTIVO_DESATIVADO = "API key inválida ou expirada"
+            print(
+                "[vector_db] Gemini desativado para esta execução: API key inválida/expirada. "
+                "Renove a chave para reativar. Seguindo com fallback local."
+            )
+            return None
+
         print(f"[vector_db] Falha ao gerar embedding Gemini: {e}")
     return None
 
@@ -277,6 +304,7 @@ def indexar_base_conhecimento(
     limite: int = 500,
     after_id: int = 0,
     progress_step: int = 0,
+    usar_gemini: bool = True,
 ) -> int:
     """
     Percorre base_conhecimento (status APROVADO) e indexa em vetores.
@@ -301,7 +329,7 @@ def indexar_base_conhecimento(
     total = 0
     total_docs = len(rows)
     for i, row in enumerate(rows, start=1):
-        total += indexar_documento(row[0], row[1], row[2], row[3] or "", usar_gemini=True)
+        total += indexar_documento(row[0], row[1], row[2], row[3] or "", usar_gemini=usar_gemini)
         if progress_step > 0 and (i % progress_step == 0 or i == total_docs):
             print(f"[indexacao] documentos processados: {i}/{total_docs}")
     return total
