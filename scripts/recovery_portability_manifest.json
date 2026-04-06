@@ -1,0 +1,96 @@
+{
+  "project": {
+    "name": "WikiSuporte",
+    "description": "Manifesto de componentes para restauracao rapida em novo servidor."
+  },
+  "portability": {
+    "backup_scope": {
+      "folders": [
+        "app",
+        "assets",
+        "database",
+        "logs",
+        "mascote",
+        "modules",
+        "pages",
+        "scripts",
+        "services",
+        "utils",
+        "uploads",
+        "uploads_wiki",
+        ".streamlit"
+      ],
+      "files": [
+        ".env.example",
+        ".gitignore",
+        "CHANGELOG.md",
+        "README.md",
+        "app.py",
+        "config.py",
+        "config_ramais.py",
+        "init_ws.bat",
+        "main_oraculo.py",
+        "menus.py",
+        "requirements.txt",
+        "requirements-dev.txt",
+        "bandit.yaml",
+        "ruff.toml",
+        "scripts/02_setup_environment.ps1",
+        "scripts/03_create_backup.ps1"
+      ],
+      "root_file_extensions": [
+        ".json",
+        ".md",
+        ".ps1",
+        ".py",
+        ".sql",
+        ".toml",
+        ".txt",
+        ".yml",
+        ".yaml"
+      ],
+      "critical_runtime_files": [
+        ".env",
+        ".streamlit/secrets.toml"
+      ],
+      "recreate_on_new_server": [
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        "backups"
+      ]
+    },
+    "database": {
+      "name": "wikisuporte",
+      "extension": "postgresql",
+      "backup_commands": {
+        "dump_binary": "pg_dump",
+        "restore_binary": "psql",
+        "critical_note": "Nunca copiar pasta de dados do Postgres sem procedimento de desligamento e validação de versao"
+      }
+    },
+    "security_controls": {
+      "required": [
+        "Separar segredos em .env / .streamlit/secrets.toml e rotacionar periodicamente",
+        "Bloquear porta do PostgreSQL no firewall para fontes autorizadas",
+        "Ativar MFA/2FA nos acessos de administracao",
+        "Auditar logs de acesso e erros da aplicacao",
+        "Guardar backup em local externo (SFTP/S3/OneDrive seguro) com retencao minima"
+      ]
+    }
+  },
+  "restore_steps": [
+    "Copiar os itens do backup para a raiz do repositorio no novo servidor.",
+    "Instalar dependencias e garantir .env + .streamlit/secrets.toml.",
+    "Executar scripts/02_setup_environment.ps1 para validar estrutura e criar base.",
+    "Restaurar dump do banco de dados e validar chaves e usuarios.",
+    "Executar verificacoes basicas da aplicacao (login e fluxo principal)."
+  ],
+  "validation": {
+    "daily_backup_required": true,
+    "backup_retention_days": 30,
+    "restore_test_days": 30
+  }
+}
