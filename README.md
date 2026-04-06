@@ -56,3 +56,57 @@ Alterações por versão: **[CHANGELOG.md](CHANGELOG.md)**. Releases assinaladas
 ## Licença e uso
 
 Uso interno da organização. Ajuste esta secção se o projeto tiver licença pública explícita.
+
+## Backup e continuidade (DR)
+
+O projeto já possui backup automatizado em:
+
+- `scripts/03_create_backup.ps1`
+
+Use o plano completo de recuperacao em:
+
+- `SECURITY_BACKUP_PLAN.md`
+
+O inventario de pastas e arquivos criticos para troca de servidor esta em:
+
+- `scripts/recovery_portability_manifest.json`
+
+## Script único de estrutura do banco
+
+Para criação/cópia de ambiente (esquema + migrações atuais):
+
+- `database/wikisuporte_schema_full_ddl.sql`
+
+Este arquivo já contém **todo o DDL consolidado** (estrutura base + migrations atuais + extensão
+`pgvector`) em um único SQL físico, sem dependência de `\i`.
+
+Fluxo sugerido:
+
+1. Criar banco vazio `wikisuporte` (ou nome próprio).
+2. Conectar no banco criado.
+3. Executar: `psql -U <usuario> -d wikisuporte -f database/wikisuporte_schema_full_ddl.sql`.
+
+## Aplicação assistida do schema (produção)
+
+Para execução segura com validações prévias, log e rollback controlado:
+
+- `scripts/04_apply_schema_prod.ps1`
+
+Exemplo de uso:
+
+1. Modo padrão (usa `.env` com `DB_*`, cria banco se não existir e aplica o script).
+2. Recriar forçadamente em ambiente de homologação:
+   `.\scripts\04_apply_schema_prod.ps1 -RecreateIfExists`
+
+## Restore completo de produção (arquivos + banco)
+
+Para recuperar um ambiente de forma operacional (backup zip + dump):
+
+- `scripts/05_restore_wikisuporte.ps1`
+
+Exemplo de uso:
+
+1. Restaurar apenas arquivos:  
+   `.\scripts\05_restore_wikisuporte.ps1 -BackupPath .\backups\WikiSuporte_Backup_YYYYMMDD_HHMM.zip -SkipDatabaseRestore`
+2. Restore completo com banco novo:
+   `.\scripts\05_restore_wikisuporte.ps1 -BackupPath .\backups\WikiSuporte_Backup_YYYYMMDD_HHMM.zip -DropExistingDatabase -ForceFileOverwrite -PromptForPassword`

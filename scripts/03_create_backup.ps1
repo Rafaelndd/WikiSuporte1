@@ -32,11 +32,37 @@ $dumpFileName = "wikisuporte_dump_$stamp.sql"
 $dumpPath = Join-Path $root $dumpFileName
 $zipName = "WikiSuporte_Backup_$stamp.zip"
 $zipPath = Join-Path $backupsDir $zipName
+$manifestPath = Join-Path $scriptDir 'recovery_portability_manifest.json'
+$defaultRootPatterns = @('.py', '.bat', '.exe')
 
-# Pastas estruturais obrigatórias (se existirem)
-$structuralDirs = @(
-    'assets', 'database', 'logs', 'modules', 'pages', 'scripts', 'services', 'uploads_wiki', '.streamlit'
-)
+function Get-BackupManifest {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-BackupLog "Manifesto de portabilidade nao carregado: $($_.Exception.Message)" -ErrorOnly
+        return $null
+    }
+}
+
+$defaultDirs = @('assets', 'database', 'logs', 'modules', 'pages', 'scripts', 'services', 'uploads_wiki', '.streamlit')
+$manifest = Get-BackupManifest -Path $manifestPath
+
+if ($manifest -and $manifest.portability -and $manifest.portability.backup_scope -and $manifest.portability.backup_scope.folders) {
+    $structuralDirs = @($manifest.portability.backup_scope.folders + $defaultDirs) | Select-Object -Unique
+} else {
+    $structuralDirs = $defaultDirs
+}
+
+if ($manifest -and $manifest.portability -and $manifest.portability.backup_scope -and $manifest.portability.backup_scope.root_file_extensions) {
+    $rootFilePatterns = $manifest.portability.backup_scope.root_file_extensions | ForEach-Object { $_.ToLowerInvariant().Trim() } | Where-Object { $_ }
+    if ($rootFilePatterns.Count -eq 0) {
+        $rootFilePatterns = $defaultRootPatterns
+    }
+} else {
+    $rootFilePatterns = $defaultRootPatterns
+}
 
 function Write-BackupLog {
     param([string]$Message, [switch]$ErrorOnly)
@@ -219,16 +245,28 @@ try {
         }
     }
 
-    # Raiz: .env, *.py, *.bat, *.exe
-    foreach ($pattern in @('.env')) {
+    # Raiz: arquivos explicitamente configurados + por extensao
+    $manifestRootFiles = @('.env')
+    if ($manifest -and $manifest.portability -and $manifest.portability.backup_scope -and $manifest.portability.backup_scope.files) {
+        $manifestRootFiles += $manifest.portability.backup_scope.files
+        $manifestRootFiles = $manifestRootFiles | Sort-Object -Unique
+    } else {
+        $manifestRootFiles = @('.env')
+    }
+
+    foreach ($pattern in $manifestRootFiles) {
         $p = Join-Path $root $pattern
         if (Test-Path -LiteralPath $p) { [void](Add-ZipEntrySafe -Archive $zip -SourceFile $p -EntryName (Split-Path $p -Leaf)) }
     }
     Get-ChildItem -LiteralPath $root -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
         $ext = $_.Extension.ToLowerInvariant()
-        if ($ext -notin @('.py', '.bat', '.exe')) { return }
+        if ($ext -notin $rootFilePatterns) { return }
         if (Test-ExcludePath $_.FullName) { return }
         [void](Add-ZipEntrySafe -Archive $zip -SourceFile $_.FullName -EntryName $_.Name)
+    }
+
+    if (Test-Path -LiteralPath $manifestPath) {
+        [void](Add-ZipEntrySafe -Archive $zip -SourceFile $manifestPath -EntryName (Split-Path $manifestPath -Leaf))
     }
 
     # Dump SQL
