@@ -429,7 +429,6 @@ with tab_lancar:
         st.markdown("#### 📎 Anexos")
         anexos = st.file_uploader(
             "Selecione arquivos (qualquer formato, múltiplos arquivos)",
-            max_bytes=MAX_BYTES_ANEXO_ATENDIMENTO,
             accept_multiple_files=True,
             key=f"p8_anexos_{st.session_state['p8_uploader_nonce']}",
         )

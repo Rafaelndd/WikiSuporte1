@@ -435,7 +435,6 @@ with aba2:
             "📂 Selecione o seu arquivo de atendimento (CSV, XLSX ou ZIP com agent-calls):",
             type=['csv', 'xlsx', 'zip'],
             key="up_import_mensal",
-            max_bytes=MAX_BYTES_UPLOAD_IMPORTACAO,
         )
     if arquivo_upload:
         if _tamanho_upload(arquivo_upload) > MAX_BYTES_UPLOAD_IMPORTACAO:
@@ -631,7 +630,6 @@ with aba3:
             "📂 Envie o arquivo GoTo ('Call Reports' ou 'User Activity'):",
             type=['csv', 'xlsx'],
             key=f"up_plantao_{st.session_state['plantao_uploader_key']}",
-            max_bytes=MAX_BYTES_UPLOAD_IMPORTACAO,
         )
     
     if arquivo_plantao:

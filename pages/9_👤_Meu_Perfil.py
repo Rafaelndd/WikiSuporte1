@@ -177,7 +177,6 @@ with st.container(border=True):
     up = st.file_uploader(
         "Nova imagem",
         type=["png", "jpg", "jpeg"],
-        max_bytes=MAX_BYTES_FOTO_PERFIL,
         help="Formatos: .png, .jpg, .jpeg",
         key="upload_foto_perfil",
     )
