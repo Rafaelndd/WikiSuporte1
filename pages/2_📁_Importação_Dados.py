@@ -720,6 +720,7 @@ with aba3:
                         
                     df_exibicao = st.session_state.get('df_plantao_filtrado', pd.DataFrame())
                     
+                    df_limpo = pd.DataFrame()
                     if not df_exibicao.empty:
                         df_temp = pd.DataFrame()
                         df_temp['Data_Real'] = df_exibicao['data_chamada'] 
@@ -759,140 +760,143 @@ with aba3:
                         
                         mascara_validas = ~df_temp['Atendente'].isin(["Sistema / Sem Ramal"])
                         df_limpo = df_temp[mascara_validas].copy()
-                    if len(df_limpo) > MAX_REGISTROS_POR_PLANTAO:
+
+                    if not df_limpo.empty and len(df_limpo) > MAX_REGISTROS_POR_PLANTAO:
                         st.error(f"⚠️ Resultado filtrado excede o limite de {MAX_REGISTROS_POR_PLANTAO} atendimentos.")
                         st.stop()
+
+                    if df_exibicao.empty or df_limpo.empty:
+                        st.warning("⚠️ Arquivo analisado, mas nenhum atendimento real encontrado. Verifique se o arquivo está correto ou se o regime selecionado é adequado.")
+                    else:
+                        st.success(f"🎯 ** Foram identificados **{len(df_limpo)} atendimentos válidos**! Salvando no banco...")
+                        df_limpo = df_limpo.sort_values(by=['Atendente', 'Data_Real'])
                         
-                        if df_limpo.empty:
-                            st.warning("⚠️ Arquivo analisado, mas nenhum atendimento real encontrado. Verifique se o arquivo está correto ou se o regime selecionado é adequado.")
+                        # SALVAMENTO AUTOMÁTICO
+                        engine = get_connection()
+                        try:
+                            df_usuarios = pd.read_sql(text("SELECT id, nome FROM usuarios WHERE ativo = TRUE"), engine)
+                            mapa_ids_bd = {row['nome'].strip().upper(): (row['id'], row['nome']) for _, row in df_usuarios.iterrows()}
+                            inseridos, ignorados = 0, 0
+                            
+                            with engine.begin() as conn_pl:
+                                for _, row in df_limpo.iterrows():
+                                    analista_arquivo = row['Atendente'].strip().upper()
+                                    if analista_arquivo in mapa_ids_bd:
+                                        id_an, nome_banco = mapa_ids_bd[analista_arquivo]
+                                        dt_in, dt_out = row['Data_Real'], row['Data_Fim_Real']
+                                        
+                                        query_check = text("SELECT id_plantao FROM plantoes_epsy WHERE id_analista_epsy = :id_an AND data_hora_entrada = :dt_in")
+                                        existe = conn_pl.execute(query_check, {"id_an": id_an, "dt_in": dt_in}).fetchone()
+                                        
+                                        if not existe:
+                                            query_pl = text("INSERT INTO plantoes_epsy (nome_analista_epsy, id_analista_epsy, data_hora_entrada, data_hora_saida) VALUES (:nome, :id_an, :dt_in, :dt_out)")
+                                            conn_pl.execute(query_pl, {"nome": nome_banco, "id_an": id_an, "dt_in": dt_in, "dt_out": dt_out})
+                                            inseridos += 1
+                                        else:
+                                            ignorados += 1
+                                            
+                            if inseridos > 0: st.success(f"✅ **{inseridos}** novas ligações registradas na escala de Plantões!")
+                            if ignorados > 0: st.caption(f"🛡️ **{ignorados} ligações** já constavam no banco e foram ignoradas.")
+                        except Exception as e:
+                            st.error(f"❌ Erro ao salvar: {e}")
+
+                        # 🌟 LAYOUT DE EXPORTAÇÃO TXT SOLICITADO
+                        txt_content = "Relatório de Atendimentos - Plantão\n" + "="*60 + "\n\n"
+                        
+                        lista_dfs_export = []
+                        analistas_unicos = df_limpo['Atendente'].unique()
+                        
+                        # Separa os atendimentos por analista e calcula o total dinâmico de cada um
+                        for analista in analistas_unicos:
+                            df_grupo = df_limpo[df_limpo['Atendente'] == analista].drop(columns=['Data_Real', 'Data_Fim_Real'])
+                            
+                            # Mantém a construção do arquivo TXT intacta (que não sofre com o erro do PyArrow)
+                            txt_content += f"👤 ATENDENTE: {analista}\n" + "-"*60 + "\n"
+                            for _, row in df_grupo.iterrows():
+                                txt_content += f"Data: {row['Data']}   Início: {row['Horário inicio atendimento']}   Fim: {row['Horário fim do atendimento']}   Total (Min): {row['Total (Minutos)']}\n"
+                            
+                            txt_content += f"\n-> TOTAL DE ATENDIMENTOS ({analista}): {len(df_grupo)}\n" + "="*60 + "\n\n"
+                            
+                            # Prepara os dados para o Excel e Streamlit (sem o totalizador problemático)
+                            lista_dfs_export.append(df_grupo)
+                            
+                            # ⚠️ CORREÇÃO DA LINHA EM BRANCO: Usamos None em 'Total (Minutos)' para não quebrar a tipagem numérica
+                            lista_dfs_export.append(pd.DataFrame([{
+                                'Data': '', 
+                                'Horário inicio atendimento': '', 
+                                'Horário fim do atendimento': '', 
+                                'Atendente': '', 
+                                'Total (Minutos)': None 
+                            }]))
+                        df_final_export = pd.concat(lista_dfs_export, ignore_index=True).iloc[:-1]
+                        
+                        with st.container(border=True): st.dataframe(df_final_export, width='stretch', hide_index=True)
+                        
+                        csv_content = df_final_export.to_csv(index=False, sep=';', decimal=',')
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer: df_final_export.to_excel(writer, index=False, sheet_name='Plantao_Separado')
+                        excel_content = output.getvalue()
+                        
+                        st.markdown("#### 📥 Baixar Relatórios")
+                        c_txt, c_xls, c_csv = st.columns(3)
+
+                        def _sanitize_filename_component(value: str) -> str:
+                            # Windows: <>:"/\|?* são inválidos em nomes de arquivo
+                            v = re.sub(r'[<>:"/\\|?*]+', " ", str(value or "")).strip()
+                            v = re.sub(r"\s+", " ", v)
+                            return v or "Sem nome"
+
+                        def _truncate_filename(value: str, max_len: int = 180) -> str:
+                            v = str(value or "").strip()
+                            if len(v) <= max_len:
+                                return v
+                            return v[: max_len - 1].rstrip() + "…"
+
+                        def _format_date_ptbr_for_filename(dt: pd.Timestamp | datetime.datetime) -> str:
+                            d = pd.to_datetime(dt, errors="coerce")
+                            if pd.isna(d):
+                                return datetime.datetime.now().strftime("%d-%m-%Y")
+                            # "dd/mm/aaaa" é o formato brasileiro, mas "/" não pode no Windows; usamos "-"
+                            return d.strftime("%d-%m-%Y")
+
+                        # Regra de nome do arquivo do Plantão:
+                        # - Se plantão abranger sábado+domingo: "Plantão Fim de semana <data-do-sábado>"
+                        # - Caso contrário: "Plantão <Nome do Plantonista> <data de entrada>"
+                        data_inicio_plantao = df_limpo["Data_Real"].min()
+                        atendentes_unicos = [a for a in df_limpo["Atendente"].dropna().unique().tolist() if str(a).strip()]
+
+                        dias_semana_presentes = set(pd.to_datetime(df_limpo["Data_Real"]).dt.weekday.dropna().tolist())
+                        eh_fim_de_semana = (5 in dias_semana_presentes) and (6 in dias_semana_presentes)
+                        if eh_fim_de_semana:
+                            # garante que a data usada é a do sábado
+                            datas_sabado = pd.to_datetime(df_limpo["Data_Real"]).loc[
+                                pd.to_datetime(df_limpo["Data_Real"]).dt.weekday == 5
+                            ]
+                            data_base = datas_sabado.min() if not datas_sabado.empty else data_inicio_plantao
+                            nome_arq = f"Plantão Fim de semana {_format_date_ptbr_for_filename(data_base)}"
                         else:
-                            st.success(f"🎯 ** Foram identificados **{len(df_limpo)} atendimentos válidos**! Salvando no banco...")
-                            df_limpo = df_limpo.sort_values(by=['Atendente', 'Data_Real'])
-                            
-                            # SALVAMENTO AUTOMÁTICO
-                            engine = get_connection()
-                            try:
-                                df_usuarios = pd.read_sql(text("SELECT id, nome FROM usuarios WHERE ativo = TRUE"), engine)
-                                mapa_ids_bd = {row['nome'].strip().upper(): (row['id'], row['nome']) for _, row in df_usuarios.iterrows()}
-                                inseridos, ignorados = 0, 0
-                                
-                                with engine.begin() as conn_pl:
-                                    for _, row in df_limpo.iterrows():
-                                        analista_arquivo = row['Atendente'].strip().upper()
-                                        if analista_arquivo in mapa_ids_bd:
-                                            id_an, nome_banco = mapa_ids_bd[analista_arquivo]
-                                            dt_in, dt_out = row['Data_Real'], row['Data_Fim_Real']
-                                            
-                                            query_check = text("SELECT id_plantao FROM plantoes_epsy WHERE id_analista_epsy = :id_an AND data_hora_entrada = :dt_in")
-                                            existe = conn_pl.execute(query_check, {"id_an": id_an, "dt_in": dt_in}).fetchone()
-                                            
-                                            if not existe:
-                                                query_pl = text("INSERT INTO plantoes_epsy (nome_analista_epsy, id_analista_epsy, data_hora_entrada, data_hora_saida) VALUES (:nome, :id_an, :dt_in, :dt_out)")
-                                                conn_pl.execute(query_pl, {"nome": nome_banco, "id_an": id_an, "dt_in": dt_in, "dt_out": dt_out})
-                                                inseridos += 1
-                                            else: ignorados += 1
-                                                
-                                if inseridos > 0: st.success(f"✅ **{inseridos}** novas ligações registradas na escala de Plantões!")
-                                if ignorados > 0: st.caption(f"🛡️ **{ignorados} ligações** já constavam no banco e foram ignoradas.")
-                            except Exception as e: st.error(f"❌ Erro ao salvar: {e}")
-
-                            # 🌟 LAYOUT DE EXPORTAÇÃO TXT SOLICITADO
-                            txt_content = "Relatório de Atendimentos - Plantão\n" + "="*60 + "\n\n"
-                            
-                            lista_dfs_export = []
-                            analistas_unicos = df_limpo['Atendente'].unique()
-                            
-                            # Separa os atendimentos por analista e calcula o total dinâmico de cada um
-                            for analista in analistas_unicos:
-                                df_grupo = df_limpo[df_limpo['Atendente'] == analista].drop(columns=['Data_Real', 'Data_Fim_Real'])
-                                
-                                # Mantém a construção do arquivo TXT intacta (que não sofre com o erro do PyArrow)
-                                txt_content += f"👤 ATENDENTE: {analista}\n" + "-"*60 + "\n"
-                                for _, row in df_grupo.iterrows():
-                                    txt_content += f"Data: {row['Data']}   Início: {row['Horário inicio atendimento']}   Fim: {row['Horário fim do atendimento']}   Total (Min): {row['Total (Minutos)']}\n"
-                                
-                                txt_content += f"\n-> TOTAL DE ATENDIMENTOS ({analista}): {len(df_grupo)}\n" + "="*60 + "\n\n"
-                                
-                                # Prepara os dados para o Excel e Streamlit (sem o totalizador problemático)
-                                lista_dfs_export.append(df_grupo)
-                                
-                                # ⚠️ CORREÇÃO DA LINHA EM BRANCO: Usamos None em 'Total (Minutos)' para não quebrar a tipagem numérica
-                                lista_dfs_export.append(pd.DataFrame([{
-                                    'Data': '', 
-                                    'Horário inicio atendimento': '', 
-                                    'Horário fim do atendimento': '', 
-                                    'Atendente': '', 
-                                    'Total (Minutos)': None 
-                                }]))
-                            df_final_export = pd.concat(lista_dfs_export, ignore_index=True).iloc[:-1]
-                            
-                            with st.container(border=True): st.dataframe(df_final_export, width='stretch', hide_index=True)
-                            
-                            csv_content = df_final_export.to_csv(index=False, sep=';', decimal=',')
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine='openpyxl') as writer: df_final_export.to_excel(writer, index=False, sheet_name='Plantao_Separado')
-                            excel_content = output.getvalue()
-                            
-                            st.markdown("#### 📥 Baixar Relatórios")
-                            c_txt, c_xls, c_csv = st.columns(3)
-
-                            def _sanitize_filename_component(value: str) -> str:
-                                # Windows: <>:"/\|?* são inválidos em nomes de arquivo
-                                v = re.sub(r'[<>:"/\\|?*]+', " ", str(value or "")).strip()
-                                v = re.sub(r"\s+", " ", v)
-                                return v or "Sem nome"
-
-                            def _truncate_filename(value: str, max_len: int = 180) -> str:
-                                v = str(value or "").strip()
-                                if len(v) <= max_len:
-                                    return v
-                                return v[: max_len - 1].rstrip() + "…"
-
-                            def _format_date_ptbr_for_filename(dt: pd.Timestamp | datetime.datetime) -> str:
-                                d = pd.to_datetime(dt, errors="coerce")
-                                if pd.isna(d):
-                                    return datetime.datetime.now().strftime("%d-%m-%Y")
-                                # "dd/mm/aaaa" é o formato brasileiro, mas "/" não pode no Windows; usamos "-"
-                                return d.strftime("%d-%m-%Y")
-
-                            # Regra de nome do arquivo do Plantão:
-                            # - Se plantão abranger sábado+domingo: "Plantão Fim de semana <data-do-sábado>"
-                            # - Caso contrário: "Plantão <Nome do Plantonista> <data de entrada>"
-                            data_inicio_plantao = df_limpo["Data_Real"].min()
-                            atendentes_unicos = [a for a in df_limpo["Atendente"].dropna().unique().tolist() if str(a).strip()]
-
-                            dias_semana_presentes = set(pd.to_datetime(df_limpo["Data_Real"]).dt.weekday.dropna().tolist())
-                            eh_fim_de_semana = (5 in dias_semana_presentes) and (6 in dias_semana_presentes)
-                            if eh_fim_de_semana:
-                                # garante que a data usada é a do sábado
-                                datas_sabado = pd.to_datetime(df_limpo["Data_Real"]).loc[
-                                    pd.to_datetime(df_limpo["Data_Real"]).dt.weekday == 5
-                                ]
-                                data_base = datas_sabado.min() if not datas_sabado.empty else data_inicio_plantao
-                                nome_arq = f"Plantão Fim de semana {_format_date_ptbr_for_filename(data_base)}"
+                            data_base = data_inicio_plantao
+                            if len(atendentes_unicos) == 1:
+                                nome_base = _sanitize_filename_component(atendentes_unicos[0])
                             else:
-                                data_base = data_inicio_plantao
-                                if len(atendentes_unicos) == 1:
-                                    nome_base = _sanitize_filename_component(atendentes_unicos[0])
-                                else:
-                                    # Lista todos os plantonistas presentes no arquivo (nomes únicos)
-                                    nomes = [_sanitize_filename_component(n) for n in atendentes_unicos]
-                                    nomes = [n for n in nomes if n and n != "Sem nome"]
-                                    nomes = sorted(set(nomes), key=str.casefold)
-                                    nome_base = " + ".join(nomes) if nomes else "Sem nome"
-                                nome_arq = f"Plantão {nome_base} {_format_date_ptbr_for_filename(data_base)}"
-                            nome_arq = _sanitize_filename_component(nome_arq)
-                            nome_arq = _truncate_filename(nome_arq, max_len=180)
-                            c_txt.download_button("📄 Exportar TXT Formatado", txt_content, f"{nome_arq}.txt", "text/plain", width='stretch')
-                            c_xls.download_button("📊 Exportar Excel (.xlsx)", excel_content, f"{nome_arq}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width='stretch')
-                            c_csv.download_button("📑 Exportar CSV", csv_content, f"{nome_arq}.csv", "text/csv", width='stretch')
+                                # Lista todos os plantonistas presentes no arquivo (nomes únicos)
+                                nomes = [_sanitize_filename_component(n) for n in atendentes_unicos]
+                                nomes = [n for n in nomes if n and n != "Sem nome"]
+                                nomes = sorted(set(nomes), key=str.casefold)
+                                nome_base = " + ".join(nomes) if nomes else "Sem nome"
+                            nome_arq = f"Plantão {nome_base} {_format_date_ptbr_for_filename(data_base)}"
+                        nome_arq = _sanitize_filename_component(nome_arq)
+                        nome_arq = _truncate_filename(nome_arq, max_len=180)
+                        c_txt.download_button("📄 Exportar TXT Formatado", txt_content, f"{nome_arq}.txt", "text/plain", width='stretch')
+                        c_xls.download_button("📊 Exportar Excel (.xlsx)", excel_content, f"{nome_arq}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width='stretch')
+                        c_csv.download_button("📑 Exportar CSV", csv_content, f"{nome_arq}.csv", "text/csv", width='stretch')
 
-                            st.divider()
-                            
-                            if st.button("🧹 Limpar Tela e Enviar Novo Arquivo", width='stretch'):
-                                st.session_state['plantao_uploader_key'] += 1
-                                if 'df_plantao_filtrado' in st.session_state: del st.session_state['df_plantao_filtrado']
-                                st.rerun()
+                        st.divider()
+                        
+                        if st.button("🧹 Limpar Tela e Enviar Novo Arquivo", width='stretch'):
+                            st.session_state['plantao_uploader_key'] += 1
+                            if 'df_plantao_filtrado' in st.session_state: del st.session_state['df_plantao_filtrado']
+                            st.rerun()
                     
-                    elif st.session_state.get('df_plantao_filtrado') is not None and st.session_state['df_plantao_filtrado'].empty:
+                    if st.session_state.get('df_plantao_filtrado') is not None and st.session_state['df_plantao_filtrado'].empty:
                         st.info(" O arquivo é válido, mas não ocorreram atendimentos nesse horário de plantão específico.")
