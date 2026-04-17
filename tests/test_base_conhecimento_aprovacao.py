@@ -106,3 +106,37 @@ def test_contar_aprovacoes_monta_sql_exclude():
     args = conn.execute.call_args[0]
     assert "id <> :excl" in str(args[0])
     assert args[1]["excl"] == 9
+
+
+def test_aprovar_evento_passado_aplica_pontuacao_fixa_padrao():
+    conn = MagicMock()
+    contrib = _row_select_for_update()
+    contrib["modalidade_contribuicao"] = "EVENTO_PASSADO"
+    contrib["data_ocorrido"] = __import__("datetime").date(2025, 1, 1)
+
+    def exec_side_effect(stmt, params=None):
+        s = str(stmt)
+        r = MagicMock()
+        if "FOR UPDATE" in s:
+            r.mappings.return_value.one_or_none.return_value = contrib
+        elif "FROM contribution_scoring_rules" in s:
+            # Sem linha de configuração: serviço deve usar defaults (evento passado = 90)
+            r.mappings.return_value.first.return_value = None
+        elif "COUNT(*)" in s and "DATE(timezone" in s:
+            r.mappings.return_value.one.return_value = {"n": 0}
+        elif "COUNT(*)" in s and "IYYY-IW" in s:
+            r.mappings.return_value.one.return_value = {"n": 0}
+        elif "to_char(timezone" in s and "CURRENT_TIMESTAMP" in s:
+            r.mappings.return_value.one.return_value = {"w": "2026-14"}
+        elif s.strip().upper().startswith("UPDATE BASE_CONHECIMENTO"):
+            r.rowcount = 1
+        elif "INSERT INTO user_xp_events" in s:
+            pytest.fail("não deveria inserir bônus semanal neste cenário")
+        return r
+
+    conn.execute.side_effect = exec_side_effect
+
+    xp_res = aprovar_contribuicao_conhecimento(conn, 9, 7)
+
+    assert xp_res.pontos_contribuicao == 90
+    assert xp_res.bonus_semanal_concedido is False

@@ -873,9 +873,13 @@ with aba_acervo:
 # ABA 5: HISTÓRICO E RANKING DA EQUIPE
 # ==========================================
 with aba_arquivo:
+    hist_limit_key = "historico_buscas_limite"
+    if hist_limit_key not in st.session_state:
+        st.session_state[hist_limit_key] = 10
+
     st.subheader("📖 Histórico e Ranking da Equipe")
     st.caption(
-        "Histórico agrupa por **tema semântico** (mesma dúvida em palavras diferentes = um bloco). "
+        "Histórico agrupa por **tema** (mesma dúvida em palavras diferentes = um bloco). "
         "Ranking mostra **o que mais gera dúvida** na equipe, sem repetir variações do mesmo assunto."
     )
     col_hist, col_rank = st.columns([2, 1])
@@ -885,7 +889,7 @@ with aba_arquivo:
         df_recentes = pd.DataFrame()
         if _busca_sem_ok and historico_por_topico_recente:
             try:
-                recentes = historico_por_topico_recente(engine, 25)
+                recentes = historico_por_topico_recente(engine, int(st.session_state[hist_limit_key]))
                 df_recentes = pd.DataFrame(recentes) if recentes else pd.DataFrame()
             except Exception:
                 df_recentes = pd.DataFrame()
@@ -900,10 +904,14 @@ with aba_arquivo:
                         FROM historico_buscas_psy h
                         LEFT JOIN usuarios u ON h.usuario_id = u.id
                         ORDER BY lower(h.pergunta), h.criado_em DESC
-                    ) sub ORDER BY criado_em DESC LIMIT 15
+                    ) sub ORDER BY criado_em DESC LIMIT :limite
                     """
                 )
-                df_recentes = pd.read_sql(query_recentes, conn)
+                df_recentes = pd.read_sql(
+                    query_recentes,
+                    conn,
+                    params={"limite": int(st.session_state[hist_limit_key])},
+                )
         if not df_recentes.empty:
             for idx, row in df_recentes.iterrows():
                 nome_autor = row.get("nome") or row.get("Nome") or "Membro da Equipe"
@@ -915,23 +923,27 @@ with aba_arquivo:
                 with st.expander(titulo):
                     st.caption(f"Pergunta registrada: {pergunta}")
                     st.markdown(resposta)
+            if len(df_recentes) == int(st.session_state[hist_limit_key]):
+                if st.button("📥 Carregar mais 20 (Histórico)", key="btn_hist_load_more", use_container_width=True):
+                    st.session_state[hist_limit_key] += 20
+                    st.rerun()
         else:
             st.info("Ainda não há registros de buscas ao Psy.")
 
     with col_rank:
-        st.markdown("#### 🏆 Top assuntos (semântico)")
+        st.markdown("#### 🏆 Top 5 assuntos")
         df_ranking_buscas = pd.DataFrame()
         if _busca_sem_ok and ranking_topicos_agregado:
             try:
                 # Assistente + Wiki + Manual no mesmo ranking global (soma por tópico já está em busca_topicos por origem)
                 # Unimos os três origens num único "volume" por label seria duplicado; melhor: top ASSISTENTE + mesclar
-                ra = ranking_topicos_agregado(engine, "ASSISTENTE", 6)
-                rw = ranking_topicos_agregado(engine, "WIKI", 4)
-                rm = ranking_topicos_agregado(engine, "MANUAL", 4)
+                ra = ranking_topicos_agregado(engine, "ASSISTENTE", 5)
+                rw = ranking_topicos_agregado(engine, "WIKI", 5)
+                rm = ranking_topicos_agregado(engine, "MANUAL", 5)
                 merged = {}
                 for label, n in ra + rw + rm:
                     merged[label] = merged.get(label, 0) + n
-                top = sorted(merged.items(), key=lambda x: -x[1])[:12]
+                top = sorted(merged.items(), key=lambda x: -x[1])[:5]
                 df_ranking_buscas = pd.DataFrame(top, columns=["Assunto (tema)", "Total buscas"])
             except Exception:
                 df_ranking_buscas = pd.DataFrame()
@@ -939,7 +951,7 @@ with aba_arquivo:
             with engine.connect() as conn:
                 query_ranking_buscas = text(
                     'SELECT INITCAP(lower(pergunta)) as "Assunto", COUNT(id) as "Volume" '
-                    "FROM historico_buscas_psy GROUP BY lower(pergunta) ORDER BY \"Volume\" DESC LIMIT 10"
+                    "FROM historico_buscas_psy GROUP BY lower(pergunta) ORDER BY \"Volume\" DESC LIMIT 5"
                 )
                 df_ranking_buscas = pd.read_sql(query_ranking_buscas, conn)
         if not df_ranking_buscas.empty:
@@ -955,7 +967,7 @@ with aba_nova:
     with st.form("form_contribuicao", clear_on_submit=True):
         titulo = st.text_input("📌 Título", placeholder="Título claro e objetivo")
         
-        col_menu, col_submenu, col_data = st.columns([1,1,1])
+        col_menu, col_modalidade, col_data = st.columns([1, 1, 1])
 
         with col_menu:
             menu = st.selectbox(
@@ -979,6 +991,22 @@ with aba_nova:
         #         )
         #     else:
         #         subsubmenu = None
+
+        with col_modalidade:
+            modalidade_rotulo = st.selectbox(
+                "🏷️ Tipo da Contribuição",
+                options=["🟢 Evento Atual", "🕘 Evento Passado"],
+                index=0,
+                help=(
+                    "Evento Atual: pontua por prazo (0-7 dias: 100, 8-14: 75, 15-21: 25, >21: 0). "
+                    "Evento Passado: valor fixo de 90 XP quando aprovado."
+                ),
+            )
+            modalidade_contribuicao = (
+                "EVENTO_ATUAL"
+                if modalidade_rotulo == "🟢 Evento Atual"
+                else "EVENTO_PASSADO"
+            )
 
         with col_data:
             data_evento = st.date_input(
@@ -1075,7 +1103,7 @@ with aba_nova:
                                 conn,
                                 autor_id=int(usuario_logado_id),
                                 exclude_contribuicao_id=None,
-                                modalidade="EVENTO_ATUAL",
+                                modalidade=modalidade_contribuicao,
                                 data_ocorrido=data_evento,
                                 criado_em=agora,
                                 era_revisao_pendente=False,
@@ -1087,7 +1115,7 @@ with aba_nova:
                                      status, caminho_anexo, qtd_tentativas, data_ocorrido,
                                      pontos_contribuicao, data_avaliacao, id_avaliador, modalidade_contribuicao)
                                     VALUES ('CONHECIMENTO_SUPORTE', :t, :c, :s, :co, :a, :st, :ax, 1, :do,
-                                            :pts, CURRENT_TIMESTAMP, :av, 'EVENTO_ATUAL')
+                                            :pts, CURRENT_TIMESTAMP, :av, :mod)
                                     RETURNING id
                                 """),
                                 {
@@ -1101,6 +1129,7 @@ with aba_nova:
                                     "do": data_evento,
                                     "pts": xp_res.pontos_contribuicao,
                                     "av": usuario_logado_id,
+                                    "mod": modalidade_contribuicao,
                                 },
                             )
                             novo_id = ins.scalar_one()
@@ -1112,8 +1141,8 @@ with aba_nova:
                                 text("""
                                     INSERT INTO base_conhecimento
                                     (origem, titulo, categoria, subcategoria, conteudo, id_analista_autor,
-                                     status, caminho_anexo, qtd_tentativas, data_ocorrido)
-                                    VALUES ('CONHECIMENTO_SUPORTE', :t, :c, :s, :co, :a, :st, :ax, 1, :do)
+                                     status, caminho_anexo, qtd_tentativas, data_ocorrido, modalidade_contribuicao)
+                                    VALUES ('CONHECIMENTO_SUPORTE', :t, :c, :s, :co, :a, :st, :ax, 1, :do, :mod)
                                 """),
                                 {
                                     "t": titulo.strip(),
@@ -1124,6 +1153,7 @@ with aba_nova:
                                     "st": status_inicial,
                                     "ax": caminho_anexo_db,
                                     "do": data_evento,
+                                    "mod": modalidade_contribuicao,
                                 },
                             )
                     
@@ -1281,7 +1311,8 @@ if perfil_logado == "admin":
         with engine.connect() as conn:
             # Trazendo dados cruzados do autor, data e contador
             query_fila = text("""
-                SELECT b.id, b.titulo, b.categoria, b.subcategoria, b.conteudo, b.caminho_anexo, b.qtd_tentativas, 
+                SELECT b.id, b.titulo, b.categoria, b.subcategoria, b.conteudo, b.caminho_anexo, b.qtd_tentativas,
+                       COALESCE(NULLIF(b.modalidade_contribuicao, ''), 'EVENTO_ATUAL') AS modalidade_contribuicao,
                        to_char(b.criado_em, 'DD/MM/YYYY às HH24:MI') as data_envio, u.nome AS autor 
                 FROM base_conhecimento b 
                 JOIN usuarios u ON b.id_analista_autor = u.id 
@@ -1298,8 +1329,13 @@ if perfil_logado == "admin":
                 alerta_tentativas = f" 🚨 ({tentativas}ª Tentativa)" if tentativas > 1 else ""
                 
                 with st.expander(f"⏳ {row['titulo']} - {row['autor']}{alerta_tentativas}"):
+                    modalidade = str(row.get("modalidade_contribuicao") or "EVENTO_ATUAL").strip().upper()
+                    modalidade_badge = "🟢 Evento Atual" if modalidade == "EVENTO_ATUAL" else "🕘 Evento Passado"
                     st.markdown(f"**👤 Autor:** {row['autor']} | **📅 Enviado em:** {row['data_envio']}")
-                    st.markdown(f"**📂 Classificação:** `{row['categoria']}` ➔ `{row['subcategoria']}`")
+                    st.markdown(
+                        f"**📂 Classificação:** `{row['categoria']}` ➔ `{row['subcategoria']}` | "
+                        f"**🏷️ Modalidade:** `{modalidade_badge}`"
+                    )
                     st.divider()
                     
                     st.markdown("#### 📖 Conteúdo Proposto:")
@@ -1351,75 +1387,123 @@ if perfil_logado == "admin":
 
 # ==========================================
 with aba_explorar:
-    # --- RECUPERAÇÃO SEGURA DO ID (RESOLVE O NAMEERROR) ---
-    # Tentamos pegar o ID de onde ele estiver guardado na sua sessão
     usuario_id = st.session_state.get('usuario_id') or st.session_state.get('usuario_logado_id')
-    
+
     if not usuario_id:
         st.error("⚠️ Erro: Usuário não identificado. Por favor, faça login novamente.")
-        st.stop() # Interrompe a execução desta aba se não houver ID
+        st.stop()
 
     st.title("🔎 Explorar Base de Conhecimento")
-    
-    # Inicialização segura
-    df_conhecimento = pd.DataFrame()
-    params = {"uid": usuario_id} 
-    
-    # ... restante do seu código (Filtros, Query e Renderização) ...
 
-    # --- 1. ÁREA DE FILTROS ---
+    limite_state_key = "explorar_conhecimento_limite"
+    filtros_state_key = "explorar_conhecimento_filtros"
+
+    if limite_state_key not in st.session_state:
+        st.session_state[limite_state_key] = 5
+
     with st.container(border=True):
         st.markdown("#### 🎯 Filtros de Pesquisa")
-        col_busca, col_cat = st.columns([2, 1])
-        
-        with col_busca:
-            termo_pesquisa = st.text_input("Pesquisar por Título ou Conteúdo:", placeholder="Ex: Erro impressora...")
-        
-        with col_cat:
-            try:
-                with engine.connect() as conn:
-                    cat_query = text(
-                        "SELECT DISTINCT categoria FROM base_conhecimento "
-                        "WHERE status IN ('APROVADO','OBSOLETO') AND origem = 'CONHECIMENTO_SUPORTE' ORDER BY categoria"
-                    )
-                    categorias_disponiveis = [row[0] for row in conn.execute(cat_query).fetchall() if row[0]]
-            except Exception:
-                categorias_disponiveis = []
-                
-            categorias_disponiveis.insert(0, "Todas as Categorias")
-            categoria_selecionada = st.selectbox("Filtrar por Categoria:", categorias_disponiveis)
+        try:
+            with engine.connect() as conn:
+                cat_query = text(
+                    "SELECT DISTINCT categoria FROM base_conhecimento "
+                    "WHERE status IN ('APROVADO','OBSOLETO') AND origem = 'CONHECIMENTO_SUPORTE' ORDER BY categoria"
+                )
+                categorias_disponiveis = [row[0] for row in conn.execute(cat_query).fetchall() if row[0]]
+                aut_query = text(
+                    """
+                    SELECT DISTINCT COALESCE(u.nome, 'Não informado') AS autor
+                    FROM base_conhecimento b
+                    LEFT JOIN usuarios u ON b.id_analista_autor = u.id
+                    WHERE b.status IN ('APROVADO','OBSOLETO') AND b.origem = 'CONHECIMENTO_SUPORTE'
+                    ORDER BY autor
+                    """
+                )
+                autores_disponiveis = [row[0] for row in conn.execute(aut_query).fetchall() if row[0]]
+        except Exception:
+            categorias_disponiveis = []
+            autores_disponiveis = []
 
-    # --- 2. MONTAGEM DA QUERY (APROVADO + OBSOLETO: obsoletas permanecem listadas) ---
+        categorias_disponiveis = ["Todas as Categorias"] + categorias_disponiveis
+        autores_disponiveis = ["Todos os autores"] + autores_disponiveis
+
+        col_assunto, col_categoria = st.columns(2)
+        with col_assunto:
+            assunto = st.text_input(
+                "Assunto (título ou conteúdo)",
+                placeholder="Ex: Erro de impressão em NFC-e",
+            )
+        with col_categoria:
+            categoria_selecionada = st.selectbox("Categoria", categorias_disponiveis)
+
+        col_autor, col_data_ini, col_data_fim = st.columns([1.4, 1, 1])
+        with col_autor:
+            autor_selecionado = st.selectbox("Autor", autores_disponiveis)
+        with col_data_ini:
+            data_inicial = st.date_input("Data inicial", value=None)
+        with col_data_fim:
+            data_final = st.date_input("Data final", value=None)
+
+        filtros_atuais = (
+            (assunto or "").strip().lower(),
+            categoria_selecionada,
+            autor_selecionado,
+            data_inicial.isoformat() if data_inicial else "",
+            data_final.isoformat() if data_final else "",
+        )
+        if st.session_state.get(filtros_state_key) != filtros_atuais:
+            st.session_state[filtros_state_key] = filtros_atuais
+            st.session_state[limite_state_key] = 5
+
+    params = {"uid": usuario_id}
     query_base = """
         SELECT b.id, b.titulo, b.categoria, b.subcategoria, b.conteudo, b.caminho_anexo,
                COALESCE(b.qtd_upvotes, 0) as qtd_upvotes,
                COALESCE(b.qtd_visualizacoes, 0) as qtd_visualizacoes,
-               to_char(b.criado_em, 'DD/MM/YYYY') as data_pub, u.nome AS autor, b.status as status_row,
+               to_char(b.criado_em, 'DD/MM/YYYY') as data_pub,
+               COALESCE(u.nome, 'Não informado') AS autor,
+               b.status as status_row,
                EXISTS(SELECT 1 FROM base_conhecimento_votos v
                       WHERE v.id_conhecimento = b.id AND v.id_analista_votante = :uid) as ja_curtiu
         FROM base_conhecimento b
         LEFT JOIN usuarios u ON b.id_analista_autor = u.id
         WHERE b.origem = 'CONHECIMENTO_SUPORTE' AND b.status IN ('APROVADO', 'OBSOLETO')
     """
-    
-    if termo_pesquisa.strip():
+
+    if (assunto or "").strip():
         query_base += " AND (b.titulo ILIKE :termo OR b.conteudo ILIKE :termo)"
-        params["termo"] = f"%{termo_pesquisa.strip()}%"
-        
+        params["termo"] = f"%{assunto.strip()}%"
+
     if categoria_selecionada != "Todas as Categorias":
         query_base += " AND b.categoria = :cat"
         params["cat"] = categoria_selecionada
-        
-    query_base += " ORDER BY b.criado_em DESC LIMIT 50"
 
-    # --- 3. EXECUÇÃO E RENDERIZAÇÃO ---
+    if autor_selecionado != "Todos os autores":
+        query_base += " AND COALESCE(u.nome, 'Não informado') = :autor"
+        params["autor"] = autor_selecionado
+
+    if data_inicial:
+        query_base += " AND DATE(b.criado_em) >= :data_ini"
+        params["data_ini"] = data_inicial
+
+    if data_final:
+        query_base += " AND DATE(b.criado_em) <= :data_fim"
+        params["data_fim"] = data_final
+
+    query_base += " ORDER BY b.criado_em DESC LIMIT :limite"
+    params["limite"] = int(st.session_state[limite_state_key])
+
     try:
         with engine.connect() as conn:
             df_conhecimento = pd.read_sql(text(query_base), conn, params=params)
 
         if df_conhecimento.empty:
-            st.info("Nenhuma contribuição encontrada.")
+            st.info("📭 Nenhuma contribuição encontrada com os filtros atuais.")
         else:
+            st.caption(
+                f"Exibindo {len(df_conhecimento)} contribuições mais recentes "
+                f"(limite atual: {st.session_state[limite_state_key]})."
+            )
             nome_marcador = st.session_state.get("usuario_nome") or "Equipe"
             for _, row in df_conhecimento.iterrows():
                 is_obsoleto = str(row.get("status_row", "")).upper() == "OBSOLETO"
@@ -1436,7 +1520,7 @@ with aba_explorar:
                     with col_btn:
                         if not is_obsoleto:
                             label = f"❤️ {row['qtd_upvotes']}" if row["ja_curtiu"] else f"🤍 {row['qtd_upvotes']}"
-                            if st.button(label, key=f"lk_{row['id']}", use_container_width='strech'):
+                            if st.button(label, key=f"lk_{row['id']}", use_container_width='stretch'):
                                 with engine.begin() as conn_voto:
                                     if row["ja_curtiu"]:
                                         conn_voto.execute(
@@ -1516,82 +1600,23 @@ with aba_explorar:
                                             st.error(f"Erro: {e}")
 
                     with st.expander("📖 Ler solução"):
-                        # Ajuste: Incrementar qtd_visualizacoes ao abrir o expander (considerando que o expander só é "acessado" quando expandido)
-                        # Usamos session_state para rastrear se já foi visualizado nesta sessão, para evitar múltiplos increments no mesmo usuário/sessão
                         view_key = f"viewed_{row['id']}"
                         if view_key not in st.session_state:
                             with engine.begin() as conn_view:
-                                conn_view.execute(text("UPDATE base_conhecimento SET qtd_visualizacoes = COALESCE(qtd_visualizacoes, 0) + 1 WHERE id = :pid"), {"pid": row['id']})
-                            st.session_state[view_key] = True  # Marca como visualizado nesta sessão
+                                conn_view.execute(
+                                    text(
+                                        "UPDATE base_conhecimento "
+                                        "SET qtd_visualizacoes = COALESCE(qtd_visualizacoes, 0) + 1 "
+                                        "WHERE id = :pid"
+                                    ),
+                                    {"pid": row['id']},
+                                )
+                            st.session_state[view_key] = True
                         st.markdown(row['conteudo'])
 
+            if len(df_conhecimento) == st.session_state[limite_state_key]:
+                if st.button("📥 Carregar mais 20", use_container_width=True, key="btn_carregar_mais_explorar"):
+                    st.session_state[limite_state_key] += 20
+                    st.rerun()
     except Exception as e:
         st.error(f"❌ Erro ao carregar dados: {e}")
-
-
-    # --- 3. EXIBIÇÃO DOS RESULTADOS (UI/UX) ---
-    if df_conhecimento.empty:
-        st.info("📭 Nenhuma contribuição encontrada com os filtros atuais.")
-    else:
-        st.caption(f"A mostrar {len(df_conhecimento)} resultados aprovados.")
-        
-        for index, row in df_conhecimento.iterrows():
-            # Cria um "card" expansível para cada contribuição
-            titulo_card = f"📖 {row['titulo']} — (📂 {row['categoria']})"
-            
-            with st.expander(titulo_card):
-                # Cabeçalho do Card
-                col_meta1, col_meta2 = st.columns([3, 1])
-                with col_meta1:
-                    st.markdown(f"**Subcategoria:** `{row['subcategoria']}` | **Autor:** 👤 {row['autor']}")
-                with col_meta2:
-                    st.markdown(f"📅 *{row['data_pub']}*")
-                    
-                st.divider()
-                
-                # Corpo de Texto
-                st.markdown("#### Conteúdo")
-                st.write(row['conteudo'])
-                
-                # --- LÓGICA DE EXIBIÇÃO DE ANEXOS E MULTIMÉDIA ---
-                caminho_anexo = row.get('caminho_anexo')
-                
-                # Verifica se a string não é nula e se o ficheiro físico realmente existe
-                if pd.notna(caminho_anexo) and str(caminho_anexo).strip() and os.path.exists(str(caminho_anexo)):
-                    st.markdown("---")
-                    st.markdown("📎 **Evidências e Anexos**")
-                    
-                    extensao = str(caminho_anexo).split('.')[-1].lower()
-                    
-                    # 1. Pré-visualização Integrada (Renderização Nativa)
-                    if extensao in ['png', 'jpg', 'jpeg']:
-                        # Exibe a imagem de forma responsiva sem ultrapassar o layout
-                        st.image(str(caminho_anexo), caption="Imagem em Anexo", use_container_width='strech')
-                        
-                    elif extensao in ['mp4', 'avi', 'mov']:
-                        st.video(str(caminho_anexo))
-                        
-                    elif extensao in ['mp3', 'wav', 'ogg']:
-                        st.audio(str(caminho_anexo))
-                        
-                    # 2. Botão Universal de Download (Para PDFs, TXT, XML, SQL, ZIP, FR3, etc.)
-                    # Usamos 'with open' para ler os bytes do ficheiro e passar para o botão
-                    try:
-                        with open(str(caminho_anexo), "rb") as file:
-                            bytes_ficheiro = file.read()
-                            nome_original = os.path.basename(str(caminho_anexo))
-                            
-                            st.download_button(
-                                label=f"💾 Descarregar Anexo Original (.{extensao.upper()})",
-                                data=bytes_ficheiro,
-                                file_name=nome_original,
-                                mime="application/octet-stream",
-                                # KEY única é estritamente necessária no Streamlit dentro de loops
-                                key=f"btn_dl_explorar_{row['id']}_{index}",
-                                type="secondary"
-                            )
-                    except Exception as e:
-                        st.warning(f"⚠️ O arquivo não pôde ser carregado:{e}")
-                elif pd.notna(caminho_anexo) and str(caminho_anexo).strip():
-                    # Caso o registo exista no banco, mas o ficheiro físico tenha sido apagado do servidor
-                    st.error("⚠️ O anexo desta contribuição não foi encontrado no servidor físico (Pode ter sido movido ou apagado).")
