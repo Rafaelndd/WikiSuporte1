@@ -5,10 +5,4 @@
 # https://docs.streamlit.io/develop/api-reference/configuration/config.toml
 
 [client]
-<<<<<<< Updated upstream
 toolbarMode = "minimal"
-=======
-toolbarMode = "viewer"
-[server]
-port = 8502
->>>>>>> Stashed changes
