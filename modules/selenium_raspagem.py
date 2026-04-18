@@ -14,7 +14,7 @@ if sys.platform == "win32":
         except Exception:
             pass
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Selenium
@@ -45,6 +45,7 @@ from services.bot_control import (
     consumir_tarefa,
     definir_etapa,
     deve_parar,
+    deve_executar_no_horario_fixo,
     iniciar_execucao,
     finalizar_execucao,
     ler_estado,
@@ -1021,7 +1022,16 @@ class OraculoBot:
                 (
                     (ChamadoTecnuv.nome_cliente == None) |
                     (ChamadoTecnuv.nome_cliente == "") |
-                    (ChamadoTecnuv.versao_sistema == None)
+                    (ChamadoTecnuv.versao_sistema == None) |
+                    (ChamadoTecnuv.versao_sistema == "") |
+                    (ChamadoTecnuv.atendente_tecnuv == None) |
+                    (ChamadoTecnuv.atendente_tecnuv == "") |
+                    (ChamadoTecnuv.usuario_epsy == None) |
+                    (ChamadoTecnuv.usuario_epsy == "") |
+                    (ChamadoTecnuv.assunto_html == None) |
+                    (ChamadoTecnuv.assunto_html == "") |
+                    (ChamadoTecnuv.motivo_abertura_html == None) |
+                    (ChamadoTecnuv.motivo_abertura_html == "")
                 ),
                 ChamadoTecnuv.status_atual.notin_(["Encerrado", "Cancelado"])
             ).all()
@@ -1162,26 +1172,13 @@ def iniciar_psy_assistente_wikisuporte_bot():
                 time.sleep(60)
                 continue
 
-            intervalo_minutos = estado.get("intervalo", 30)
-            ultima_exec_str = estado.get("ultima_execucao")
-
-            executar_agora = False
-            if not ultima_exec_str:
-                executar_agora = True
-            else:
-                try:
-                    ultima_exec = datetime.fromisoformat(ultima_exec_str)
-                    proxima_exec = ultima_exec + timedelta(minutes=intervalo_minutos)
-                    if datetime.now() >= proxima_exec:
-                        executar_agora = True
-                except Exception:
-                    executar_agora = True
+            executar_agora, horario_slot = deve_executar_no_horario_fixo(estado)
 
             if executar_agora:
                 ok, motivo = pode_executar_raspagem(ler_estado())
                 if ok:
-                    logging.info(f"Ciclo automático (Intervalo: {intervalo_minutos} min).")
-                    iniciar_execucao("Ciclo automático: chamados")
+                    logging.info(f"Ciclo automático por horário fixo ({horario_slot}).")
+                    iniciar_execucao(f"Ciclo automático: chamados ({horario_slot})")
                     try:
                         _executar_ciclo_chamados()
                     finally:

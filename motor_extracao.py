@@ -39,6 +39,7 @@ from services.db_homologacao import (
 from services.bot_control import (
     consumir_tarefa,
     definir_etapa,
+    deve_executar_no_horario_fixo,
     iniciar_execucao,
     finalizar_execucao,
     ler_estado,
@@ -624,31 +625,21 @@ def iniciar_psy_assistente():
                 continue
 
             if estado.get("auto_ativo", False):
-                from datetime import timedelta
-                intervalo_minutos = estado.get("intervalo", 60)
-                ultima = estado.get("ultima_execucao")
-
-                executar_agora = False
-                if not ultima:
-                    executar_agora = True
-                else:
-                    try:
-                        dt_ultima = datetime.fromisoformat(ultima)
-                        if datetime.now() >= dt_ultima + timedelta(minutes=intervalo_minutos):
-                            executar_agora = True
-                    except Exception:
-                        executar_agora = True
+                executar_agora, horario_slot = deve_executar_no_horario_fixo(estado)
 
                 if executar_agora:
                     ok, motivo = pode_executar_raspagem(ler_estado())
                     if ok:
-                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iniciando ciclo automático (intervalo {intervalo_minutos} min)...")
-                        iniciar_execucao("Ciclo automático: chamados + demais fontes")
+                        print(
+                            f"\n[{datetime.now().strftime('%H:%M:%S')}] "
+                            f"Iniciando ciclo automático por horário fixo ({horario_slot})..."
+                        )
+                        iniciar_execucao(f"Ciclo automático: chamados + demais fontes ({horario_slot})")
                         try:
                             _executar_motor()
                         finally:
                             finalizar_execucao()
-                        print(f"⏳ Ciclo concluído. Próximo em {intervalo_minutos} min.")
+                        print("⏳ Ciclo concluído. Próxima janela fixa: 00:00 ou 12:00.")
                     else:
                         print(f"⛔ Ciclo automático bloqueado: {motivo}")
 

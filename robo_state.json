@@ -1,15 +1,20 @@
 {
-  "ultima_execucao": "2026-04-17T14:02:42.509541",
+  "ultima_execucao": "2026-04-17T23:46:00.903842",
   "em_andamento": false,
-  "auto_ativo": false,
+  "auto_ativo": true,
   "intervalo": 30,
-  "etapa_atual": "Chamados: encerrando navegador",
+  "etapa_atual": null,
   "tarefa_solicitada": null,
-  "raspagens_por_hora": 2,
-  "ultima_raspagem_hora": "2026-04-17T13:59:47.762914",
+  "raspagens_por_hora": 1,
+  "ultima_raspagem_hora": "2026-04-17T23:44:50.289661",
   "min_intervalo": 30,
   "max_raspagens_hora": 3,
   "horario_inicio": null,
   "horario_fim": null,
+  "horarios_fixos": [
+    "00:00",
+    "12:00"
+  ],
+  "janela_execucao_min": 20,
   "parar_solicitada": false
 }

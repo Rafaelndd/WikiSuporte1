@@ -24,13 +24,14 @@ RASPAGENS = {
 MIN_INTERVALO_MINUTOS = 30
 MAX_RASPAGENS_POR_HORA = 3
 MIN_INTERVALO_ENTRE_REQUISICOES_SEG = 5
+HORARIOS_FIXOS_PADRAO = ["00:00", "12:00"]
 
 
 def _estado_default():
     return {
         "ultima_execucao": None,
         "em_andamento": False,
-        "auto_ativo": False,
+        "auto_ativo": True,
         "intervalo": 60,
         "etapa_atual": None,
         "tarefa_solicitada": None,
@@ -40,6 +41,8 @@ def _estado_default():
         "max_raspagens_hora": MAX_RASPAGENS_POR_HORA,
         "horario_inicio": None,
         "horario_fim": None,
+        "horarios_fixos": HORARIOS_FIXOS_PADRAO.copy(),
+        "janela_execucao_min": 20,
         "parar_solicitada": False,
     }
 
@@ -209,3 +212,46 @@ def sincronizar_estado_se_motor_morto() -> bool:
 
 def deve_parar() -> bool:
     return bool(ler_estado().get("parar_solicitada"))
+
+
+def _parse_hhmm(valor: str) -> tuple[int, int] | None:
+    try:
+        hh_str, mm_str = (valor or "").strip().split(":")
+        hh = int(hh_str)
+        mm = int(mm_str)
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return hh, mm
+    except Exception:
+        return None
+    return None
+
+
+def deve_executar_no_horario_fixo(estado: dict, agora: Optional[datetime] = None) -> tuple[bool, str]:
+    """
+    Verifica se o ciclo automático deve rodar no momento, baseado em horários fixos.
+    Executa no máximo uma vez por slot diário (ex.: 00:00 e 12:00).
+    """
+    now = agora or datetime.now()
+    horarios = estado.get("horarios_fixos") or HORARIOS_FIXOS_PADRAO
+    janela_min = int(estado.get("janela_execucao_min", 20) or 20)
+
+    ultima_exec = None
+    ultima_exec_str = estado.get("ultima_execucao")
+    if ultima_exec_str:
+        try:
+            ultima_exec = datetime.fromisoformat(ultima_exec_str)
+        except Exception:
+            ultima_exec = None
+
+    for horario in horarios:
+        parsed = _parse_hhmm(horario)
+        if not parsed:
+            continue
+        hh, mm = parsed
+        slot = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        delta_seg = (now - slot).total_seconds()
+        # Roda apenas dentro da janela após o horário definido.
+        if 0 <= delta_seg <= janela_min * 60:
+            if not ultima_exec or ultima_exec < slot:
+                return True, horario
+    return False, ""
