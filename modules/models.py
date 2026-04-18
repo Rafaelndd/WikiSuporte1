@@ -25,6 +25,8 @@ class ChamadoTecnuv(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     nr_chamado = Column(BigInteger, unique=True, nullable=False, index=True)
+    # Coluna real no banco atual: nome_cliente.
+    # Mantemos o atributo Python como nome_cliente para consistência do código.
     nome_cliente = Column(Text, nullable=True)
     atendente_tecnuv = Column(Text, nullable=True)
     usuario_epsy = Column(Text, nullable=True)
@@ -45,6 +47,7 @@ class ChamadoTecnuv(Base):
     previsao_conclusao = Column(Date, nullable=True)
     ultima_alteracao_tecnuv = Column(DateTime, nullable=True)
     ultima_verificacao_robo = Column(DateTime, default=datetime.now)
+    atualizado_em = Column(DateTime, default=datetime.now)
     # RELACIONAMENTOS (Atualizados para incluir Cobranças e Clientes Vinculados)
     transicoes = relationship("HistoricoTransicaoStatus", back_populates="chamado", cascade="all, delete-orphan")
     interacoes = relationship("HistoricoInteracao", back_populates="chamado", cascade="all, delete-orphan")
@@ -53,13 +56,16 @@ class ChamadoTecnuv(Base):
 
 
 class HistoricoTransicaoStatus(Base):
-    __tablename__ = "historico_transicoes_status"
+    # DB usa nome no singular (historico_transicao_status).
+    __tablename__ = "historico_transicao_status"
 
-    id_transicao = Column(BigInteger, primary_key=True, index=True)
+    # Mantemos atributo id_transicao, mapeando para coluna real id.
+    id_transicao = Column("id", BigInteger, primary_key=True, index=True)
     nr_chamado = Column(BigInteger, ForeignKey("chamados_tecnuv.nr_chamado", ondelete="CASCADE"))
     status_anterior = Column(Text, nullable=True)
     status_novo = Column(Text, nullable=False)
-    data_deteccao = Column(DateTime, default=datetime.now)
+    # Mantemos atributo data_deteccao, mapeando para coluna real data_mudanca.
+    data_deteccao = Column("data_mudanca", DateTime, default=datetime.now)
 
     chamado = relationship("ChamadoTecnuv", back_populates="transicoes")
 
@@ -67,11 +73,13 @@ class HistoricoTransicaoStatus(Base):
 class HistoricoInteracao(Base):
     __tablename__ = "historico_interacoes"
 
-    id = Column(BigInteger, primary_key=True, index=True)
+    # DB usa id_interacao; mantemos atributo id.
+    id = Column("id_interacao", BigInteger, primary_key=True, index=True)
     nr_chamado = Column(BigInteger, ForeignKey("chamados_tecnuv.nr_chamado", ondelete="CASCADE"))
     usuario = Column(Text, nullable=False)
     data_interacao = Column(DateTime, nullable=False)
-    descricao_html = Column(Text, nullable=True)
+    # DB usa descricao_texto; mantemos atributo descricao_html para compatibilidade.
+    descricao_html = Column("descricao_texto", Text, nullable=True)
 
     chamado = relationship("ChamadoTecnuv", back_populates="interacoes")
 

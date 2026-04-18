@@ -376,18 +376,17 @@ class OraculoLogistica:
         """)
         
         try:
-            # Executa a query injetando a chave secreta do config.py
-            resultado = self.session.execute(sql_update, {"chave_lgpd": Config.LGPD_SECRET_KEY})
-            self.session.commit() # Salva a transação!
-            
+            # Usa transação explícita com engine para evitar dependência de sessão não inicializada.
+            with self.engine.begin() as conn:
+                resultado = conn.execute(sql_update, {"chave_lgpd": Config.LGPD_SECRET_KEY})
+
             # resultado.rowcount nos diz exatamente quantas linhas foram "amarradas"
             linhas_afetadas = resultado.rowcount
             print(f"✅ Vínculos sincronizados! {linhas_afetadas} ligações órfãs foram conectadas a clientes.")
-            
+
             return linhas_afetadas
-            
+
         except Exception as e:
-            self.session.rollback() # Evita o efeito dominó se der erro
             print(f"❌ Erro crítico ao sincronizar clientes GoTo: {e}")
             return 0
 
@@ -409,15 +408,15 @@ class OraculoLogistica:
         """)
         
         try:
-            resultado = self.session.execute(sql_update, {"chave_lgpd": Config.LGPD_SECRET_KEY})
-            self.session.commit()
-            
+            # Usa transação explícita com engine para evitar dependência de sessão não inicializada.
+            with self.engine.begin() as conn:
+                resultado = conn.execute(sql_update, {"chave_lgpd": Config.LGPD_SECRET_KEY})
+
             linhas_afetadas = resultado.rowcount
             print(f"✅ Vínculos Multi360 sincronizados! {linhas_afetadas} chats órfãos foram conectados.")
             return linhas_afetadas
-            
+
         except Exception as e:
-            self.session.rollback()
             print(f"❌ Erro crítico ao sincronizar clientes Multi360: {e}")
             return 0
 

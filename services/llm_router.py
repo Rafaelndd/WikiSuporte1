@@ -1,12 +1,11 @@
 """
-Serviço: Roteador de LLM (Gemini + DeepSeek).
+Serviço: Roteador de LLM (Gemini + Groq).
 
 Objetivo:
 - Centralizar o uso de LLM para texto (pergunta + contexto) sem alterar
   o código existente.
-- Usar GEMINI_API_KEY como provedora principal.
-- Usar DEEPSEEK_API_KEY (ou DEEP_SEEk_API_KEY) como fallback, dentro da
-  filosofia de economizar chamadas e aproveitar o plano gratuito.
+- Usar GEMINI_API_KEY como provedora principal (google-genai).
+- Usar GROQ_API_KEY como fallback (API OpenAI-compatible em api.groq.com).
 
 Importante:
 - Este módulo NÃO é importado automaticamente em nenhuma página.
@@ -38,7 +37,7 @@ class LLMResposta:
     Estrutura de retorno padrão para chamadas de LLM.
 
     - texto: resposta final em texto.
-    - provedor: 'gemini' ou 'deepseek'.
+    - provedor: 'gemini', 'groq' ou 'nenhum'.
     - modelo: nome do modelo utilizado.
     - meta: dicionário opcional com metadados (tokens, etc.).
     """
@@ -53,9 +52,8 @@ def _get_gemini_api_key() -> Optional[str]:
     return os.getenv("GEMINI_API_KEY")
 
 
-def _get_deepseek_api_key() -> Optional[str]:
-    # Suporta tanto DEEPSEEK_API_KEY quanto DEEP_SEEk_API_KEY (como está hoje no .env)
-    return os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEP_SEEk_API_KEY")
+def _get_groq_api_key() -> Optional[str]:
+    return (os.getenv("GROQ_API_KEY") or "").strip() or None
 
 
 def _tentar_gemini(prompt: str, modelo: str = "gemini-2.5-flash") -> Optional[LLMResposta]:
@@ -101,12 +99,12 @@ def _tentar_gemini(prompt: str, modelo: str = "gemini-2.5-flash") -> Optional[LL
         return None
 
 
-def _tentar_deepseek(prompt: str, modelo: Optional[str] = None) -> Optional[LLMResposta]:
+def _tentar_groq(prompt: str, modelo: Optional[str] = None) -> Optional[LLMResposta]:
     """
-    Tenta gerar resposta via DeepSeek (API compatível com OpenAI).
-    Retorna LLMResposta ou None em caso de erro.
+    Tenta gerar resposta via Groq (API compatível com OpenAI).
+    Documentação: https://console.groq.com/docs/overview
     """
-    api_key = _get_deepseek_api_key()
+    api_key = _get_groq_api_key()
     if not api_key:
         return None
 
@@ -115,8 +113,8 @@ def _tentar_deepseek(prompt: str, modelo: Optional[str] = None) -> Optional[LLMR
     except Exception:
         return None
 
-    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    modelo_final = modelo or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    base_url = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+    modelo_final = modelo or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
@@ -135,13 +133,12 @@ def _tentar_deepseek(prompt: str, modelo: Optional[str] = None) -> Optional[LLMR
                 "content": prompt,
             },
         ],
-        # Parâmetros conservadores, pensando em plano gratuito
-        "temperature": float(os.getenv("DEEPSEEK_TEMPERATURE", "0.2")),
-        "max_tokens": int(os.getenv("DEEPSEEK_MAX_TOKENS", "512")),
+        "temperature": float(os.getenv("GROQ_TEMPERATURE", "0.2")),
+        "max_tokens": int(os.getenv("GROQ_MAX_TOKENS", "512")),
     }
 
     try:
-        resp = requests.post(url, json=data, headers=headers, timeout=30)
+        resp = requests.post(url, json=data, headers=headers, timeout=60)
         if resp.status_code != 200:
             return None
         payload = resp.json()
@@ -160,7 +157,7 @@ def _tentar_deepseek(prompt: str, modelo: Optional[str] = None) -> Optional[LLMR
 
         return LLMResposta(
             texto=texto,
-            provedor="deepseek",
+            provedor="groq",
             modelo=modelo_final,
             meta=meta,
         )
@@ -172,7 +169,7 @@ def gerar_resposta(pergunta: str, contexto: str = "") -> LLMResposta:
     """
     Roteia a chamada de LLM:
     1. Tenta Gemini, se GEMINI_API_KEY estiver configurado e o pacote existir.
-    2. Se falhar ou estiver indisponível, tenta DeepSeek se DEEPSEEK_API_KEY (ou DEEP_SEEk_API_KEY) estiver configurado.
+    2. Se falhar ou estiver indisponível, tenta Groq se GROQ_API_KEY estiver configurado.
     3. Em último caso, retorna mensagem padrão sem chamar nenhuma API.
 
     Exemplo de uso na aba do Assistente (substituindo o bloco atual):
@@ -196,8 +193,8 @@ def gerar_resposta(pergunta: str, contexto: str = "") -> LLMResposta:
     if resposta and resposta.texto:
         return resposta
 
-    # 2) Fallback: DeepSeek
-    resposta = _tentar_deepseek(prompt)
+    # 2) Fallback: Groq
+    resposta = _tentar_groq(prompt)
     if resposta and resposta.texto:
         return resposta
 

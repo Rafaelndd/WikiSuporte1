@@ -159,7 +159,7 @@ def render_contrib_rules_table(*, compact: bool = False) -> None:
                 <tbody>
                     <tr>
                         <td>🟢 Evento Atual</td>
-                        <td>0-7 dias: 100 | 8-14: 75 | 15-21: 25 | &gt;21: 0</td>
+                        <td>0-7 dias: 100 pts. | 8-14 dias: 75 pts. | 15-21 dias: 25 pts. | &gt;21 dias: 0 pts.</td>
                         <td><span class="ws-tag-green">Pontuação por prazo</span></td>
                     </tr>
                     <tr>
@@ -174,7 +174,7 @@ def render_contrib_rules_table(*, compact: bool = False) -> None:
                     </tr>
                     <tr>
                         <td>🟢 Bônus semanal</td>
-                        <td>Ao atingir {cfg['bonus_semanal_meta_qtd']} aprovações na semana ISO</td>
+                        <td>Ao atingir {cfg['bonus_semanal_meta_qtd']} aprovações na semana</td>
                         <td><span class="ws-tag-green">+{cfg['bonus_semanal_meta_pontos']} XP</span></td>
                     </tr>
                     <tr>
@@ -185,7 +185,7 @@ def render_contrib_rules_table(*, compact: bool = False) -> None:
                     <tr>
                         <td>🔴 Penalidade semanal</td>
                         <td>
-                            Sem 7 dias de aprovação (até -{cfg['penalidade_sem_7_dias']}) ou
+                            Ficar sem contribuir por 7 dias ou mais, (até -{cfg['penalidade_sem_7_dias']}) ou
                             abaixo da meta semanal de {cfg['minimo_semanal_sem_penalidade']}
                             aprovações (até -{cfg['penalidade_semana_insuficiente']})
                         </td>

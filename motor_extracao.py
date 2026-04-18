@@ -559,11 +559,21 @@ def _executar_motor(tarefa: str | None = None):
     """
     Cria o motor, faz login e executa a raspagem.
     Se `tarefa` for 'chamados', usa OraculoBot. Caso contrário, MotorExtracao.
-    Se None, executa todas as fontes do MotorExtracao.
+    Se None (ciclo automático do painel), primeiro sincroniza chamados TecNuv → banco
+    (OraculoBot) e em seguida executa todas as fontes do MotorExtracao.
     """
     if tarefa == "chamados":
         _executar_ciclo_chamados()
         return
+
+    # Ciclo completo: a fila TecNuv é a fonte da verdade para chamados abertos.
+    if tarefa is None:
+        try:
+            print("📋 Ciclo automático: sincronizando chamados TecNuv com o PostgreSQL...")
+            definir_etapa("Chamados: validando fila e gravando no banco")
+            _executar_ciclo_chamados()
+        except Exception as e:
+            print(f"⚠️ Ciclo de chamados (antes das demais fontes) falhou ou avisou: {e}")
 
     motor = MotorExtracao()
     try:
@@ -633,7 +643,7 @@ def iniciar_psy_assistente():
                     ok, motivo = pode_executar_raspagem(ler_estado())
                     if ok:
                         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iniciando ciclo automático (intervalo {intervalo_minutos} min)...")
-                        iniciar_execucao("Ciclo automático: todas as fontes")
+                        iniciar_execucao("Ciclo automático: chamados + demais fontes")
                         try:
                             _executar_motor()
                         finally:
