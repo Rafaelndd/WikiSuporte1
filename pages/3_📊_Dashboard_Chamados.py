@@ -82,64 +82,170 @@ except ImportError:
 # 2. MOTORES DE BUSCA E PROCESSAMENTO
 # ==========================================
 # TTL curto: o bot grava no Postgres em tempo real; cache longo faz parecer que "não salvou"
-@st.cache_data(ttl=45)
-def carregar_dados_tecnuv():
+@st.cache_data(ttl=300)
+def _metadata_chamados_tecnuv() -> dict:
     engine = get_connection()
     try:
-        df = pd.read_sql(
-            """
-            SELECT
-                nr_chamado,
-                data_abertura,
-                data_encerramento,
-                usuario_epsy,
-                nome_analista_epsy,
-                nome_cliente,
-                status_atual,
-                atendente_tecnuv,
-                motivo_abertura_html,
-                assunto_html,
-                versao_sistema,
-                situacao
-            FROM chamados_tecnuv
-            """,
+        cols = pd.read_sql(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'chamados_tecnuv'
+                """
+            ),
             engine,
         )
-        if not df.empty:
-            df['data_abertura'] = pd.to_datetime(df.get('data_abertura'), errors='coerce')
-            df['data_encerramento'] = pd.to_datetime(df.get('data_encerramento'), errors='coerce')
-            # usuario_epsy: fallback para nome_analista_epsy se a coluna não existir
-            col_epsy = df.get("usuario_epsy") if "usuario_epsy" in df.columns else df.get("nome_analista_epsy", pd.Series(dtype=object))
-            df["usuario_epsy"] = col_epsy.fillna("Não Informado").astype(str)
-            df['atendente_tecnuv'] = df.get('atendente_tecnuv', pd.Series(dtype=str)).fillna("Não Informado")
-            df['versao_sistema'] = df.get('versao_sistema', pd.Series(dtype=str)).fillna("Não Informada")
-            # cliente_nome: enriquecer com clientes_vinculados_chamado quando vazio
-            try:
-                df_vinculos = pd.read_sql(
-                    "SELECT nr_chamado, nome_cliente FROM clientes_vinculados_chamado",
-                    engine,
+        names = set(cols["column_name"].astype(str).str.lower())
+    except Exception:
+        names = set()
+
+    if "usuario_epsy" in names and "nome_analista_epsy" in names:
+        expr_analista = "COALESCE(NULLIF(TRIM(c.usuario_epsy), ''), NULLIF(TRIM(c.nome_analista_epsy), ''), 'Não Informado')"
+    elif "usuario_epsy" in names:
+        expr_analista = "COALESCE(NULLIF(TRIM(c.usuario_epsy), ''), 'Não Informado')"
+    elif "nome_analista_epsy" in names:
+        expr_analista = "COALESCE(NULLIF(TRIM(c.nome_analista_epsy), ''), 'Não Informado')"
+    else:
+        expr_analista = "'Não Informado'"
+
+    if "cliente_nome" in names:
+        expr_cliente = "COALESCE(NULLIF(TRIM(c.cliente_nome), ''), 'Não Informado')"
+    elif "nome_cliente" in names:
+        expr_cliente = "COALESCE(NULLIF(TRIM(c.nome_cliente), ''), 'Não Informado')"
+    else:
+        expr_cliente = "'Não Informado'"
+
+    return {
+        "colunas": names,
+        "expr_analista": expr_analista,
+        "expr_cliente": expr_cliente,
+    }
+
+
+@st.cache_data(ttl=180)
+def carregar_contexto_filtros() -> Tuple[Optional[datetime], Optional[datetime], list[str]]:
+    """
+    Contexto leve para montar os filtros sem carregar toda a base.
+    """
+    engine = get_connection()
+    meta = _metadata_chamados_tecnuv()
+    expr_analista = meta["expr_analista"]
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    f"""
+                    SELECT
+                        MIN(c.data_abertura) AS min_data,
+                        MAX(c.data_abertura) AS max_data
+                    FROM chamados_tecnuv c
+                    """
                 )
-                if not df_vinculos.empty:
-                    mapa_cliente = df_vinculos.set_index('nr_chamado')['nome_cliente'].to_dict()
-                    def preencher_cliente(row):
-                        val = row.get('cliente_nome')
-                        if pd.isna(val) or not str(val).strip() or str(val).strip() in ("Não Informado", "Não Informada"):
-                            return mapa_cliente.get(row['nr_chamado'], val)
-                        return val
-                    df['cliente_nome'] = df.apply(preencher_cliente, axis=1)
-            except Exception:
-                pass
+            ).fetchone()
+            analistas_df = pd.read_sql(
+                text(
+                    f"""
+                    SELECT DISTINCT {expr_analista} AS usuario_epsy
+                    FROM chamados_tecnuv c
+                    WHERE {expr_analista} <> 'Não Informado'
+                    ORDER BY 1
+                    """
+                ),
+                conn,
+            )
+        min_data = row[0] if row else None
+        max_data = row[1] if row else None
+        analistas = analistas_df["usuario_epsy"].astype(str).tolist() if not analistas_df.empty else []
+        return min_data, max_data, analistas
+    except Exception:
+        return None, None, []
+
+
+@st.cache_data(ttl=45)
+def carregar_dados_tecnuv(data_inicio: datetime, data_fim_exclusivo: datetime, analista: str):
+    engine = get_connection()
+    meta = _metadata_chamados_tecnuv()
+    expr_analista = meta["expr_analista"]
+    expr_cliente = meta["expr_cliente"]
+    tem_categoria = "categoria_ia" in meta["colunas"]
+    sql_categoria = "c.categoria_ia" if tem_categoria else "NULL::text AS categoria_ia"
+    try:
+        df = pd.read_sql(
+            text(
+                f"""
+                SELECT
+                    c.nr_chamado,
+                    c.data_abertura,
+                    c.data_encerramento,
+                    {expr_analista} AS usuario_epsy,
+                    {expr_cliente} AS cliente_nome,
+                    COALESCE(NULLIF(TRIM(c.status_atual), ''), 'Não Informado') AS status_atual,
+                    COALESCE(NULLIF(TRIM(c.atendente_tecnuv), ''), 'Não Informado') AS atendente_tecnuv,
+                    c.motivo_abertura_html,
+                    c.assunto_html,
+                    COALESCE(NULLIF(TRIM(c.versao_sistema), ''), 'Não Informada') AS versao_sistema,
+                    c.situacao,
+                    {sql_categoria}
+                FROM chamados_tecnuv c
+                WHERE c.data_abertura >= :data_inicio
+                  AND c.data_abertura < :data_fim_exclusivo
+                  AND (:analista = 'Todos' OR {expr_analista} = :analista)
+                ORDER BY c.data_abertura DESC NULLS LAST
+                """
+            ),
+            engine,
+            params={
+                "data_inicio": pd.to_datetime(data_inicio),
+                "data_fim_exclusivo": pd.to_datetime(data_fim_exclusivo),
+                "analista": analista,
+            },
+        )
+        if not df.empty:
+            df["data_abertura"] = pd.to_datetime(df.get("data_abertura"), errors="coerce")
+            df["data_encerramento"] = pd.to_datetime(df.get("data_encerramento"), errors="coerce")
+            df["usuario_epsy"] = df.get("usuario_epsy", pd.Series(dtype=object)).fillna("Não Informado").astype(str)
+            df["atendente_tecnuv"] = df.get("atendente_tecnuv", pd.Series(dtype=str)).fillna("Não Informado")
+            df["versao_sistema"] = df.get("versao_sistema", pd.Series(dtype=str)).fillna("Não Informada")
+
+            ids = df["nr_chamado"].dropna().astype(int).unique().tolist()
+            if ids:
+                try:
+                    df_vinculos = pd.read_sql(
+                        text(
+                            """
+                            SELECT nr_chamado, MIN(nome_cliente) AS nome_cliente
+                            FROM clientes_vinculados_chamado
+                            WHERE nr_chamado = ANY(:ids)
+                            GROUP BY nr_chamado
+                            """
+                        ),
+                        engine,
+                        params={"ids": ids},
+                    )
+                    if not df_vinculos.empty:
+                        mapa_cliente = df_vinculos.set_index("nr_chamado")["nome_cliente"].to_dict()
+
+                        def preencher_cliente(row):
+                            val = row.get("cliente_nome")
+                            if pd.isna(val) or not str(val).strip() or str(val).strip() in ("Não Informado", "Não Informada"):
+                                return mapa_cliente.get(row["nr_chamado"], val)
+                            return val
+
+                        df["cliente_nome"] = df.apply(preencher_cliente, axis=1)
+                except Exception:
+                    pass
+
             df["cliente_nome"] = df.get("cliente_nome", pd.Series(dtype=str)).fillna("Não Informado").astype(str)
-            # Motivo/assunto: sempre texto limpo + Title Case na amostragem (colunas originais no DF para UI)
             for col in ("motivo_abertura_html", "assunto_html"):
                 if col in df.columns:
                     df[col] = df[col].apply(limpar_html)
             df["erro_relatado"] = df.get("motivo_abertura_html", pd.Series(dtype=str)).apply(
                 lambda x: x if isinstance(x, str) else limpar_html(x)
             )
-            # categoria_ia (classificação semântica) se existir
-            if 'categoria_ia' not in df.columns:
-                df['categoria_ia'] = None
+            if "categoria_ia" not in df.columns:
+                df["categoria_ia"] = None
             st_col = df.get("status_atual", pd.Series("", index=df.index)).astype(str)
             df["status_norm"] = st_col.map(_normalize_status_key)
             df["status_canonico"] = st_col.map(status_para_canonico)
@@ -148,76 +254,121 @@ def carregar_dados_tecnuv():
         st.error(f"Erro ao carregar chamados: {e}")
         return pd.DataFrame()
 
+
 @st.cache_data(ttl=45)
-def carregar_interacoes():
+def carregar_interacoes(data_inicio: datetime, data_fim_exclusivo: datetime, analista: str):
     engine = get_connection()
+    meta = _metadata_chamados_tecnuv()
+    expr_analista = meta["expr_analista"]
+    sql_base = f"""
+        SELECT
+            hi.nr_chamado,
+            hi.data_interacao,
+            hi.descricao_html,
+            hi.origem_interacao,
+            hi.origem,
+            hi.usuario
+        FROM {{tabela}} hi
+        JOIN chamados_tecnuv c ON c.nr_chamado = hi.nr_chamado
+        WHERE c.data_abertura >= :data_inicio
+          AND c.data_abertura < :data_fim_exclusivo
+          AND (:analista = 'Todos' OR {expr_analista} = :analista)
+    """
+    params = {
+        "data_inicio": pd.to_datetime(data_inicio),
+        "data_fim_exclusivo": pd.to_datetime(data_fim_exclusivo),
+        "analista": analista,
+    }
     try:
         try:
-            df = pd.read_sql(
-                """
-                SELECT
-                    nr_chamado,
-                    data_interacao,
-                    descricao_html,
-                    origem_interacao,
-                    origem,
-                    usuario
-                FROM historico_interacao
-                """,
-                engine,
-            )
+            df = pd.read_sql(text(sql_base.format(tabela="historico_interacao")), engine, params=params)
         except Exception:
-            df = pd.read_sql(
-                """
-                SELECT
-                    nr_chamado,
-                    data_interacao,
-                    descricao_html,
-                    origem_interacao,
-                    origem,
-                    usuario
-                FROM historico_interacoes
-                """,
-                engine,
-            )
-            
-        if not df.empty and 'data_interacao' in df.columns:
-            df['data_interacao'] = pd.to_datetime(df['data_interacao'], errors='coerce')
+            df = pd.read_sql(text(sql_base.format(tabela="historico_interacoes")), engine, params=params)
+
+        if not df.empty and "data_interacao" in df.columns:
+            df["data_interacao"] = pd.to_datetime(df["data_interacao"], errors="coerce")
         return df
     except Exception:
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=45)
-def carregar_releases_chamados():
+def carregar_releases_chamados(data_inicio: datetime, data_fim_exclusivo: datetime, analista: str):
     """
-    Quantas vezes o chamado apareceu em releases (release_itens ou ciclos_homologacao).
+    Quantas vezes o chamado apareceu em releases (release_itens),
+    respeitando o recorte de período/analista da tela.
     """
     engine = get_connection()
+    meta = _metadata_chamados_tecnuv()
+    expr_analista = meta["expr_analista"]
+    params = {
+        "data_inicio": pd.to_datetime(data_inicio),
+        "data_fim_exclusivo": pd.to_datetime(data_fim_exclusivo),
+        "analista": analista,
+    }
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
-        df_rel = pd.read_sql(
-            """
-            SELECT nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
-            FROM release_itens
-            GROUP BY nr_chamado
-            """,
-            engine,
-        )
-        return df_rel
-    except Exception:
-        try:
-            return pd.read_sql(
+        return pd.read_sql(
+            text(
+                f"""
+                SELECT
+                    ri.nr_chamado,
+                    COUNT(DISTINCT ri.id_release) AS qtd_releases
+                FROM release_itens ri
+                JOIN chamados_tecnuv c ON c.nr_chamado = ri.nr_chamado
+                WHERE c.data_abertura >= :data_inicio
+                  AND c.data_abertura < :data_fim_exclusivo
+                  AND (:analista = 'Todos' OR {expr_analista} = :analista)
+                GROUP BY ri.nr_chamado
                 """
-                SELECT id_chamado::integer AS nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
-                FROM ciclos_homologacao
-                GROUP BY id_chamado
-                """,
-                engine,
-            )
-        except Exception:
-            return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
+            ),
+            engine,
+            params=params,
+        )
+    except Exception:
+        return pd.DataFrame(columns=["nr_chamado", "qtd_releases"])
+
+
+@st.cache_data(ttl=45)
+def carregar_release_versoes_por_chamado(data_inicio: datetime, data_fim_exclusivo: datetime, analista: str) -> dict[int, str]:
+    """
+    Lista de versões de release por chamado (somente release_itens), para auditoria de reincidência.
+    """
+    engine = get_connection()
+    meta = _metadata_chamados_tecnuv()
+    expr_analista = meta["expr_analista"]
+    try:
+        df_rel = pd.read_sql(
+            text(
+                f"""
+                SELECT
+                    ri.nr_chamado,
+                    TRIM(COALESCE(ri.versao, '')) AS versao
+                FROM release_itens ri
+                JOIN chamados_tecnuv c ON c.nr_chamado = ri.nr_chamado
+                WHERE c.data_abertura >= :data_inicio
+                  AND c.data_abertura < :data_fim_exclusivo
+                  AND (:analista = 'Todos' OR {expr_analista} = :analista)
+                  AND TRIM(COALESCE(ri.versao, '')) <> ''
+                """
+            ),
+            engine,
+            params={
+                "data_inicio": pd.to_datetime(data_inicio),
+                "data_fim_exclusivo": pd.to_datetime(data_fim_exclusivo),
+                "analista": analista,
+            },
+        )
+        if df_rel.empty:
+            return {}
+        por_chamado: dict[int, str] = {}
+        for nr, grupo in df_rel.groupby("nr_chamado"):
+            versoes = sorted({str(v).strip() for v in grupo["versao"].tolist() if str(v).strip()})
+            por_chamado[int(nr)] = ", ".join(versoes) if versoes else "—"
+        return por_chamado
+    except Exception:
+        return {}
 
 # --- Status Tecnuv: só estes no filtro; cores alinhadas ao Helpdesk; match 100% via texto normalizado (minúsculas, sem acento) ---
 STATUS_DASHBOARD_LABELS = [
@@ -479,13 +630,7 @@ with st.expander("🤔 Como usar esta página?"):
         "Se não vir mudança na hora, clique **🔄 Atualizar** nos filtros (limpa cache)."
     )
 
-df_raw = carregar_dados_tecnuv()
-df_int = carregar_interacoes()
-df_releases = carregar_releases_chamados()
-
-if df_raw.empty:
-    st.warning("WikiSuporte ainda não se conectou ao banco de dados.")
-    st.stop()
+min_data_db, max_data_db, analistas_db = carregar_contexto_filtros()
 
 # ==========================================
 # 4. PAINEL DE CONTROLO E FILTROS (NA TELA PRINCIPAL)
@@ -496,11 +641,11 @@ with st.expander("⚙️ Filtros: ", expanded=True):
     col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
     
     with col_f1:
-        # Padrão: sempre 12 meses para trás a partir de HOJE (independente do max no banco)
+        # Padrão: últimos 12 meses; limites baseados no banco sem puxar a tabela inteira.
         hoje = datetime.now().date()
         default_fim = hoje
         default_inicio = hoje - timedelta(days=365)
-        min_global = df_raw["data_abertura"].min().date() if not df_raw["data_abertura"].isna().all() else default_inicio
+        min_global = min_data_db.date() if min_data_db is not None else default_inicio
 
         datas_selecionadas = st.date_input(
             "📅 Período (Abertura):",
@@ -511,9 +656,7 @@ with st.expander("⚙️ Filtros: ", expanded=True):
         )
 
     with col_f2:
-        lista_analistas = ["Todos"] + sorted(
-            [a for a in df_raw["usuario_epsy"].unique() if a and str(a).strip() != "Não Informado"]
-        )
+        lista_analistas = ["Todos"] + sorted(analistas_db)
         analista_filtro = st.selectbox("👤 Analista EPSY:", options=lista_analistas, help="Lista com todos analistas")
 
     with col_f3:
@@ -531,19 +674,44 @@ with st.expander("⚙️ Filtros: ", expanded=True):
             st.cache_data.clear()
             st.rerun()
 
+if len(datas_selecionadas) != 2:
+    st.warning("Selecione um intervalo de início e fim para continuar.")
+    st.stop()
+
+d_inicio_visao, d_fim_visao = datas_selecionadas
+d_fim_visao_excl = pd.to_datetime(d_fim_visao) + timedelta(days=1)
+
+df_raw = carregar_dados_tecnuv(
+    data_inicio=pd.to_datetime(d_inicio_visao),
+    data_fim_exclusivo=d_fim_visao_excl,
+    analista=analista_filtro,
+)
+df_int = carregar_interacoes(
+    data_inicio=pd.to_datetime(d_inicio_visao),
+    data_fim_exclusivo=d_fim_visao_excl,
+    analista=analista_filtro,
+)
+df_releases = carregar_releases_chamados(
+    data_inicio=pd.to_datetime(d_inicio_visao),
+    data_fim_exclusivo=d_fim_visao_excl,
+    analista=analista_filtro,
+)
+map_releases_versoes = carregar_release_versoes_por_chamado(
+    data_inicio=pd.to_datetime(d_inicio_visao),
+    data_fim_exclusivo=d_fim_visao_excl,
+    analista=analista_filtro,
+)
+
+if df_raw.empty:
+    st.info("Nenhum chamado no período (e analista) selecionados. Ajuste os filtros.")
+    st.stop()
+
 # --- Base do período + analista (Visão Geral e métricas de qualidade usam TODOS os status no período) ---
 df_visao = df_raw.copy()
-d_inicio_visao, d_fim_visao, d_fim_visao_excl = None, None, None
-if len(datas_selecionadas) == 2:
-    d_inicio_visao, d_fim_visao = datas_selecionadas
-    d_fim_visao_excl = pd.to_datetime(d_fim_visao) + timedelta(days=1)
-    df_visao = df_visao[
-        (df_visao["data_abertura"] >= pd.to_datetime(d_inicio_visao))
-        & (df_visao["data_abertura"] < d_fim_visao_excl)
-    ]
-
-if analista_filtro != "Todos":
-    df_visao = df_visao[df_visao["usuario_epsy"] == analista_filtro]
+df_visao = df_visao[
+    (df_visao["data_abertura"] >= pd.to_datetime(d_inicio_visao))
+    & (df_visao["data_abertura"] < d_fim_visao_excl)
+]
 
 if df_visao.empty:
     st.info("Nenhum chamado no período (e analista) selecionados. Ajuste os filtros.")
@@ -570,12 +738,15 @@ if not df_releases.empty:
     map_releases = df_releases.set_index("nr_chamado")["qtd_releases"].to_dict()
 
 def _enriquecer_reincidencia(frame: pd.DataFrame) -> pd.DataFrame:
+    interacoes_por_chamado = (
+        {k: v for k, v in df_int.groupby("nr_chamado")} if not df_int.empty and "nr_chamado" in df_int.columns else {}
+    )
     out_class, out_tempo = [], []
     for _, row in frame.iterrows():
         nr = row["nr_chamado"]
         status = row["status_atual"]
         dt_abertura = row["data_abertura"]
-        inter = df_int[df_int["nr_chamado"] == nr] if not df_int.empty else pd.DataFrame()
+        inter = interacoes_por_chamado.get(nr, pd.DataFrame())
         _, dt_primeira_lib = classificar_reincidencia_e_tempo(inter, dt_abertura, status)
         qtd_rel = int(map_releases.get(nr, 0) or 0)
         status_lower = str(status).lower()
@@ -1065,25 +1236,6 @@ with aba3:
         fig_v.update_layout(showlegend=False, height=altura_barras, margin=dict(l=8, r=8, t=8, b=8))
         st.plotly_chart(fig_v, use_container_width=True)
 
-        # --- 2) Categorias (abertos) — mais aberturas com a desenvolvedora ---
-        st.markdown("#### 📊 Categorias (IA) — volume entre chamados **ainda abertos**")
-        ab = dfv[dfv["aberto"]]
-        if ab.empty:
-            st.info("Nenhum chamado aberto no recorte.")
-        else:
-            cat_cnt = ab["categoria_ia"].value_counts().reset_index()
-            cat_cnt.columns = ["Categoria", "Volume"]
-            fig_c = px.bar(
-                cat_cnt.sort_values("Volume", ascending=True),
-                x="Volume",
-                y="Categoria",
-                orientation="h",
-                color="Volume",
-                color_continuous_scale="Blues",
-            )
-            fig_c.update_layout(showlegend=False, height=max(280, len(cat_cnt) * 24))
-            st.plotly_chart(fig_c, use_container_width=True)
-
         # --- 3) Mapa nr_chamado -> versões em release (para “corrigido na versão X”) ---
         map_nr_releases: dict = {}
         try:
@@ -1241,7 +1393,15 @@ with aba3:
 with aba4:
     st.subheader("👥 Análise de Performance")
     
-    df_epsy = df[~df['usuario_epsy'].isin(["Não Informado", "Não Informada", ""])].copy()
+    # Performance deve refletir a fila aberta real do recorte (sem restringir pelo filtro de status da aba).
+    df_abertos_perf = df_visao[df_visao["is_aberto"]].copy()
+    if not df_abertos_perf.empty:
+        # Garante 1 linha por chamado para não inflar volumes por cliente/analista.
+        df_abertos_perf = (
+            df_abertos_perf.sort_values("data_abertura", ascending=False)
+            .drop_duplicates(subset=["nr_chamado"], keep="first")
+        )
+    df_epsy = df_abertos_perf[~df_abertos_perf["usuario_epsy"].isin(["Não Informado", "Não Informada", ""])].copy()
     
     e1, e2 = st.columns([1, 1])
     
@@ -1256,28 +1416,58 @@ with aba4:
             
     with e2:
         st.markdown("#### 🏢 Chamados Abertos por Cliente")
-        df_cli = df.copy()
-        df_cli["cliente_exibicao"] = df_cli["cliente_nome"].replace(
-            ["", None], "Sem cliente vinculado"
-        ).fillna("Sem cliente vinculado")
-        mask_na = df_cli["cliente_exibicao"].isin(["Não Informado", "Não Informada", ""])
-        df_cli.loc[mask_na, "cliente_exibicao"] = "Sem cliente vinculado"
-        clientes_agg = df_cli.groupby("cliente_exibicao", as_index=False).agg(
-            Total_Chamados=("nr_chamado", "count"),
-            Fila_Ativa=("is_aberto", "sum"),
-        ).sort_values("Total_Chamados", ascending=False).head(15)
-        clientes_agg.rename(
-            columns={
-                "cliente_exibicao": "Cliente",
-                "Total_Chamados": "Total Abertos (Período)",
-                "Fila_Ativa": "Ainda Pendentes",
-            },
-            inplace=True,
+        df_cli = df_abertos_perf.copy()
+        df_cli["cliente_exibicao"] = (
+            df_cli.get("cliente_nome", pd.Series(index=df_cli.index, dtype=object))
+            .fillna("")
+            .astype(str)
+            .str.strip()
         )
-        if clientes_agg.empty:
+        placeholders = {"", "Não Informado", "Não Informada", "None", "nan"}
+        df_cli.loc[df_cli["cliente_exibicao"].isin(placeholders), "cliente_exibicao"] = "Sem cliente vinculado"
+        df_cli["cliente_exibicao"] = df_cli["cliente_exibicao"].str.replace(r"\s+", " ", regex=True)
+
+        if df_cli.empty:
             st.info("Nenhum chamado no período. Ajuste os filtros.")
         else:
-            st.dataframe(clientes_agg, hide_index=True, use_container_width='stretch')
+            clientes_agg_full = (
+                df_cli.groupby("cliente_exibicao", as_index=False)
+                .agg(
+                    Chamados_Abertos=("nr_chamado", "nunique"),
+                    Pendente_Representante=("pendente_representante", "sum"),
+                )
+                .sort_values("Chamados_Abertos", ascending=False)
+            )
+            clientes_agg = clientes_agg_full.head(15).rename(
+                columns={
+                    "cliente_exibicao": "Cliente",
+                    "Chamados_Abertos": "Chamados Abertos",
+                    "Pendente_Representante": "Pendente representante",
+                }
+            )
+            total_abertos = int(df_cli["nr_chamado"].nunique())
+            total_agregado = int(clientes_agg_full["Chamados_Abertos"].sum())
+            if total_abertos != total_agregado:
+                st.warning(
+                    "Divergência detectada na agregação por cliente. "
+                    "Revise o mapeamento de dados do chamado."
+                )
+
+            fig_clientes = px.bar(
+                clientes_agg.sort_values("Chamados Abertos", ascending=True),
+                x="Chamados Abertos",
+                y="Cliente",
+                orientation="h",
+                color="Chamados Abertos",
+                color_continuous_scale="Blues",
+            )
+            fig_clientes.update_layout(showlegend=False, height=max(300, 34 * len(clientes_agg)))
+            st.plotly_chart(fig_clientes, use_container_width=True)
+            st.dataframe(clientes_agg, hide_index=True, use_container_width=True)
+            st.caption(
+                f"Base: **{total_abertos} chamados abertos únicos** no recorte (período + analista), "
+                "com normalização de cliente e sem duplicidade por chamado."
+            )
             if (clientes_agg["Cliente"] == "Sem cliente vinculado").any():
                 st.caption("💡 Vincule clientes em **Configurações** para identificar por razão social.")
 
@@ -1285,89 +1475,53 @@ with aba4:
 # ABA 5: ENTREGA TECNUV — indicadores úteis (chamados_tecnuv + release_itens + interações)
 # ------------------------------------------
 with aba5:
-    st.subheader("Entrega da desenvolvedora — indicadores para o suporte")
+    st.subheader("Auditoria da entrega da produtora de software")
     st.markdown(
-        "Dados do **mesmo período e analista** da Visão Geral: **`chamados_tecnuv`**, **`release_itens`** (notas de release) e **histórico de interações**. "
-        "Nada depende de `ciclos_homologacao`."
+        "Painel focado em reincidência técnica da entrega: quantas vezes o mesmo chamado reaparece em releases "
+        "e em quais versões isso ocorreu (base em **`release_itens`**)."
     )
 
     Xv = len(df_visao)
     if Xv == 0:
         st.info("Sem chamados no período.")
     else:
-        enc_v = df_visao["status_canonico"].eq("Encerrado") if "status_canonico" in df_visao.columns else df_visao[
-            "status_atual"
-        ].astype(str).str.contains("encerrado", case=False, na=False)
-        n_enc = int(enc_v.sum())
-        n_reinc = int((df_visao["classificacao_reincidencia"] == "Reincidência").sum())
-        n_aberto = int(df_visao["is_aberto"].sum())
-        n_repr = int(df_visao["pendente_representante"].sum())
         com_rel = df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) > 0)
-        n_com_rel = int(com_rel.sum())
         n_multi_rel = int(df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) > 1).sum())
-        t_lib = df_visao["tempo_ate_liberacao_dias"].dropna()
-        med_lib = float(t_lib.median()) if len(t_lib) else None
-        mean_lib = float(t_lib.mean()) if len(t_lib) else None
+        sem_release = int((~com_rel).sum())
+        com_um_release = int((df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) == 1)).sum())
 
         pct = lambda a: (100.0 * a / Xv) if Xv else 0
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Encerrados no período", f"{n_enc} ({pct(n_enc):.0f}%)", help="Status Encerrado entre os abertos no intervalo")
-        m2.metric("Reincidentes (releases)", f"{n_reinc} ({pct(n_reinc):.0f}%)", help="Citados em >1 release e encerrados — correção não sustentou", delta_color="inverse")
-        m3.metric("Ainda em aberto", f"{n_aberto} ({pct(n_aberto):.0f}%)", help="Não encerrado/cancelado")
-        m4.metric("Citados em release", f"{n_com_rel} ({pct(n_com_rel):.0f}%)", help="Aparecem em pelo menos uma nota de versão")
+        m1.metric("Total no recorte", str(Xv))
+        m2.metric("Com reincidência (>1 release)", f"{n_multi_rel} ({pct(n_multi_rel):.0f}%)", delta_color="inverse")
+        m3.metric("Com 1 release", f"{com_um_release} ({pct(com_um_release):.0f}%)")
+        m4.metric("Sem release", f"{sem_release} ({pct(sem_release):.0f}%)")
 
-        m5, m6, m7, m8 = st.columns(4)
-        m5.metric("Pendente representante", str(n_repr), help="Situação no Helpdesk")
-        m6.metric("Em >1 release (volume)", str(n_multi_rel), help="Chamados citados em várias versões")
-        m7.metric("Mediana dias até 1ª liberação", f"{med_lib:.0f} d" if med_lib is not None else "—", help="Entre quem tem interação TecNuv com liberação")
-        m8.metric("Média dias até liberação", f"{mean_lib:.0f} d" if mean_lib is not None else "—")
-
-        st.divider()
-        g1, g2 = st.columns(2)
-        with g1:
-            st.markdown("#### Situação pós-liberação (qualidade da correção)")
-            qdf = df_visao["classificacao_reincidencia"].value_counts().reset_index()
-            qdf.columns = ["Situação", "Chamados"]
-            fig_q = px.bar(
-                qdf,
-                x="Chamados",
-                y="Situação",
-                orientation="h",
-                color="Situação",
-                color_discrete_map={
-                    "Resolvido Pós-Liberação": "#27ae60",
-                    "Reincidência": "#c0392b",
-                    "Aguardando Validação EPSY": "#f39c12",
-                    "Sem Liberação": "#7f8c8d",
-                },
-            )
-            fig_q.update_layout(showlegend=False, height=min(260, 40 + len(qdf) * 28))
-            st.plotly_chart(fig_q, width="stretch")
-            st.caption("**Reincidência** = mais de uma menção em release com encerramento. **Sem liberação** = nunca citado em release.")
-
-        with g2:
-            st.markdown("#### Classificação IA (volume no período)")
-            if "categoria_ia" in df_visao.columns and df_visao["categoria_ia"].notna().any():
-                cat = df_visao["categoria_ia"].astype(str).replace("None", "Não classificada").value_counts().head(15).reset_index()
-                cat.columns = ["Categoria", "Chamados"]
-                fig_c = px.bar(cat, x="Chamados", y="Categoria", orientation="h", color="Chamados", color_continuous_scale="Teal")
-                fig_c.update_layout(showlegend=False, height=min(360, 40 + len(cat) * 22))
-                st.plotly_chart(fig_c, width="stretch")
-            else:
-                st.info("Coluna **categoria_ia** vazia ou inexistente — rode a classificação nos chamados.")
-
-        st.markdown("#### Chamados com mais de um release (atenção à entrega)")
+        st.markdown("#### Reincidências detectadas (chamado em mais de 1 release)")
         mask_m = df_visao["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0) > 1)
         base_m = df_visao.loc[mask_m, ["nr_chamado", "cliente_nome", "usuario_epsy"]].copy()
         base_m["Status"] = df_visao.loc[mask_m, "status_canonico" if "status_canonico" in df_visao.columns else "status_atual"].values
         multi = base_m
         multi["releases_distintos"] = multi["nr_chamado"].map(lambda n: int(map_releases.get(n, 0) or 0))
+        multi["releases_reincidentes"] = multi["nr_chamado"].map(
+            lambda n: map_releases_versoes.get(int(n), "—")
+        )
         if multi.empty:
-            st.success("Nenhum chamado do período citado em mais de um release.")
+            st.success("Nenhuma reincidência detectada no recorte.")
         else:
-            multi = multi.sort_values("releases_distintos", ascending=False).head(50)
+            multi = multi.sort_values("releases_distintos", ascending=False).head(50).rename(
+                columns={
+                    "nr_chamado": "Chamado",
+                    "cliente_nome": "Cliente",
+                    "usuario_epsy": "Analista EPSY",
+                    "releases_distintos": "Qtd. releases",
+                    "releases_reincidentes": "Releases da reincidência",
+                }
+            )
             st.dataframe(multi, hide_index=True, use_container_width=True)
-            st.caption("Origem: **release_itens** — quantos itens de Release da versão distintos citam o chamado.")
+            st.caption(
+                "Origem: **release_itens** — quantidade e lista de versões de release que citaram o mesmo chamado."
+            )
 
 # ------------------------------------------
 # ABA 6: FILA ABERTA + RELEASES / REINCIDÊNCIA
@@ -1416,24 +1570,12 @@ with aba6:
         else:
             expr_quem = "'—'"
 
-        tem_release_itens = False
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
-            tem_release_itens = True
-        except Exception:
-            pass
-
-        if tem_release_itens:
-            sub_ri = """
-            SELECT nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
-            FROM release_itens GROUP BY nr_chamado
-            """
-        else:
-            sub_ri = """
-            SELECT id_chamado::integer AS nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
-            FROM ciclos_homologacao GROUP BY id_chamado
-            """
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1 FROM release_itens LIMIT 1"))
+        sub_ri = """
+        SELECT nr_chamado, COUNT(DISTINCT id_release) AS qtd_releases
+        FROM release_itens GROUP BY nr_chamado
+        """
 
         cat_select = "COALESCE(c.categoria_ia, '—') AS categoria_ia" if "categoria_ia" in cols else "'—' AS categoria_ia"
 
@@ -1470,18 +1612,13 @@ with aba6:
         df_fila = pd.read_sql(text(sql), engine)
         if not df_fila.empty and "resumo" in df_fila.columns:
             df_fila["resumo"] = df_fila["resumo"].apply(limpar_html)
-        if not tem_release_itens:
-            st.info(
-                "Tabela **`release_itens`** ainda não existe — contagem de releases veio de **`ciclos_homologacao`**. "
-                "Para uma linha por bullet no release, execute `database/migracao_release_itens.sql` e reprocesse na Page 11."
-            )
         if df_fila.empty:
             st.info("Nenhum registro com os filtros atuais.")
         else:
             st.metric("Registros", len(df_fila))
             st.dataframe(df_fila, use_container_width=True, hide_index=True)
     except Exception as e:
-        st.warning("Erro na consulta da aba Fila/releases. Verifique tabelas `chamados_tecnuv` e `ciclos_homologacao`.")
+        st.warning("Erro na consulta da aba Fila/releases. Verifique as tabelas `chamados_tecnuv` e `release_itens`.")
         st.code(str(e))
 
 registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD_CHAMADOS", "Acessou Dashboard Analítico - Chamados Tecnuv (EPSY)")

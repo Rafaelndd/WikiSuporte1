@@ -1,119 +1,52 @@
-# WikiSuporte — instale com: pip install -r requirements.txt
+# WikiSuporte — dependências diretas do projeto.
+# Instalar: pip install -r requirements.txt
+# O pip resolve e instala dependências transitivas (Streamlit, google-genai, etc.).
 
-alembic
-altair
-annotated-doc
-annotated-types
-anyio
-APScheduler
-attrs
-bcrypt
-beautifulsoup4>=4.12.0
-blinker
-cachetools
-cattrs
-certifi
-cffi
-charset-normalizer
-click
-colorama
-cryptography
-fastapi
-flatbuffers
-git-filter-repo
-gitdb
-GitPython
-# Gemini / IA: o código usa só `from google import genai` (pacote google-genai).
-# Não listar google-api-python-client nem google-generativeai aqui — puxam resolução enorme e são legado/redundantes.
-google-genai>=1.0.0
-greenlet
-grpcio
-grpcio-status
-h11
-httpcore
-httplib2
-httptools
-httpx
-idna
-jh2
-Jinja2
-jsonschema
-jsonschema-specifications
-# lance-namespace / lance-namespace-urllib3-client removidos: não são usados no código e
-# podem instalar cliente HTTP alternativo que quebra `urllib3` usado por requests/streamlit.
-Mako
-MarkupSafe
-narwhals
-numpy>=1.24.0
-# openmeteo-requests 1.5+ puxa niquests/urllib3-future e quebra urllib3+requests (Streamlit).
-openmeteo-requests>=1.4.0,<1.5.0
-openmeteo_sdk
-openpyxl
-outcome
-packaging
-pandas>=2.0.0
-passlib
-pgvector>=0.2.0
-pillow
-platformdirs
-plotly>=5.18.0
-proto-plus
-protobuf
-psycopg2-binary>=2.9.0
-pyarrow
-pyasn1
-pyasn1_modules
-pycparser
-pydantic
-pydantic-settings
-pydantic_core
-pydeck
-pyparsing
-pypdf>=4.0.0
-PySocks
-python-dateutil
-python-dotenv>=1.0.0
-python-jose
-python-multipart
-pytz
-PyYAML
-qh3
-referencing
-reportlab>=4.0.0
-requests>=2.31.0,<3
-requests-cache>=1.0.0
-retry-requests>=2.0.0
-rpds-py
-rsa
-selenium>=4.15.0
-six
-smmap
-sniffio
-sortedcontainers
-sqlalchemy>=2.0.0
-starlette
+# --- Aplicação ---
 streamlit
 streamlit-authenticator>=0.4.0
-tenacity
-toml
-tornado
-tqdm
-trio
-trio-websocket
-typing-inspection
-typing_extensions
-tzdata
-tzlocal
-uritemplate
-url-normalize
-# urllib3 canônico para requests/streamlit — não misturar com urllib3-future no mesmo venv.
-# >=2.6.3: CVE-2025-66418, CVE-2025-66471, CVE-2026-21441 (pip-audit / CI).
+python-dotenv>=1.0.0
+
+# --- Dados e PostgreSQL ---
+pandas>=2.0.0
+numpy>=1.24.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+pgvector>=0.2.0
+
+# --- HTTP (app, APIs, cache) ---
+# openmeteo-requests 1.5+ puxa stack HTTP alternativa e pode conflitar com requests/urllib3.
+openmeteo-requests>=1.4.0,<1.5.0
+requests>=2.31.0,<3
+# CVE / alinhamento com CI (pip-audit): manter urllib3 recente.
 urllib3>=2.6.3
-uvicorn
-wassima
-watchdog
-watchfiles
+requests-cache>=1.0.0
+retry-requests>=2.0.0
+
+# --- Raspagem / automação ---
+selenium>=4.15.0
 webdriver-manager
-websocket-client
-websockets
-wsproto
+beautifulsoup4>=4.12.0
+
+# --- IA (Gemini / embeddings via google-genai) ---
+google-genai>=1.0.0
+
+# --- Documentos ---
+pypdf>=4.0.0
+openpyxl>=3.0.0
+reportlab>=4.0.0
+python-docx>=1.0.0
+striprtf>=0.0.26
+
+# --- Embeddings opcionais (EMBEDDING_MODEL=openai no .env) ---
+openai>=1.0.0
+
+# --- Sistema (bot, página de configurações) ---
+psutil>=5.9.0
+
+# --- Gráficos ---
+plotly>=5.18.0
+
+# --- Criptografia / autenticação (extras do streamlit-authenticator, senhas, TLS) ---
+bcrypt
+cryptography

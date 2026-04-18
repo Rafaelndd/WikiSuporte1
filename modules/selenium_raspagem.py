@@ -24,12 +24,19 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    TimeoutException,
+    WebDriverException,
+    StaleElementReferenceException,
+)
 
 # Banco de Dados
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import insert
 from modules.database import get_connection
+from modules.log_redaction import install_sensitive_data_redaction
 from modules.models import ChamadoTecnuv, HistoricoInteracao, HistoricoTransicaoStatus
 
 # Memória do Robô
@@ -52,6 +59,24 @@ def _status_encerrado_cancelado(status_txt: str) -> bool:
     return s in ("encerrado", "cancelado") or "encerrado" in s or "cancelado" in s
 
 
+def _norm_lista_txt(v) -> str:
+    return (str(v) if v is not None else "").strip()
+
+
+def _lista_helpdesk_difere_do_banco(chamado_db, meta: dict) -> bool:
+    """True se colunas espelhadas da grade TecNuv divergem do registro local."""
+    pares = (
+        ("setor", "setor"),
+        ("situacao", "situacao"),
+        ("prioridade", "prioridade"),
+        ("ticket_vinculado", "ticket_vinculado"),
+    )
+    for attr, key in pares:
+        if _norm_lista_txt(getattr(chamado_db, attr, None)) != _norm_lista_txt(meta.get(key)):
+            return True
+    return False
+
+
 # Logs: arquivo UTF-8; consola Windows (cp1252) sem emoji para evitar UnicodeEncodeError
 _log_file = logging.FileHandler("oraculo_engine.log", encoding="utf-8")
 _log_console = logging.StreamHandler()
@@ -61,6 +86,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[_log_file, _log_console],
 )
+install_sensitive_data_redaction(logging.getLogger())
 
 load_dotenv()
 
@@ -96,10 +122,40 @@ class OraculoBot:
         """
         self.driver = self._iniciar_driver()
         self.engine = get_connection()
+        self._garantir_schema_minimo()
         self.Session = sessionmaker(bind=self.engine)
         self.wait = WebDriverWait(self.driver, 5)
         # Lista de chamados que o bot não tem permissão para acessar
         self.chamados_sem_permissao = []
+
+    def _garantir_schema_minimo(self):
+        """
+        Auto-repara divergências de schema que quebram o ciclo do robô.
+        Mantém compatibilidade com trigger update_modified_column().
+        """
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    sa_text(
+                        """
+                        ALTER TABLE IF EXISTS chamados_tecnuv
+                        ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMP
+                        """
+                    )
+                )
+                conn.execute(
+                    sa_text(
+                        """
+                        UPDATE chamados_tecnuv
+                        SET atualizado_em = COALESCE(atualizado_em, CURRENT_TIMESTAMP)
+                        WHERE atualizado_em IS NULL
+                        """
+                    )
+                )
+            logging.info("[DB] Schema validado para chamados_tecnuv (coluna atualizado_em).")
+        except Exception as e:
+            logging.error(f"[DB] Falha ao validar schema mínimo de chamados_tecnuv: {e}")
+            raise
 
     def _iniciar_driver(self):
         """
@@ -122,7 +178,27 @@ class OraculoBot:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
+        # Timeouts explícitos evitam travas silenciosas em execução longa (24/7).
+        driver.set_page_load_timeout(60)
+        driver.set_script_timeout(30)
         return driver
+
+    def _ler_linhas_grade_helpdesk(self):
+        """
+        Lê a grade da página de chamados em lote (uma chamada JS),
+        reduzindo round-trips Selenium e risco de queda de sessão.
+        """
+        script = """
+            const rows = Array.from(document.querySelectorAll("table tbody tr"));
+            return rows.map((tr) => {
+                const cols = Array.from(tr.querySelectorAll("td"));
+                return {
+                    colunas: cols.map((td) => (td.innerText || "").trim()),
+                    html_coluna_10: cols[10] ? (cols[10].innerHTML || "") : "",
+                };
+            });
+        """
+        return self.driver.execute_script(script) or []
 
     def fechar_modal_se_existir(self):
         """Tenta fechar modais de notificação sem interromper o fluxo."""
@@ -268,30 +344,44 @@ class OraculoBot:
             while True:
                 logging.info(f"[FASE 1] Lendo página {pagina_atual}...")
                 self.wait.until(EC.presence_of_all_elements_located((By.XPATH, "//table/tbody/tr")))
-                linhas = self.driver.find_elements(By.XPATH, "//table/tbody/tr")
+
+                linhas = []
+                for tentativa in range(1, 4):
+                    try:
+                        linhas = self._ler_linhas_grade_helpdesk()
+                        break
+                    except (StaleElementReferenceException, WebDriverException) as e:
+                        if tentativa == 3:
+                            raise RuntimeError(
+                                f"[FASE 1] Falha ao ler grade na página {pagina_atual} após 3 tentativas: {e}"
+                            ) from e
+                        logging.warning(
+                            f"[FASE 1] Instabilidade ao ler grade (página {pagina_atual}, tentativa {tentativa}/3): {e}"
+                        )
+                        time.sleep(2)
 
                 for linha in linhas:
                     try:
-                        tds = linha.find_elements(By.TAG_NAME, "td")
-                        if len(tds) < 11:
+                        colunas = linha.get("colunas") or []
+                        if len(colunas) < 11:
                             continue
 
-                        cliente_tabela = tds[1].text.strip()
+                        cliente_tabela = colunas[1].strip()
                         if "TECNUV SISTEMAS" in cliente_tabela.upper():
                             continue
 
-                        nr_chamado_str = tds[0].text.strip()
+                        nr_chamado_str = colunas[0].strip()
                         if not nr_chamado_str.isdigit():
                             continue
 
                         nr_chamado = int(nr_chamado_str)
-                        status_web = tds[7].text.strip()
+                        status_web = colunas[7].strip()
                         if _status_encerrado_cancelado(status_web):
                             continue
 
                         data_alt_web = None
                         try:
-                            html_coluna_10 = tds[10].get_attribute("innerHTML")
+                            html_coluna_10 = linha.get("html_coluna_10") or ""
                             if "dcontexto" in html_coluna_10:
                                 datas_encontradas = re.findall(
                                     r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}(?::\d{2})?)',
@@ -311,11 +401,11 @@ class OraculoBot:
                             "link": f"https://postogestor.com.br/helpdesk/sistema/tecnuv/editar/id/{nr_chamado}",
                             "status_web": status_web,
                             "data_alt_web": data_alt_web,
-                            "ticket_vinculado": tds[2].text.strip(),
-                            "setor": tds[6].text.strip(),
-                            "situacao": tds[8].text.strip(),
-                            "prioridade": tds[9].text.strip(),
-                            "dt_abertura_str": tds[5].text.strip()
+                            "ticket_vinculado": colunas[2].strip(),
+                            "setor": colunas[6].strip(),
+                            "situacao": colunas[8].strip(),
+                            "prioridade": colunas[9].strip(),
+                            "dt_abertura_str": colunas[5].strip()
                         }
 
                     except Exception as e:
@@ -337,7 +427,6 @@ class OraculoBot:
             logging.info(f"[FASE 1] Total de chamados ativos encontrados no helpdesk: {len(chamados_helpdesk)}")
             # Filtro extra: remove da lista tudo que já está ENCERRADO/CANCELADO no banco
             try:
-                from sqlalchemy import text as sa_text  # import local para evitar conflitos
                 with self.engine.connect() as conn:
                     rows = conn.execute(
                         sa_text(
@@ -493,6 +582,11 @@ class OraculoBot:
                     precisa_raspar = True
                     motivo = "nova alteração detectada"
 
+                # Grade TecNuv (setor, situação, ticket EPSY, prioridade) divergiu do banco
+                elif _lista_helpdesk_difere_do_banco(chamado_db, meta):
+                    precisa_raspar = True
+                    motivo = "lista TecNuv divergente do banco (setor/situação/vínculo/prioridade)"
+
                 if precisa_raspar:
                     # Persistir já o que veio da lista (status, datas, setor…) antes do deep scrape
                     if meta.get("data_alt_web"):
@@ -505,6 +599,7 @@ class OraculoBot:
                     ):
                         if meta.get(key):
                             setattr(chamado_db, attr, meta[key])
+                    chamado_db.ultima_verificacao_robo = datetime.now()
                     logging.info(f"[DIFERENÇA] Chamado {nr} - Motivo: {motivo}. Buscando detalhes...")
                     session.commit()
                     logging.info(f"[DB] Chamado {nr} lista/status gravados (commit). Deep scrape a seguir.")
@@ -772,6 +867,8 @@ class OraculoBot:
             self.registrar_interacoes(session, interacoes)
             self._processar_liberacoes(session, interacoes, chamado)
 
+            if chamado:
+                chamado.ultima_verificacao_robo = datetime.now()
             session.commit()
             logging.info(f"[OK] Chamado {nr_chamado} sincronizado com sucesso (commit no banco).")
             # Classificação semântica (Erro / Melhoria / Adequação Fiscal) via pgvector

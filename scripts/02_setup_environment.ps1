@@ -87,7 +87,7 @@ if (Test-Path -LiteralPath $envPath) {
     Write-Host ""
     Write-Host "--- APIs de IA ---" -ForegroundColor White
     $GEMINI_API_KEY = Read-Host "GEMINI_API_KEY"
-    $DEEPSEEK_API_KEY = Read-Host "DEEPSEEK_API_KEY"
+    $GROQ_API_KEY = Read-Host "GROQ_API_KEY (fallback chat; pode ficar vazio)"
 
     Write-Host ""
     Write-Host "--- SMTP (e-mail suporte / monitor) ---" -ForegroundColor White
@@ -144,11 +144,11 @@ GOTO_REFRESH_TOKEN=$GOTO_REFRESH_TOKEN
 
 # --- APIs ---
 GEMINI_API_KEY=$GEMINI_API_KEY
-DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY
+GROQ_API_KEY=$GROQ_API_KEY
 
 EMBEDDING_MODEL=gemini
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-LLM_MODEL=deepseek-chat
+GROQ_MODEL=llama-3.3-70b-versatile
 
 # --- SMTP / e-mail ---
 EMAIL_SUPORTE_HOST=$EMAIL_SUPORTE_HOST

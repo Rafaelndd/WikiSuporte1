@@ -10,7 +10,7 @@
 
 | Como era 🔴 | Como ficou 🟢 |
 | --- | --- |
-| A Home mostrava muitas informações de uma vez e cansava a leitura. | A Home ficou mais limpa e direta, com foco no que importa. |
+| A Home mostrava muitas informações. | A Home ficou mais limpa e direta, com foco no que importa. |
 | Algumas telas ainda passavam sensação de excesso de informação. | A navegação está mais simples e agradável para o uso diário. |
 
 ### Contribuições, pontos e penalidades
@@ -32,7 +32,7 @@
 | Como era 🔴 | Como ficou 🟢 |
 | --- | --- |
 | Em arquivos grandes, a ingestão e indexação podiam travar. | O processo está mais estável para grandes volumes de conteúdo. |
-| Quando parava no meio, era difícil retomar de onde ficou. | Agora é possível retomar por lote e acompanhar melhor o progresso. |
+
 
 ### Comunicação com o usuário
 
