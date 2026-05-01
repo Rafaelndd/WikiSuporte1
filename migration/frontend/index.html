@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WikiSuporte – Importação GoTo &amp; Multi360</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ───────── HEADER ───────── -->
+  <header class="app-header">
+    <div class="header-inner">
+      <span class="logo">📋 WikiSuporte</span>
+      <span class="tagline">Importação &amp; Análise – GoTo / Multi360</span>
+    </div>
+  </header>
+
+  <!-- ───────── MAIN ───────── -->
+  <main class="container">
+
+    <!-- ── Upload Card ── -->
+    <section class="card" id="upload-card">
+      <h2>📁 Upload de Arquivo</h2>
+      <p class="hint">Formatos aceitos: <strong>.csv</strong>, <strong>.xlsx</strong>, <strong>.zip</strong> — máx. <strong>10 MB</strong></p>
+
+      <div
+        class="drop-zone"
+        id="drop-zone"
+        role="button"
+        tabindex="0"
+        aria-label="Área de arrastar e soltar arquivo"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p>Arraste o arquivo aqui ou <span class="link-text">clique para selecionar</span></p>
+        <input
+          type="file"
+          id="file-input"
+          accept=".csv,.xlsx,.zip"
+          class="visually-hidden"
+          aria-label="Selecionar arquivo para importação"
+        />
+      </div>
+
+      <!-- Prévia do arquivo selecionado -->
+      <div id="file-preview" class="file-preview hidden" aria-live="polite">
+        <span class="file-icon">📄</span>
+        <span id="file-name-label"></span>
+        <span id="file-size-label" class="badge"></span>
+        <button class="btn-icon" id="clear-file-btn" title="Remover arquivo" aria-label="Remover arquivo selecionado">✕</button>
+      </div>
+
+      <!-- Botão enviar -->
+      <button class="btn btn-primary" id="upload-btn" disabled>
+        <span id="upload-btn-text">Enviar e Processar</span>
+        <span id="upload-spinner" class="spinner hidden" aria-hidden="true"></span>
+      </button>
+
+      <!-- Mensagem de erro / status -->
+      <div id="upload-msg" class="alert hidden" role="alert" aria-live="assertive"></div>
+    </section>
+
+    <!-- ── Filtros / Relatório ── -->
+    <section class="card hidden" id="filter-card">
+      <h2>🔍 Filtros de Relatório</h2>
+      <div class="filter-grid">
+        <div class="form-group">
+          <label for="filter-analista">Analista / Atendente</label>
+          <input type="text" id="filter-analista" placeholder="Ex.: João Silva" />
+        </div>
+        <div class="form-group">
+          <label for="filter-plantao">Plantão / Fila</label>
+          <input type="text" id="filter-plantao" placeholder="Ex.: Suporte N1" />
+        </div>
+        <div class="form-group">
+          <label for="filter-data-inicio">Data início</label>
+          <input type="date" id="filter-data-inicio" />
+        </div>
+        <div class="form-group">
+          <label for="filter-data-fim">Data fim</label>
+          <input type="date" id="filter-data-fim" />
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="filter-btn">Aplicar Filtros</button>
+    </section>
+
+    <!-- ── Resultado ── -->
+    <section class="card hidden" id="result-card">
+      <div class="result-header">
+        <div>
+          <h2>✅ Dados Processados</h2>
+          <p id="result-meta" class="meta-info"></p>
+        </div>
+        <div class="download-group">
+          <span class="download-label">Exportar:</span>
+          <button class="btn btn-download" id="dl-csv">CSV</button>
+          <button class="btn btn-download" id="dl-xlsx">XLSX</button>
+          <button class="btn btn-download" id="dl-pdf">PDF</button>
+        </div>
+      </div>
+
+      <!-- Tabela de preview -->
+      <div class="table-wrapper" id="table-wrapper" role="region" aria-label="Preview dos dados">
+        <table id="preview-table" class="data-table">
+          <thead id="preview-thead"></thead>
+          <tbody id="preview-tbody"></tbody>
+        </table>
+      </div>
+      <p class="table-note" id="table-note"></p>
+    </section>
+
+  </main>
+
+  <!-- ───────── FOOTER ───────── -->
+  <footer class="app-footer">
+    <small>WikiSuporte &copy; 2026 — API GoTo + Multi360</small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
