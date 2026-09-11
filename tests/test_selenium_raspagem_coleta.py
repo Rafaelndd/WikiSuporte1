@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import types
 import sys
+import types
 
 from modules.selenium_raspagem import OraculoBot
 

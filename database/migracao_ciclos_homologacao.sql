@@ -7,11 +7,15 @@
 -- ---------------------------------------------------------------------------------
 -- 1. Tabela de Domínio: Chamados (a essência do problema/funcionalidade)
 -- ---------------------------------------------------------------------------------
+-- Migradas para TIMESTAMPTZ em 2026-09-11 (ver
+-- database/migrations/20260911_ciclos_homologacao_timestamptz.sql). Mantida
+-- idêntica, coluna a coluna e constraint a constraint, à definição destas
+-- mesmas três tabelas em database/init_database.sql.
 CREATE TABLE IF NOT EXISTS chamados (
     id_chamado VARCHAR(50) PRIMARY KEY,
     assunto TEXT NOT NULL,
     modulo_sistema VARCHAR(100),
-    data_primeiro_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    data_primeiro_registro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ---------------------------------------------------------------------------------
@@ -20,7 +24,7 @@ CREATE TABLE IF NOT EXISTS chamados (
 CREATE TABLE IF NOT EXISTS releases (
     id_release SERIAL PRIMARY KEY,
     versao_release VARCHAR(50) UNIQUE NOT NULL,
-    data_liberacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    data_liberacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ---------------------------------------------------------------------------------
@@ -32,7 +36,7 @@ CREATE TABLE IF NOT EXISTS ciclos_homologacao (
     id_release INTEGER NOT NULL REFERENCES releases(id_release) ON DELETE CASCADE,
     status_teste VARCHAR(20) DEFAULT 'Aguardando',
     motivo_reprovacao TEXT,
-    data_teste TIMESTAMP,
+    data_teste TIMESTAMP WITH TIME ZONE,
     CONSTRAINT uk_chamado_release UNIQUE (id_chamado, id_release),
     CONSTRAINT chk_status_teste CHECK (status_teste IN ('Aguardando', 'Aprovado', 'Reprovado'))
 );

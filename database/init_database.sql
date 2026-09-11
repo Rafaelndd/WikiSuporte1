@@ -347,6 +347,14 @@ CREATE TABLE IF NOT EXISTS log_auditoria_usuarios (
 -- ---------------------------------------------------------------------------------
 -- Seção 2.8: Ciclos de Homologação (Nova Arquitetura)
 -- ---------------------------------------------------------------------------------
+-- Migradas para TIMESTAMPTZ em 2026-09-11 (ver
+-- database/migrations/20260911_ciclos_homologacao_timestamptz.sql) para
+-- alinhar com a convenção do resto do schema e com o que o código de
+-- aplicação já assumia (services/db_homologacao.py já fazia
+-- CAST(:data_lib AS TIMESTAMP WITH TIME ZONE) antes mesmo da coluna ser
+-- TIMESTAMPTZ). Valores existentes foram reinterpretados como
+-- America/Sao_Paulo (timezone de sessão confirmado em produção), preservando
+-- o horário de parede original.
 CREATE TABLE IF NOT EXISTS chamados (
     id_chamado VARCHAR(50) PRIMARY KEY,
     assunto TEXT NOT NULL,
@@ -368,10 +376,11 @@ CREATE TABLE IF NOT EXISTS ciclos_homologacao (
     id_ciclo SERIAL PRIMARY KEY,
     id_chamado VARCHAR(50) NOT NULL REFERENCES chamados(id_chamado) ON DELETE CASCADE,
     id_release INTEGER NOT NULL REFERENCES releases(id_release) ON DELETE CASCADE,
-    status_teste VARCHAR(20) DEFAULT 'Aguardando' CHECK (status_teste IN ('Aguardando', 'Aprovado', 'Reprovado')),
+    status_teste VARCHAR(20) DEFAULT 'Aguardando',
     motivo_reprovacao TEXT,
     data_teste TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT uk_chamado_release UNIQUE (id_chamado, id_release)
+    CONSTRAINT uk_chamado_release UNIQUE (id_chamado, id_release),
+    CONSTRAINT chk_status_teste CHECK (status_teste IN ('Aguardando', 'Aprovado', 'Reprovado'))
 );
 
 -- =================================================================================

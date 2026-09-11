@@ -360,6 +360,8 @@ CREATE TABLE IF NOT EXISTS log_auditoria_usuarios (
 -- ---------------------------------------------------------------------------------
 -- Seção 2.8: Ciclos de Homologação (Nova Arquitetura)
 -- ---------------------------------------------------------------------------------
+-- Migradas para TIMESTAMPTZ em 2026-09-11 (ver
+-- database/migrations/20260911_ciclos_homologacao_timestamptz.sql).
 CREATE TABLE IF NOT EXISTS chamados (
     id_chamado VARCHAR(50) PRIMARY KEY,
     assunto TEXT NOT NULL,
@@ -381,10 +383,11 @@ CREATE TABLE IF NOT EXISTS ciclos_homologacao (
     id_ciclo SERIAL PRIMARY KEY,
     id_chamado VARCHAR(50) NOT NULL REFERENCES chamados(id_chamado) ON DELETE CASCADE,
     id_release INTEGER NOT NULL REFERENCES releases(id_release) ON DELETE CASCADE,
-    status_teste VARCHAR(20) DEFAULT 'Aguardando' CHECK (status_teste IN ('Aguardando', 'Aprovado', 'Reprovado')),
+    status_teste VARCHAR(20) DEFAULT 'Aguardando',
     motivo_reprovacao TEXT,
     data_teste TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT uk_chamado_release UNIQUE (id_chamado, id_release)
+    CONSTRAINT uk_chamado_release UNIQUE (id_chamado, id_release),
+    CONSTRAINT chk_status_teste CHECK (status_teste IN ('Aguardando', 'Aprovado', 'Reprovado'))
 );
 
 -- =================================================================================
@@ -1015,6 +1018,54 @@ WHERE COALESCE(xp_total, 0) < 0;
 -- =========================================
 
 -- =========================================
+-- INICIO BLOCO: database\migrations\20260911_ciclos_homologacao_timestamptz.sql
+-- =========================================
+-- Corrige a divergência de tipo entre database/init_database.sql e
+-- database/migracao_ciclos_homologacao.sql para chamados, releases e
+-- ciclos_homologacao: as três colunas de data estavam declaradas como
+-- TIMESTAMP WITH TIME ZONE em um arquivo e TIMESTAMP (sem fuso) no outro.
+-- Como CREATE TABLE IF NOT EXISTS é idempotente, a definição que rodasse
+-- primeiro "vencia" silenciosamente — e em produção, quem venceu foi a
+-- versão sem fuso.
+--
+-- Converte as três colunas para TIMESTAMPTZ, alinhando com a convenção do
+-- resto do schema e com o que o código de aplicação já assumia
+-- (services/db_homologacao.py já fazia
+-- CAST(:data_lib AS TIMESTAMP WITH TIME ZONE) ao inserir em
+-- releases.data_liberacao, mesmo com a coluna ainda sendo TIMESTAMP).
+-- Valores existentes são reinterpretados com AT TIME ZONE
+-- 'America/Sao_Paulo' — timezone de sessão confirmado do servidor —
+-- preservando o horário de parede original.
+--
+-- Idempotente: só altera o tipo se a coluna ainda estiver sem fuso.
+DO $$
+BEGIN
+    IF (SELECT data_type FROM information_schema.columns
+        WHERE table_name = 'chamados' AND column_name = 'data_primeiro_registro') = 'timestamp without time zone' THEN
+        ALTER TABLE chamados
+            ALTER COLUMN data_primeiro_registro TYPE TIMESTAMPTZ
+            USING data_primeiro_registro AT TIME ZONE 'America/Sao_Paulo';
+    END IF;
+
+    IF (SELECT data_type FROM information_schema.columns
+        WHERE table_name = 'releases' AND column_name = 'data_liberacao') = 'timestamp without time zone' THEN
+        ALTER TABLE releases
+            ALTER COLUMN data_liberacao TYPE TIMESTAMPTZ
+            USING data_liberacao AT TIME ZONE 'America/Sao_Paulo';
+    END IF;
+
+    IF (SELECT data_type FROM information_schema.columns
+        WHERE table_name = 'ciclos_homologacao' AND column_name = 'data_teste') = 'timestamp without time zone' THEN
+        ALTER TABLE ciclos_homologacao
+            ALTER COLUMN data_teste TYPE TIMESTAMPTZ
+            USING data_teste AT TIME ZONE 'America/Sao_Paulo';
+    END IF;
+END $$;
+-- =========================================
+-- FIM BLOCO: database\migrations\20260911_ciclos_homologacao_timestamptz.sql
+-- =========================================
+
+-- =========================================
 -- INICIO BLOCO: database\migracao_atendimentos_registrados.sql
 -- =========================================
 -- Migração: registro diário de atendimentos + normalização mínima de clientes
@@ -1168,11 +1219,15 @@ CREATE INDEX IF NOT EXISTS idx_historico_id_topico ON historico_buscas_psy(id_to
 -- ---------------------------------------------------------------------------------
 -- 1. Tabela de Domínio: Chamados (a essência do problema/funcionalidade)
 -- ---------------------------------------------------------------------------------
+-- Migradas para TIMESTAMPTZ em 2026-09-11 (ver
+-- database/migrations/20260911_ciclos_homologacao_timestamptz.sql). Mantida
+-- idêntica, coluna a coluna e constraint a constraint, à definição destas
+-- mesmas três tabelas no bloco database\init_database.sql acima.
 CREATE TABLE IF NOT EXISTS chamados (
     id_chamado VARCHAR(50) PRIMARY KEY,
     assunto TEXT NOT NULL,
     modulo_sistema VARCHAR(100),
-    data_primeiro_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    data_primeiro_registro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ---------------------------------------------------------------------------------
@@ -1181,7 +1236,7 @@ CREATE TABLE IF NOT EXISTS chamados (
 CREATE TABLE IF NOT EXISTS releases (
     id_release SERIAL PRIMARY KEY,
     versao_release VARCHAR(50) UNIQUE NOT NULL,
-    data_liberacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    data_liberacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ---------------------------------------------------------------------------------
@@ -1193,7 +1248,7 @@ CREATE TABLE IF NOT EXISTS ciclos_homologacao (
     id_release INTEGER NOT NULL REFERENCES releases(id_release) ON DELETE CASCADE,
     status_teste VARCHAR(20) DEFAULT 'Aguardando',
     motivo_reprovacao TEXT,
-    data_teste TIMESTAMP,
+    data_teste TIMESTAMP WITH TIME ZONE,
     CONSTRAINT uk_chamado_release UNIQUE (id_chamado, id_release),
     CONSTRAINT chk_status_teste CHECK (status_teste IN ('Aguardando', 'Aprovado', 'Reprovado'))
 );

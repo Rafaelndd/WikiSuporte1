@@ -3,6 +3,7 @@ Camada de UI para notificações globais, lembretes e estilo moderno.
 """
 from __future__ import annotations
 
+import html
 from datetime import datetime
 from typing import Optional
 
@@ -284,17 +285,20 @@ def render_global_notifications_listener(*, show_release_banner: bool = True) ->
             bid = int(b["id"])
             if bid in st.session_state["ws_dismissed_version_blocks"]:
                 continue
+            modulo_safe = html.escape(str(b["modulo_nome"]))
+            versao_safe = html.escape(str(b["versao_problematica"]))
+            motivo_safe = html.escape(str(b.get("motivo") or "Não informado"))
             st.markdown(
                 f"""
                 <div class="ws-card ws-pulse ws-sticky" style="margin-top:4px;">
-                    <b>🚫 NÃO ATUALIZE O MÓDULO {b['modulo_nome']}</b><br/>
-                    Versão bloqueada: <b>{b['versao_problematica']}</b><br/>
-                    Motivo: {b.get('motivo') or 'Não informado'}
+                    <b>🚫 NÃO ATUALIZE O MÓDULO {modulo_safe}</b><br/>
+                    Versão bloqueada: <b>{versao_safe}</b><br/>
+                    Motivo: {motivo_safe}
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            st.error(f"Bloqueio ativo: módulo {b['modulo_nome']} versão {b['versao_problematica']}.")
+            st.error(f"Bloqueio ativo: módulo {modulo_safe} versão {versao_safe}.")
             if st.button("Entendi este alerta", key=f"ack_ver_block_{bid}"):
                 st.session_state["ws_dismissed_version_blocks"].append(bid)
                 st.rerun()

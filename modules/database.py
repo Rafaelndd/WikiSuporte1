@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 
 # Sempre carrega `.env` da raiz do repositório (não depende do cwd do Streamlit).
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,23 +18,50 @@ DB_NAME = os.getenv("DB_NAME", "central_chamados")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("DB_PASS")
 
-# Monta a string de conexão no padrão exigido pelo SQLAlchemy
-connection_string = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# A validação de DB_PASS é adiada para get_connection()/get_engine() (abaixo)
+# em vez de rodar aqui, no import do módulo. Levantar aqui quebrava qualquer
+# import deste módulo em ambiente sem banco configurado (ex.: CI rodando
+# testes que não tocam o banco, mas importam — direta ou transitivamente —
+# um módulo que importa este arquivo).
+engine_global = None
+if DB_PASS:
+    # URL.create escapa automaticamente caracteres especiais na senha/usuário
+    # (ex.: '@', ':', '/'), o que a interpolação de f-string anterior não fazia.
+    connection_url = URL.create(
+        "postgresql",
+        username=DB_USER,
+        password=DB_PASS,
+        host=DB_HOST,
+        port=int(DB_PORT),
+        database=DB_NAME,
+    )
+    try:
+        # Performance: O motor (engine) agora é criado APENAS UMA VEZ
+        # quando este arquivo é lido. Ele gerencia as conexões automaticamente.
+        engine_global = create_engine(connection_url)
+    except Exception as e:
+        print(f"Erro ao configurar o motor do banco: {e}")
+        raise e
 
-try:
-    # Performance: O motor (engine) agora é criado APENAS UMA VEZ 
-    # quando este arquivo é lido. Ele gerencia as conexões automaticamente.
-    engine_global = create_engine(connection_string)
-except Exception as e:
-    print(f"Erro ao configurar o motor do banco: {e}")
-    raise e
+
+def _exigir_engine():
+    if engine_global is None:
+        raise RuntimeError(
+            "DB_PASS não configurada. Defina-a no .env antes de usar o banco — "
+            "sem ela a conexão não pode ser estabelecida. (Antes desta checagem, "
+            "uma connection string com \"None\" no lugar da senha era montada "
+            "silenciosamente, ex.: postgresql://postgres:None@..., e só falhava "
+            "de forma confusa no driver.)"
+        )
+    return engine_global
+
 
 def get_connection():
     """
     Retorna a conexão com o banco de dados usando o motor (engine) global do SQLAlchemy.
     Isso evita o esgotamento de conexões e vazamento de memória.
     """
-    return engine_global
+    return _exigir_engine()
 
 def carregar_dados_sql(query):
     """
@@ -51,4 +79,4 @@ def carregar_dados_sql(query):
         return pd.DataFrame()  # Retorna um DataFrame vazio em caso de erro
 
 def get_engine():
-    return engine_global
+    return _exigir_engine()

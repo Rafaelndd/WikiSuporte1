@@ -16,6 +16,7 @@ from app.services.base_conhecimento_service import (
     AprovacaoContribuicaoError,
     aprovar_contribuicao_conhecimento,
     computar_xp_aprovacao,
+    lock_aprovacao_autor,
     registrar_bonus_semanal_contribuicao,
 )
 import tempfile
@@ -1099,6 +1100,7 @@ with aba_nova:
 
                         if status_inicial == "APROVADO":
                             agora = datetime.now(timezone.utc)
+                            lock_aprovacao_autor(conn, int(usuario_logado_id))
                             xp_res = computar_xp_aprovacao(
                                 conn,
                                 autor_id=int(usuario_logado_id),
