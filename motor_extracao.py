@@ -58,10 +58,6 @@ URL_TICKETS = "https://postogestor.com.br/helpdesk/sistema/tickets"
 URL_MANUAIS = "https://postogestor.com.br/helpdesk/sistema/manuais/busca" 
 URL_WIKI = "https://postogestor.com.br/helpdesk/sistema/wiki"
 
-# INSIRA AQUI AS CREDENCIAIS DE UM USUÁRIO COM ACESSO A TUDO NO HELPDESK
-USUARIO_HELPDESK = "rafaeln"
-SENHA_HELPDESK = ""
-
 class MotorExtracao:
     def __init__(self):
         self.oraculo = OraculoLogistica()

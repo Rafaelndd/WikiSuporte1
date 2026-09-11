@@ -50,14 +50,9 @@ GOTO_PAGE_SIZE = 1000
 GOTO_REQUEST_TIMEOUT = 30
 
 # Chave de SALT para hashing LGPD – mesma usada no processador_csv.py
-# APP_SALT_KEY deve estar definida no .env; o valor padrão é usado apenas como
-# fallback de compatibilidade (idêntico ao comportamento do processador_csv.py).
-SALT = os.getenv("APP_SALT_KEY", "chave_secreta_wiki_suporte_2026")
-if not os.getenv("APP_SALT_KEY"):
-    logger.warning(
-        "APP_SALT_KEY não definida no .env. "
-        "Defina esta variável para garantir a segurança dos dados LGPD."
-    )
+# Sem fallback hardcoded: um salt conhecido no código anularia a
+# irreversibilidade do hash LGPD. Deve ser definida em APP_SALT_KEY (.env).
+SALT = os.getenv("APP_SALT_KEY")
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +63,11 @@ def _gerar_hash_lgpd(texto: str) -> str:
     """Gera um hash SHA-256 irreversível do dado sensível."""
     if not texto or texto.strip() == "":
         return ""
+    if not SALT:
+        raise RuntimeError(
+            "APP_SALT_KEY não configurada. Defina-a no .env antes de gerar "
+            "hashes LGPD — sem ela, os dados não podem ser considerados anonimizados."
+        )
     dado_com_salt = f"{texto}{SALT}".encode("utf-8")
     return hashlib.sha256(dado_com_salt).hexdigest()
 

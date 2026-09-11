@@ -182,6 +182,23 @@ def registrar_bonus_semanal_contribuicao(
     )
 
 
+def lock_aprovacao_autor(conn: Connection, autor_id: int) -> None:
+    """
+    Serializa aprovações concorrentes do MESMO autor dentro desta transação.
+
+    O `SELECT ... FOR UPDATE` abaixo trava apenas a linha da contribuição sendo
+    aprovada — se duas contribuições *diferentes* do mesmo autor forem aprovadas
+    ao mesmo tempo (duas abas, dois admins), cada transação trava uma linha
+    distinta e ambas contam hoje/semana sem enxergar o UPDATE uma da outra,
+    sub-atribuindo XP silenciosamente. Este advisory lock, por autor, fecha
+    essa janela: a segunda transação espera a primeira commitar antes de contar.
+    """
+    conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+        {"k": f"XP_APROVACAO_AUTOR:{autor_id}"},
+    )
+
+
 def aprovar_contribuicao_conhecimento(
     conn: Connection,
     contribuicao_id: int,
@@ -215,6 +232,12 @@ def aprovar_contribuicao_conhecimento(
         raise AprovacaoContribuicaoError(f"Status '{st}' não permite aprovação pela fila.")
 
     autor_id = int(m["id_analista_autor"])
+    # A trava por linha (FOR UPDATE, acima) não impede que OUTRA contribuição
+    # pendente do MESMO autor seja aprovada em paralelo por outra transação —
+    # cada uma trava uma linha diferente. O advisory lock abaixo serializa
+    # explicitamente por autor: a segunda aprovação só conta hoje/semana depois
+    # que a primeira já tiver commitado, evitando sub-atribuição de XP.
+    lock_aprovacao_autor(conn, autor_id)
     era_revisao = st == "REVISAO_PENDENTE"
     criado_em = m["criado_em"]
     if not isinstance(criado_em, datetime):

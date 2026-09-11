@@ -9,13 +9,20 @@ import os
 # CONFIGURAÇÕES DE SEGURANÇA (LGPD)
 # ==========================================
 
-# A chave secreta (SALT) para o embaralhamento. 
-SALT = os.getenv("APP_SALT_KEY", "chave_secreta_wiki_suporte_2026")
+# A chave secreta (SALT) para o embaralhamento.
+# Sem fallback hardcoded: um salt conhecido no código anularia a
+# irreversibilidade do hash LGPD. Deve ser definida em APP_SALT_KEY (.env).
+SALT = os.getenv("APP_SALT_KEY")
 
 def gerar_hash_lgpd(texto: str) -> str:
     """Gera um Hash irreversível (SHA-256) do dado sensível."""
     if not texto or pd.isna(texto) or texto == "":
         return ""
+    if not SALT:
+        raise RuntimeError(
+            "APP_SALT_KEY não configurada. Defina-a no .env antes de gerar "
+            "hashes LGPD — sem ela, os dados não podem ser considerados anonimizados."
+        )
     dado_com_salt = f"{texto}{SALT}".encode('utf-8')
     return hashlib.sha256(dado_com_salt).hexdigest()
 
