@@ -55,7 +55,6 @@ from services.wiki_authenticator import (
 )
 from services.ui_theme_presets import wiki_theme_apply_authenticated, wiki_theme_apply_login_page
 from services.ui_avatar import html_avatar_perfil_circular
-from services.contrib_rules_ui import render_contrib_rules_table
 #======================================================================================================================#
 # Variáveis de ambiente: carregadas no topo (antes de database / wiki_authenticator).
 #======================================================================================================================#
@@ -1043,12 +1042,6 @@ def renderizar_dashboard_conquistas(
                     f"📉 No último fechamento semanal foi aplicado desconto de **{pen_sem} XP** "
                     "em eventos de penalidade registados nesta semana ISO."
                 )
-
-    st.subheader("📋 Regras de contribuições e penalidades", anchor=False)
-    st.caption(
-        "Resumo objetivo das regras que valem para pontuação, bônus, janela de carência e descontos."
-    )
-    render_contrib_rules_table(compact=False)
 
     # 4. MINI-RESUMO DE CONTRIBUIÇÕES
     st.subheader("📚 Minhas Estatísticas", anchor=False)
