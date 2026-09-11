@@ -8,6 +8,7 @@ Não modifica arquivos originais do projeto.
 import os
 import re
 from datetime import datetime
+from email.utils import parseaddr
 from typing import List, Optional, Tuple
 
 import sys
@@ -19,8 +20,14 @@ try:
 except ImportError:
     get_connection = None
 
-# Remetentes considerados para cobrança (nomes ou e-mails)
+# Remetentes considerados para cobrança (parte local do e-mail, antes do @)
 REMENTENTES_COBRANCA = ("rodrigo", "jairo")
+
+# Domínio real exigido do remetente — sem isso, o nome de exibição do header
+# "From" (facilmente falsificável) era o único critério de confiança, e
+# qualquer remetente externo podia se passar por "Rodrigo"/"Jairo" e gerar
+# um registro de cobrança falso vinculado a um chamado arbitrário.
+DOMINIO_COBRANCA = "tecnuv.com.br"
 
 # Padrões para extrair número de chamado (regex)
 PADROES_CHAMADO = [
@@ -71,13 +78,25 @@ def extrair_numero_chamado(texto: str) -> Optional[int]:
 
 def remetente_e_cobranca(de: Optional[str], assunto: Optional[str], corpo: Optional[str]) -> bool:
     """
-    Verifica se o e-mail é de Rodrigo ou Jairo e parece ser cobrança
-    (assunto ou corpo contém palavras como cobrança, cobrar, follow-up, acompanhamento).
+    Verifica se o e-mail é de Rodrigo ou Jairo no domínio @tecnuv.com.br e
+    parece ser cobrança (assunto ou corpo contém palavras como cobrança,
+    cobrar, follow-up, acompanhamento).
+
+    O nome de exibição do header "From" é texto livre, facilmente
+    falsificável por qualquer remetente ("Rodrigo" <atacante@gmail.com>
+    passaria antes). Por isso o endereço é parseado e o domínio real
+    validado — só o e-mail (parte antes do @) é comparado contra os nomes
+    esperados, nunca o nome de exibição.
     """
     if not de:
         return False
-    de_lower = de.lower()
-    if not any(nome in de_lower for nome in REMENTENTES_COBRANCA):
+    _, endereco = parseaddr(de)
+    if not endereco or "@" not in endereco:
+        return False
+    parte_local, _, dominio = endereco.lower().partition("@")
+    if dominio != DOMINIO_COBRANCA:
+        return False
+    if not any(nome in parte_local for nome in REMENTENTES_COBRANCA):
         return False
     texto = f"{assunto or ''} {corpo or ''}".lower()
     termos = ("cobrança", "cobranca", "cobrar", "cobramos", "follow-up", "followup", "acompanhamento", "retorno")
