@@ -16,10 +16,13 @@ def test_normaliza_admin_e_analista_do_banco():
     assert normalizar_perfil_para_sessao("analista") == PERFIL_ANALISTA
 
 
-def test_legado_vira_admin():
-    assert normalizar_perfil_para_sessao("dev") == PERFIL_ADMIN
-    assert normalizar_perfil_para_sessao("master") == PERFIL_ADMIN
-    assert normalizar_perfil_para_sessao("coordenação") == PERFIL_ADMIN
+def test_legado_nao_vira_admin():
+    """Aliases legados (dev, coordenador, master...) foram removidos: nenhum
+    usuário real os utiliza, e concediam admin implicitamente a um valor não
+    reconhecido. Devem cair no padrão seguro (analista), não em admin."""
+    assert normalizar_perfil_para_sessao("dev") == PERFIL_ANALISTA
+    assert normalizar_perfil_para_sessao("master") == PERFIL_ANALISTA
+    assert normalizar_perfil_para_sessao("coordenação") == PERFIL_ANALISTA
 
 
 def test_desconhecido_e_analista():
