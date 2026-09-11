@@ -357,7 +357,7 @@ with tab_lancar:
         "Telefone/Celular",
         key=telefone_key,
         placeholder="(48) 9 9999-8888",
-        help="Formato brasileiro. Ex.: (48) 9 9999-8888",
+        help="Ex.: (48) 9 9999-8888",
         on_change=_mascarar_telefone_campo,
         args=(telefone_key,),
     )
@@ -513,7 +513,7 @@ with tab_consulta:
 
             analistas_df = _carregar_analistas_ativos()
             analista_id = None
-            if perfil == "admin" and not analistas_df.empty:
+            if not analistas_df.empty:
                 dic_analistas: Dict[str, Optional[int]] = {"Todos": None}
                 for _, r in analistas_df.iterrows():
                     dic_analistas[f"{r['nome']} ({r['perfil_norm']})"] = int(r["id"])

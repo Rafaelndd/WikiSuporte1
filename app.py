@@ -1,14 +1,10 @@
-
 #*** IMPORTAÇÕES ***#
-
 import sys
 import os
-
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(_BASE_DIR)
 
 from pathlib import Path
-
 from dotenv import load_dotenv
 
 # Antes de importar `modules.database` (que monta o engine com DB_*).
@@ -29,14 +25,11 @@ import numpy as np
 import streamlit.components.v1 as components
 
 from datetime import datetime, timedelta
-from datetime import datetime
 from retry_requests import retry
-from datetime import datetime, timedelta
 from sqlalchemy import text
 from typing import Tuple, Optional
 from modules.database import get_connection
 from modules.auditoria import registrar_log_auditoria
-from typing import Union
 from typing import Optional, Dict, Union  
 from modules.utils import inicializar_usuario, calcular_patente
 from services.ui_realtime import (
