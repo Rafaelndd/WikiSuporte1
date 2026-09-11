@@ -38,7 +38,22 @@ if DB_PASS:
     try:
         # Performance: O motor (engine) agora é criado APENAS UMA VEZ
         # quando este arquivo é lido. Ele gerencia as conexões automaticamente.
-        engine_global = create_engine(connection_url)
+        #
+        # Pool dimensionado explicitamente (em vez do default do SQLAlchemy,
+        # pool_size=5 + max_overflow=10) porque esta engine é compartilhada entre
+        # todas as sessões Streamlit concorrentes E o robô de raspagem 24/7
+        # (motor_extracao.py), que competem pelo mesmo pool.
+        # pool_pre_ping evita repassar ao chamador uma conexão já derrubada pelo
+        # servidor/firewall (comum num processo de longa duração como o robô).
+        # pool_recycle descarta conexões ociosas antes que o servidor ou um
+        # proxy intermediário as feche por timeout.
+        engine_global = create_engine(
+            connection_url,
+            pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "20")),
+            pool_pre_ping=True,
+            pool_recycle=1800,
+        )
     except Exception as e:
         print(f"Erro ao configurar o motor do banco: {e}")
         raise e
