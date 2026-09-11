@@ -63,7 +63,7 @@ Ele descreve o que precisa ser levado para outro servidor:
   - `app.py`
   - `config.py`
   - `config_ramais.py`
-  - `main_oraculo.py`
+  - `motor_extracao.py`
   - `menus.py`
   - `cadastro_usuarios.py`
   - `bandit.yaml`

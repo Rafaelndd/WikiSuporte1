@@ -21,6 +21,9 @@ st.set_page_config(
 )
 if process_forced_logout_from_url():
     st.rerun()
+# Intencionalmente sem restrição a perfil=admin (decisão confirmada em
+# 2026-09-11): qualquer analista autenticado pode ver este dashboard,
+# diferente de 1_Dashboard_Atendimentos.py, que é admin-only.
 if not st.session_state.get("autenticado", False):
     st.switch_page("app.py")
 render_global_notifications_listener()
