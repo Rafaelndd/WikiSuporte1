@@ -1,8 +1,9 @@
 """
 Perfis canônicos alinhados ao PostgreSQL: somente `admin` e `analista`.
 
-Valores legados no banco ou na sessão (dev, coordenação, master, etc.)
-são normalizados para um destes dois ao aplicar regras de acesso.
+Valores desconhecidos (qualquer coisa fora dos dois canônicos e dos aliases
+abaixo) caem em `analista` por padrão — o normalizador nunca concede admin
+implicitamente a um valor não reconhecido.
 """
 
 from __future__ import annotations
@@ -11,20 +12,16 @@ from __future__ import annotations
 PERFIL_ADMIN = "admin"
 PERFIL_ANALISTA = "analista"
 
-# Tudo isto conta como administrador (acesso total), gravando `admin` em novas alterações
+# Restrito aos valores realmente em uso (confirmado por introspecção em
+# `usuarios.perfil`: só existem 'admin' e 'analista' hoje). Antes incluía
+# aliases legados (dev, coordenador, master, supervisor...) que concediam
+# admin completo a qualquer um desses valores — nenhum usuário real os
+# utiliza, e mantê-los era uma via de escalonamento de privilégio silencioso
+# caso alguém definisse perfil='dev' manualmente no banco no futuro.
 _ALIASES_ADMIN = frozenset(
     {
         "admin",
         "administrador",
-        "master",
-        "dev",
-        "desenvolvedor",
-        "coordenador",
-        "coordenação",
-        "coordenacao",
-        "supervisor",
-        "supervisão",
-        "supervisao",
     }
 )
 

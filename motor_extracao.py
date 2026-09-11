@@ -17,7 +17,7 @@ if sys.platform == "win32":
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 from selenium import webdriver
 from config import Config 
 from selenium.webdriver.chrome.options import Options
@@ -29,7 +29,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # Importações do nosso ecossistema
 from modules.OraculoLogistica import OraculoLogistica
-from modules.utils import ler_estado_robo, salvar_estado_robo
 from services.db_homologacao import (
     processar_release_completo,
     get_helpdesk_release_head,
@@ -37,14 +36,29 @@ from services.db_homologacao import (
     _extrair_versao_do_titulo,
 )
 from services.bot_control import (
-    consumir_tarefa,
     definir_etapa,
     iniciar_execucao,
     finalizar_execucao,
-    ler_estado,
-    pode_executar_raspagem,
     MIN_INTERVALO_ENTRE_REQUISICOES_SEG,
 )
+from modules.log_redaction import install_sensitive_data_redaction
+
+# Configurado aqui (não só em modules/selenium_raspagem.py) porque o loop
+# principal deste processo (iniciar_psy_assistente) registra em log antes de
+# qualquer raspagem de chamados rodar — sem isso, as mensagens de "próxima
+# execução" e o circuito de falhas consecutivas não apareceriam em lugar
+# nenhum até o primeiro ciclo disparar o import de selenium_raspagem.py.
+# Mesmo arquivo/formato daquele módulo para manter um único log operacional.
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler("oraculo_engine.log", encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
+    install_sensitive_data_redaction(logging.getLogger())
 
 
 # ==========================================
@@ -520,7 +534,7 @@ class MotorExtracao:
                     WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.ID, "w_desc")))
                     html_interno = self.driver.page_source
                     self.oraculo.processar_e_salvar_wiki_interna(html_interno, wiki_id)
-                except:
+                except Exception:
                     print(f"⚠️ Erro ao ler a Wiki {wiki_id}. Conteúdo vazio ou acesso negado.")
                 
                 time.sleep(1) # Respeito ao servidor
@@ -590,73 +604,66 @@ def _executar_motor(tarefa: str | None = None):
         motor.fechar()
 
 
+# Máximo de falhas consecutivas do ciclo diário antes de o robô desistir e
+# encerrar (em vez de tentar de novo indefinidamente). Não há canal de
+# alerta externo hoje — o log (oraculo_engine.log) é a única fonte de
+# diagnóstico, então uma falha persistente precisa parar de forma visível
+# em vez de girar em silêncio.
+MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO = 5
+
+
+def _segundos_ate_proxima_meia_noite() -> float:
+    agora = datetime.now()
+    proxima = (agora + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (proxima - agora).total_seconds()
+
+
 def iniciar_psy_assistente():
-    print("🤖 PSY Assistente do WikiSuporte Iniciado. Aguardando ordens do painel de controle...")
+    """
+    Único modo de operação do robô: roda o ciclo completo de sincronização
+    (chamados, releases, plantões, manuais, wikis) uma vez por dia, à meia-
+    noite (horário local do servidor). Substitui os antigos modos manual/
+    intervalo configurável e os pontos de disparo redundantes
+    (main_oraculo.py e modules/selenium_raspagem.py rodado diretamente).
+    """
+    logging.info("🤖 PSY Assistente do WikiSuporte iniciado. Execução automática diária à meia-noite.")
+
+    falhas_consecutivas = 0
 
     while True:
+        segundos = _segundos_ate_proxima_meia_noite()
+        proxima = datetime.now() + timedelta(seconds=segundos)
+        logging.info(
+            f"Próxima execução automática: {proxima.strftime('%d/%m/%Y %H:%M:%S')} "
+            f"(em {segundos / 3600:.1f}h)."
+        )
+        time.sleep(segundos)
+
         try:
-            estado = ler_estado()
-
-            if estado.get("em_andamento"):
-                time.sleep(10)
-                continue
-
-            tarefa = consumir_tarefa()
-            if tarefa:
-                ok, motivo = pode_executar_raspagem(ler_estado())
-                if not ok:
-                    print(f"⛔ Raspagem '{tarefa}' bloqueada: {motivo}")
-                    time.sleep(30)
-                    continue
-
-                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Tarefa solicitada: {tarefa}")
-                iniciar_execucao(f"Preparando raspagem: {tarefa}")
-                try:
-                    _executar_motor(tarefa)
-                finally:
-                    finalizar_execucao()
-                print(f"✅ Tarefa '{tarefa}' concluída.")
-                time.sleep(10)
-                continue
-
-            if estado.get("auto_ativo", False):
-                from datetime import timedelta
-                intervalo_minutos = estado.get("intervalo", 60)
-                ultima = estado.get("ultima_execucao")
-
-                executar_agora = False
-                if not ultima:
-                    executar_agora = True
-                else:
-                    try:
-                        dt_ultima = datetime.fromisoformat(ultima)
-                        if datetime.now() >= dt_ultima + timedelta(minutes=intervalo_minutos):
-                            executar_agora = True
-                    except Exception:
-                        executar_agora = True
-
-                if executar_agora:
-                    ok, motivo = pode_executar_raspagem(ler_estado())
-                    if ok:
-                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iniciando ciclo automático (intervalo {intervalo_minutos} min)...")
-                        iniciar_execucao("Ciclo automático: chamados + demais fontes")
-                        try:
-                            _executar_motor()
-                        finally:
-                            finalizar_execucao()
-                        print(f"⏳ Ciclo concluído. Próximo em {intervalo_minutos} min.")
-                    else:
-                        print(f"⛔ Ciclo automático bloqueado: {motivo}")
-
-            time.sleep(30)
-
+            iniciar_execucao("Ciclo automático diário: chamados + demais fontes")
+            try:
+                _executar_motor()
+            finally:
+                finalizar_execucao()
+            logging.info("✅ Ciclo automático diário concluído com sucesso.")
+            falhas_consecutivas = 0
         except Exception as e:
-            print(f"❌ Erro crítico no loop principal: {e}")
+            falhas_consecutivas += 1
+            logging.error(
+                f"❌ Falha no ciclo automático diário "
+                f"(tentativa {falhas_consecutivas}/{MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO}): {e}"
+            )
             try:
                 finalizar_execucao()
             except Exception:
                 pass
-            time.sleep(60)
+            if falhas_consecutivas >= MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO:
+                logging.critical(
+                    f"🛑 {MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO} falhas consecutivas no ciclo "
+                    "automático diário. Encerrando o PSY Assistente — requer intervenção "
+                    "manual (ver oraculo_engine.log)."
+                )
+                raise SystemExit(1)
 
 
 if __name__ == "__main__":

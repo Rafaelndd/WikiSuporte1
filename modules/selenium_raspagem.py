@@ -38,18 +38,7 @@ from sqlalchemy.dialects.postgresql import insert
 from modules.database import get_connection
 from modules.log_redaction import install_sensitive_data_redaction
 from modules.models import ChamadoTecnuv, HistoricoInteracao, HistoricoTransicaoStatus
-
-# Memória do Robô
-from modules.utils import ler_estado_robo, salvar_estado_robo
-from services.bot_control import (
-    consumir_tarefa,
-    definir_etapa,
-    deve_parar,
-    iniciar_execucao,
-    finalizar_execucao,
-    ler_estado,
-    pode_executar_raspagem,
-)
+from services.bot_control import definir_etapa, deve_parar
 
 
 def _status_encerrado_cancelado(status_txt: str) -> bool:
@@ -171,6 +160,10 @@ class OraculoBot:
         options.add_argument("--start-maximized")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        # NOTA: mascara sinais de automação (CDP user-agent override, flags
+        # abaixo) contra o helpdesk do fornecedor (postogestor.com.br). Uso
+        # autorizado formalmente pela equipe/fornecedor — confirmado em
+        # 2026-09-11 — não é uma tentativa de burlar controle de acesso.
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
@@ -241,7 +234,7 @@ class OraculoBot:
                         f"Acesso bloqueado. Adicionado à lista de não acessados."
                     )
                     return False
-        except:
+        except Exception:
             pass
 
         # Se não carregou e não achou mensagem de erro, assume bloqueio por timeout
@@ -330,7 +323,7 @@ class OraculoBot:
                 select_pag.click()
                 self.driver.find_element(By.XPATH, "//option[@value='500']").click()
                 time.sleep(1)
-            except:
+            except Exception:
                 pass
 
             # Clica em Buscar (visão nativa sem filtros = apenas ativos)
@@ -518,7 +511,7 @@ class OraculoBot:
                 dt_abertura = None
                 try:
                     dt_abertura = datetime.strptime(meta["dt_abertura_str"], "%d/%m/%Y %H:%M:%S")
-                except:
+                except Exception:
                     pass
 
                 novo = ChamadoTecnuv(
@@ -771,7 +764,7 @@ class OraculoBot:
         try:
             try:
                 from modules.models import CobrancaChamado, ClienteVinculadoChamado
-            except:
+            except Exception:
                 pass
 
             def get_val(label_text):
@@ -780,12 +773,12 @@ class OraculoBot:
                         By.XPATH,
                         f"//label[normalize-space(text())='{label_text}']/following-sibling::span"
                     ).text.strip()
-                except:
+                except Exception:
                     return "Não Informado"
 
             try:
                 versao = self.driver.find_element(By.ID, "tecnuv_versao_abertura").get_attribute("value").strip()
-            except:
+            except Exception:
                 versao = "Não Informada"
 
             try:
@@ -814,7 +807,7 @@ class OraculoBot:
                 if previsao_str and previsao_str != "Não Informado":
                     try:
                         chamado.previsao_conclusao = datetime.strptime(previsao_str, "%d/%m/%Y").date()
-                    except:
+                    except Exception:
                         pass
 
                 # Cobranças
@@ -842,7 +835,7 @@ class OraculoBot:
                                 session.add(nova_cob)
                         except Exception as e:
                             logging.warning(f"Erro ao ler cobrança: {e}")
-                except:
+                except Exception:
                     pass
 
                 # Clientes Vinculados
@@ -859,7 +852,7 @@ class OraculoBot:
                                 nome_cliente=t.strip(),
                                 cnpj_cliente=cnpj
                             ))
-                except:
+                except Exception:
                     pass
 
             # Coleta interações, salva e verifica liberação
@@ -907,7 +900,7 @@ class OraculoBot:
                 )
                 btn_limpar.click()
                 time.sleep(2)
-            except:
+            except Exception:
                 pass
 
             numero_limpo = str(nr_chamado).strip()
@@ -1121,85 +1114,8 @@ def _executar_ciclo_chamados():
             bot.encerrar()
 
 
-def iniciar_psy_assistente_wikisuporte_bot():
-    """
-    Mantém o robô ativo em segundo plano.
-    Reage a tarefa_solicitada == 'chamados' e ao ciclo automático.
-    """
-    logging.info("[BOT] PSY Assistente WikiSuporte iniciado. Aguardando comandos...")
-
-    while True:
-        try:
-            estado = ler_estado()
-
-            if estado.get("em_andamento", False):
-                time.sleep(10)
-                continue
-
-            tarefa = consumir_tarefa()
-            if tarefa == "chamados":
-                ok, motivo = pode_executar_raspagem(ler_estado())
-                if not ok:
-                    logging.warning(f"Raspagem 'chamados' bloqueada: {motivo}")
-                    time.sleep(30)
-                    continue
-
-                logging.info("Tarefa solicitada: chamados")
-                iniciar_execucao("Preparando raspagem: chamados")
-                try:
-                    _executar_ciclo_chamados()
-                finally:
-                    finalizar_execucao()
-                logging.info("Tarefa 'chamados' concluída.")
-                time.sleep(10)
-                continue
-
-            if tarefa and tarefa != "chamados":
-                pass
-
-            auto_ativo = estado.get("auto_ativo", False)
-            if not auto_ativo:
-                time.sleep(60)
-                continue
-
-            intervalo_minutos = estado.get("intervalo", 30)
-            ultima_exec_str = estado.get("ultima_execucao")
-
-            executar_agora = False
-            if not ultima_exec_str:
-                executar_agora = True
-            else:
-                try:
-                    ultima_exec = datetime.fromisoformat(ultima_exec_str)
-                    proxima_exec = ultima_exec + timedelta(minutes=intervalo_minutos)
-                    if datetime.now() >= proxima_exec:
-                        executar_agora = True
-                except Exception:
-                    executar_agora = True
-
-            if executar_agora:
-                ok, motivo = pode_executar_raspagem(ler_estado())
-                if ok:
-                    logging.info(f"Ciclo automático (Intervalo: {intervalo_minutos} min).")
-                    iniciar_execucao("Ciclo automático: chamados")
-                    try:
-                        _executar_ciclo_chamados()
-                    finally:
-                        finalizar_execucao()
-                    logging.info("Ciclo automático finalizado.")
-                else:
-                    logging.warning(f"Ciclo automático bloqueado: {motivo}")
-
-            time.sleep(30)
-
-        except Exception as e:
-            logging.error(f"Erro crítico no Cérebro do PSY: {e}")
-            try:
-                finalizar_execucao()
-            except Exception:
-                pass
-            time.sleep(60)
-
-
-if __name__ == "__main__":
-    iniciar_psy_assistente_wikisuporte_bot()
+# Este módulo não expõe mais um loop de robô próprio (era um terceiro ponto
+# de disparo independente, redundante com motor_extracao.py.
+# iniciar_psy_assistente, que é hoje o único modo de operação — ciclo
+# completo automático diário à meia-noite). `python -m
+# modules.selenium_raspagem` não inicia nada; use `python motor_extracao.py`.
