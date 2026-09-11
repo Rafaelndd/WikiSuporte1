@@ -83,9 +83,16 @@ Thumbs.db
 
 # Backups (Git handles history, avoid committing manual backups)
 backups/
+Backups_Postgres/
+backup_diario.bat
+database/dump/
+uploads_wiki.rar
 hist
 docs
 *.bkp
+
+# Estado de runtime do robô de raspagem (muda a cada execução local)
+robo_state.json
 
 # Relatórios de testes (executados localmente/CI; não versionar)
 test-reports/
