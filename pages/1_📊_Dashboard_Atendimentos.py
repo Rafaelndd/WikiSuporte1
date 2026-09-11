@@ -1188,5 +1188,5 @@ with aba_telefonia:
 try:
     usuario_id = st.session_state.get("usuario_id", None)
     registrar_log_auditoria(usuario_id, "VIEW_DASHBOARD", "Acessou o dashboard de atendimentos Multi360 e Goto")
-except:
+except Exception:
     pass

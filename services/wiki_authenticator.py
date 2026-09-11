@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import os
-import secrets
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
@@ -65,12 +64,19 @@ def credential_login_key(nome: Any, username: Any) -> Tuple[str, str]:
 
 
 def _cookie_signing_key() -> str:
+    """
+    Sem cache/memoização por design: uma chave aleatória por invocação (o
+    comportamento antigo em caso de env var ausente) invalidaria cookies a
+    cada restart ou entre workers diferentes, derrubando sessões de forma
+    imprevisível — só um warning registrava isso, fácil de passar despercebido
+    em produção. Falha explícita força a configuração correta antes do deploy.
+    """
     key = (os.getenv("WS_SESSION_SECRET") or os.getenv("LGPD_SECRET_KEY") or "").strip()
     if not key:
-        key = secrets.token_urlsafe(48)
-        logging.warning(
-            "WS_SESSION_SECRET/LGPD_SECRET_KEY não configurado. "
-            "Usando chave temporária para esta sessão."
+        raise RuntimeError(
+            "WS_SESSION_SECRET ou LGPD_SECRET_KEY não configurada. Defina uma "
+            "delas no .env antes de iniciar a aplicação — sem uma chave "
+            "estável, os cookies de sessão são invalidados a cada restart."
         )
     return key
 
@@ -144,7 +150,6 @@ def get_wiki_authenticator() -> Authenticate:
         _cookie_signing_key(),
         30.0,
         auto_hash=False,
-        login_sleep_time=0,
     )
 
 
