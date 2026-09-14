@@ -1,8 +1,8 @@
 """
 WikiSuporte - Página de Configurações.
 Cadastro de clientes com telefones e administração de comunicados globais.
-Acesso restrito ao perfil **admin**. O robô de varredura roda em modo único
-e automático (ciclo diário à meia-noite, via `motor_extracao.py`) e não é
+Acesso liberado a todos os perfis autenticados. O robô de varredura roda em
+modo único e automático (ciclo diário à meia-noite, via `motor_extracao.py`) e não é
 mais controlado por esta tela — ver `oraculo_engine.log` para status. O
 cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs
 de auditoria registram ações importantes.
@@ -30,10 +30,7 @@ from services.system_notifications import (
     registrar_bloqueio_versao,
     resolver_bloqueio_versao,
 )
-from services.perfil_usuario import eh_admin
-from services.ui_realtime import render_global_notifications_listener
-from services.ui_theme_presets import wiki_theme_apply_authenticated
-from services.wiki_authenticator import process_forced_logout_from_url
+from services.auth_guard import require_login
 
 try:
     from modules.auditoria import registrar_log_auditoria
@@ -42,24 +39,12 @@ except ImportError:
 
 st.set_page_config(page_title="WikiSuporte - Configurações", page_icon="⚙️", layout="wide")
 
-if process_forced_logout_from_url():
-    st.rerun()
-
-if not st.session_state.get("autenticado"):
-    st.switch_page("app.py")
+# Exige login (com restauração de sessão via cookie num F5 direto na página).
+require_login()
 
 usuario_id = st.session_state.get("usuario_id")
 nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
-perfil_raw = st.session_state.get("perfil", "")
-render_global_notifications_listener()
-wiki_theme_apply_authenticated()
 ensure_notifications_schema()
-
-if not eh_admin(perfil_raw):
-    st.error("⛔ Acesso Negado. Apenas usuários com perfil **admin**.")
-    st.stop()
-
-perfil_usuario = "admin"
 
 st.title("⚙️ WikiSuporte - Configurações")
 st.markdown("Clientes, telefones e comunicados globais do sistema.")

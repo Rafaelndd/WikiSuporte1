@@ -17,26 +17,12 @@ from app.services.penalidades_service import (
     resumo_para_dict,
 )
 from modules.database import get_connection
-from services.perfil_usuario import eh_admin
-from services.ui_realtime import render_global_notifications_listener
-from services.ui_theme_presets import wiki_theme_apply_authenticated
-from services.wiki_authenticator import process_forced_logout_from_url
+from services.auth_guard import require_profile
 
 st.set_page_config(page_title="WikiSuporte - Utilizadores", page_icon="👥", layout="wide")
 
-if process_forced_logout_from_url():
-    st.rerun()
-
-if not st.session_state.get("autenticado"):
-    st.switch_page("app.py")
-
-render_global_notifications_listener()
-wiki_theme_apply_authenticated()
-
-perfil_raw = st.session_state.get("perfil", "")
-if not eh_admin(perfil_raw):
-    st.error("⛔ Acesso negado. Apenas usuários com perfil **admin**.")
-    st.stop()
+# Exige login (com restauração de sessão via cookie num F5 direto na página) e perfil admin.
+require_profile(["admin"], titulo_bloqueio="⛔ Acesso negado. Apenas usuários com perfil **admin**.")
 
 meu_id = int(st.session_state.get("usuario_id") or 0)
 

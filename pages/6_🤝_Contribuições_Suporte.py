@@ -31,10 +31,9 @@ import unicodedata
 import re
 from menus import *
 from modules.utils import inicializar_usuario, calcular_patente
+from services.auth_guard import require_login
 from services.perfil_usuario import normalizar_perfil_para_sessao
-from services.ui_realtime import render_global_notifications_listener, show_gamification_upgrade_card
-from services.ui_theme_presets import wiki_theme_apply_authenticated
-from services.wiki_authenticator import process_forced_logout_from_url
+from services.ui_realtime import show_gamification_upgrade_card
 from services.ui_avatar import html_avatar_perfil_circular
 from services.contrib_rules_ui import render_contrib_rules_table
 from services.vector_db import (
@@ -57,15 +56,8 @@ except ImportError:
 # Configuração da página (deve ser a primeira chamada Streamlit)
 st.set_page_config(page_title="WikiSuporte", page_icon="🏆", layout="wide")
 
-if process_forced_logout_from_url():
-    st.rerun()
-
-# Verificação de autenticação com default explícito para False e mensagem de redirecionamento para melhor UX
-if not st.session_state.get('autenticado', False):
-    st.info("Redirecionando para a página de login...")  # Sugestão: Adicionar feedback ao usuário
-    st.switch_page("app.py")
-render_global_notifications_listener()
-wiki_theme_apply_authenticated()
+# Exige login (com restauração de sessão via cookie num F5 direto na página).
+require_login()
 
 # Recuperação de variáveis de sessão com verificações para evitar erros
 usuario_logado_id = st.session_state.get('usuario_id')

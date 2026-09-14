@@ -13,20 +13,11 @@ from modules.database import get_connection
 from retry_requests import retry
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
-from services.ui_realtime import render_global_notifications_listener
-from services.ui_theme_presets import wiki_theme_apply_authenticated
-from services.wiki_authenticator import process_forced_logout_from_url
+from services.auth_guard import require_login
 
 # ==========================================
 # 1. SEGURANÇA E SESSÃO
 # ==========================================
-
-# Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-if "notificacoes_lidas" not in st.session_state:
-    st.session_state["notificacoes_lidas"] = []
-
 
 st.set_page_config(
     page_title="WikiSuporte",
@@ -35,17 +26,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-if process_forced_logout_from_url():
-    st.rerun()
-
-# Cadeado: impede acesso direto sem login
+# Exige login (com restauração de sessão via cookie num F5 direto na página).
 # Intencionalmente sem restrição a perfil=admin (decisão confirmada em
 # 2026-09-11): qualquer analista autenticado pode ver este dashboard,
 # diferente de 1_Dashboard_Atendimentos.py, que é admin-only.
-if not st.session_state.get("autenticado", False):
-    st.switch_page("app.py")
-render_global_notifications_listener()
-wiki_theme_apply_authenticated()
+require_login()
 
 # ID do usuário logado (usado nos logs de auditoria)
 usuario_id = st.session_state.get("usuario_id")

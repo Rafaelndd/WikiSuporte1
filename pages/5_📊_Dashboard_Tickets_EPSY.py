@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from modules.database import get_connection
 from services.auth_guard import require_login
-from services.ui_realtime import render_global_notifications_listener
-from services.wiki_authenticator import process_forced_logout_from_url
 
 # ==========================================
 # 1. CONFIGURAÇÕES DA PÁGINA E SEGURANÇA
@@ -19,14 +17,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-if process_forced_logout_from_url():
-    st.rerun()
+# Exige login (com restauração de sessão via cookie num F5 direto na página).
 # Intencionalmente sem restrição a perfil=admin (decisão confirmada em
 # 2026-09-11): qualquer analista autenticado pode ver este dashboard,
 # diferente de 1_Dashboard_Atendimentos.py, que é admin-only.
-if not st.session_state.get("autenticado", False):
-    st.switch_page("app.py")
-render_global_notifications_listener()
 perfil_logado = require_login()
 
 # ==========================================
