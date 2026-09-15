@@ -51,7 +51,6 @@ def carregar_tickets_cruzados():
         df = pd.read_sql(query, engine)
         if not df.empty and "data_abertura" in df.columns:
             df["data_abertura"] = pd.to_datetime(df["data_abertura"], errors="coerce")
-            df["Mes_Ano"] = df["data_abertura"].dt.strftime("%m/%Y")
         return df
     except Exception as e:
         st.error(f"Erro ao buscar dados dos tickets: {e}")
@@ -64,6 +63,13 @@ def _status_eh_aberto(s: str) -> bool:
         return True
     u = str(s).strip().upper()
     return u not in ("CONCLUÍDO", "CONCLUIDO", "FECHADO", "RESOLVIDO", "CANCELADO")
+
+
+def _status_tecnuv_eh_fechado(s) -> bool:
+    """Considera fechado no fornecedor Tecnuv todo status Encerrado/Cancelado (case-insensitive)."""
+    if pd.isna(s) or not str(s).strip():
+        return False
+    return str(s).strip().upper() in ("ENCERRADO", "CANCELADO")
 
 
 def _parse_tempo_aberto_str(tempo_str):
@@ -94,13 +100,14 @@ def _parse_tempo_aberto_str(tempo_str):
 # 3. CABEÇALHO E FILTROS
 # ==========================================
 st.title("📊 Dashboard - Tickets EPSY")
-st.markdown(
-    "Visão executiva e operacional dos tickets: clientes que mais abrem, principais assuntos, "
-    "tempo médio e fila atual. Por padrão são exibidos **somente os tickets em aberto**."
+st.caption(
+    "Visão geral dos tickets: clientes que mais abrem, principais assuntos, tempo médio e fila atual"
 )
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
-        "Use os **filtros** para mudar período, status ou analista. O padrão é **Somente abertos**. "
+        "Use os **filtros** para mudar período, status ou analista. O padrão é **Somente abertos**, "
+        "que também esconde tickets com **Status Fornecedor** Encerrado ou Cancelado (mesmo que o "
+        "ticket ainda conste como aberto na EPSY). Para ver esses casos, use o filtro **Todos**. "
         "Os **gráficos de barras** mostram quais clientes mais abriram tickets e os principais assuntos. "
         "**Tempo médio em aberto** refere-se aos tickets ainda abertos; **tempo médio até fechamento** "
     )
@@ -120,8 +127,16 @@ df_raw["tempo_fechamento_dias"] = df_raw["tempo_aberto_str"].apply(_parse_tempo_
 with st.expander("⚙️ Filtros", expanded=True):
     col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
     with col_f1:
-        meses_disp = ["Todos"] + sorted(df_raw["Mes_Ano"].dropna().unique().tolist(), reverse=True)
-        mes_filtro = st.selectbox("📅 Período (Mês/Ano):", meses_disp)
+        datas_validas = df_raw["data_abertura"].dropna()
+        data_min = datas_validas.min().date() if not datas_validas.empty else None
+        data_max = datas_validas.max().date() if not datas_validas.empty else None
+        periodo_filtro = st.date_input(
+            "📅 Período:",
+            value=(data_min, data_max) if data_min and data_max else (),
+            min_value=data_min,
+            max_value=data_max,
+            format="DD/MM/YYYY",
+        )
     with col_f2:
         # Opção "Somente abertos" como padrão
         tipo_filtro = st.radio(
@@ -142,12 +157,17 @@ with st.expander("⚙️ Filtros", expanded=True):
 
 # Aplicar filtros
 df = df_raw.copy()
-if mes_filtro != "Todos":
-    df = df[df["Mes_Ano"] == mes_filtro]
+if isinstance(periodo_filtro, (tuple, list)) and len(periodo_filtro) == 2:
+    data_ini, data_fim = periodo_filtro
+    df = df[
+        (df["data_abertura"].dt.date >= data_ini) & (df["data_abertura"].dt.date <= data_fim)
+    ]
+elif isinstance(periodo_filtro, (tuple, list)) and len(periodo_filtro) == 1:
+    df = df[df["data_abertura"].dt.date == periodo_filtro[0]]
 if analista_filtro != "Todos":
     df = df[df["nome_analista"] == analista_filtro]
 if tipo_filtro == "Somente abertos":
-    df = df[df["eh_aberto"]]
+    df = df[df["eh_aberto"] & ~df["status_tecnuv"].apply(_status_tecnuv_eh_fechado)]
 elif tipo_filtro == "Somente fechados":
     df = df[~df["eh_aberto"]]
 
@@ -158,8 +178,6 @@ if df.empty:
 # ==========================================
 # 4. KPIs (CARDS NO MESMO ESTILO DOS OUTROS DASHBOARDS)
 # ==========================================
-st.markdown("<br>", unsafe_allow_html=True)
-
 total_filtrado = len(df)
 abertos_filtrado = int(df["eh_aberto"].sum())
 fechados_filtrado = total_filtrado - abertos_filtrado
@@ -190,7 +208,7 @@ with c1:
         st.metric("📦 Total (filtro)", total_filtrado)
 with c2:
     with st.container(border=True):
-        st.metric("🔥 Em aberto", abertos_filtrado, delta_color="inverse")
+        st.metric("🔥 Em aberto", abertos_filtrado)
 with c3:
     with st.container(border=True):
         st.metric("✅ Fechados (filtro)", fechados_filtrado)
@@ -199,7 +217,12 @@ with c4:
         st.metric("⏱️ Tempo médio em aberto", tempo_medio_aberto_str)
 with c5:
     with st.container(border=True):
-        st.metric("📊 Tempo médio até fechamento", tempo_medio_fechamento_str)
+        st.metric(
+            "📊 Tempo médio até fechamento",
+            tempo_medio_fechamento_str,
+            help="Considera apenas tickets concluídos com tempo registrado. "
+            "Tickets cancelados não têm esse tempo disponível e são excluídos do cálculo.",
+        )
 
 st.divider()
 
@@ -207,121 +230,114 @@ st.divider()
 # 5. GRÁFICOS DE BARRAS (CLIENTES, ASSUNTOS, ANALISTA)
 # ==========================================
 st.markdown("#### 📈 Indicadores para a equipe")
-g1, g2 = st.columns(2)
 
-with g1:
-    with st.container(border=True):
-        st.markdown("#### 🏢 Clientes que mais abriram tickets")
-        cliente_nome_ok = df["cliente_nome"].fillna("(Sem nome)")
-        top_clientes = cliente_nome_ok.value_counts().head(15)
-        if top_clientes.empty:
-            st.caption("Nenhum dado no filtro atual.")
-        else:
-            df_cli = top_clientes.reset_index()
-            df_cli.columns = ["Cliente", "Quantidade"]
-            fig_cli = px.bar(
-                df_cli,
-                x="Quantidade",
-                y="Cliente",
-                orientation="h",
-                text="Quantidade",
-                color="Quantidade",
-                color_continuous_scale="Blues",
-            )
-            fig_cli.update_layout(
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=0, r=0, t=24, b=0),
-                coloraxis_showscale=False,
-                yaxis={"categoryorder": "total ascending"},
-            )
-            fig_cli.update_traces(textposition="outside")
-            st.plotly_chart(fig_cli, use_container_width=True)
+with st.container(border=True):
+    st.markdown("#### 🏢 Clientes que mais abriram tickets")
+    cliente_nome_ok = df["cliente_nome"].fillna("(Sem nome)")
+    top_clientes = cliente_nome_ok.value_counts().head(15)
+    if top_clientes.empty:
+        st.caption("Nenhum dado no filtro atual.")
+    else:
+        df_cli = top_clientes.reset_index()
+        df_cli.columns = ["Cliente", "Quantidade"]
+        fig_cli = px.bar(
+            df_cli,
+            x="Quantidade",
+            y="Cliente",
+            orientation="h",
+            text="Quantidade",
+            color="Quantidade",
+            color_continuous_scale="Blues",
+        )
+        fig_cli.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=24, b=0),
+            coloraxis_showscale=False,
+            yaxis={"categoryorder": "total ascending"},
+        )
+        fig_cli.update_traces(textposition="outside")
+        st.plotly_chart(fig_cli, use_container_width=True)
 
-with g2:
-    with st.container(border=True):
-        st.markdown("#### 📌 Principais assuntos")
-        assuntos = df["assunto"].fillna("(Sem assunto)").astype(str)
-        assuntos_trunc = assuntos.str.slice(0, 48) + np.where(assuntos.str.len() > 48, "…", "")
-        top_assuntos = assuntos_trunc.value_counts().head(15)
-        if top_assuntos.empty:
-            st.caption("Nenhum dado no filtro atual.")
-        else:
-            df_ass = top_assuntos.reset_index()
-            df_ass.columns = ["Assunto", "Quantidade"]
-            fig_ass = px.bar(
-                df_ass,
-                x="Quantidade",
-                y="Assunto",
-                orientation="h",
-                text="Quantidade",
-                color="Quantidade",
-                color_continuous_scale="Teal",
-            )
-            fig_ass.update_layout(
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=0, r=0, t=24, b=0),
-                coloraxis_showscale=False,
-                yaxis={"categoryorder": "total ascending"},
-            )
-            fig_ass.update_traces(textposition="outside")
-            st.plotly_chart(fig_ass, use_container_width=True)
+with st.container(border=True):
+    st.markdown("#### 📌 Principais assuntos")
+    assuntos = df["assunto"].fillna("(Sem assunto)").astype(str)
+    assuntos_trunc = assuntos.str.slice(0, 48) + np.where(assuntos.str.len() > 48, "…", "")
+    top_assuntos = assuntos_trunc.value_counts().head(15)
+    if top_assuntos.empty:
+        st.caption("Nenhum dado no filtro atual.")
+    else:
+        df_ass = top_assuntos.reset_index()
+        df_ass.columns = ["Assunto", "Quantidade"]
+        fig_ass = px.bar(
+            df_ass,
+            x="Quantidade",
+            y="Assunto",
+            orientation="h",
+            text="Quantidade",
+            color="Quantidade",
+            color_continuous_scale="Teal",
+        )
+        fig_ass.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=24, b=0),
+            coloraxis_showscale=False,
+            yaxis={"categoryorder": "total ascending"},
+        )
+        fig_ass.update_traces(textposition="outside")
+        st.plotly_chart(fig_ass, use_container_width=True)
 
-# Segunda linha: Volume por analista + Distribuição por status
-g3, g4 = st.columns(2)
-with g3:
-    with st.container(border=True):
-        st.markdown("#### 🏆 Volume por analista")
-        df_ana = df["nome_analista"].value_counts().reset_index()
-        df_ana.columns = ["Analista", "Volume"]
-        if df_ana.empty:
-            st.caption("Nenhum dado no filtro atual.")
-        else:
-            fig_ana = px.bar(
-                df_ana,
-                x="Volume",
-                y="Analista",
-                orientation="h",
-                text="Volume",
-                color="Volume",
-                color_continuous_scale="Blues",
-            )
-            fig_ana.update_layout(
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=0, r=0, t=24, b=0),
-                coloraxis_showscale=False,
-                yaxis={"categoryorder": "total ascending"},
-            )
-            fig_ana.update_traces(textposition="outside")
-            st.plotly_chart(fig_ana, use_container_width=True)
+with st.container(border=True):
+    st.markdown("#### 🏆 Volume por analista")
+    df_ana = df["nome_analista"].value_counts().reset_index()
+    df_ana.columns = ["Analista", "Volume"]
+    if df_ana.empty:
+        st.caption("Nenhum dado no filtro atual.")
+    else:
+        fig_ana = px.bar(
+            df_ana,
+            x="Volume",
+            y="Analista",
+            orientation="h",
+            text="Volume",
+            color="Volume",
+            color_continuous_scale="Blues",
+        )
+        fig_ana.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=24, b=0),
+            coloraxis_showscale=False,
+            yaxis={"categoryorder": "total ascending"},
+        )
+        fig_ana.update_traces(textposition="outside")
+        st.plotly_chart(fig_ana, use_container_width=True)
 
-with g4:
-    with st.container(border=True):
-        st.markdown("#### 🚥 Distribuição por status")
-        df_st = df["status_atual"].value_counts().reset_index()
-        df_st.columns = ["Status", "Quantidade"]
-        if df_st.empty:
-            st.caption("Nenhum dado no filtro atual.")
-        else:
-            fig_st = px.pie(
-                df_st,
-                values="Quantidade",
-                names="Status",
-                hole=0.5,
-                color_discrete_sequence=px.colors.qualitative.Set1,
-            )
-            fig_st.update_layout(
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=0, r=0, t=24, b=0),
-            )
-            st.plotly_chart(fig_st, use_container_width=True)
+with st.container(border=True):
+    st.markdown("#### 🚥 Distribuição por status")
+    df_st = df["status_atual"].value_counts().reset_index()
+    df_st.columns = ["Status", "Quantidade"]
+    if df_st.empty:
+        st.caption("Nenhum dado no filtro atual.")
+    else:
+        fig_st = px.pie(
+            df_st,
+            values="Quantidade",
+            names="Status",
+            hole=0.5,
+            color_discrete_sequence=px.colors.qualitative.Set1,
+        )
+        fig_st.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=24, b=0),
+        )
+        st.plotly_chart(fig_st, use_container_width=True)
 
 st.divider()
 
