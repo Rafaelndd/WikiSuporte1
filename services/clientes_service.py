@@ -212,7 +212,7 @@ def vincular_telefone_cliente(
                 except Exception:
                     id_cli = conn.execute(text("INSERT INTO clientes_crm (razao_social) VALUES (:n) RETURNING id_cliente"), {"n": razao_social.strip()}).scalar()
             ja_vinculado = conn.execute(
-                text("SELECT id_telefone FROM clientes_telefones WHERE id_cliente = :id AND numero = :num LIMIT 1"),
+                text("SELECT id FROM clientes_telefones WHERE id_cliente = :id AND numero = :num LIMIT 1"),
                 {"id": id_cli, "num": numero},
             ).fetchone()
             if ja_vinculado:
