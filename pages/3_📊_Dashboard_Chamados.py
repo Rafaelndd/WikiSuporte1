@@ -628,9 +628,7 @@ if _ultima_atualizacao is not None:
     st.caption(f"🕓 Dados atualizados em {_ultima_atualizacao.strftime('%d/%m/%Y %H:%M')}")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
-        "**Período padrão:** 12 meses. **Status padrão:** Pendente representante. "
-        "\n\n"
-        "Se não vir mudança na hora, clique **🔄 Atualizar** nos filtros (limpa cache)."
+        "**Período padrão:** 12 meses. **Status padrão:** Pendente representante."
     )
 
 min_data_db, max_data_db, analistas_db = carregar_contexto_filtros()
@@ -641,8 +639,8 @@ min_data_db, max_data_db, analistas_db = carregar_contexto_filtros()
 OPCOES_STATUS_FILTRO = [s for s in STATUS_DASHBOARD_LABELS if s != "Outros"]
 
 with st.expander("⚙️ Filtros: ", expanded=True):
-    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
-    
+    col_f1, col_f2, col_f3 = st.columns([2, 2, 2])
+
     with col_f1:
         # Padrão: últimos 12 meses; limites baseados no banco sem puxar a tabela inteira.
         hoje = datetime.now().date()
@@ -669,13 +667,6 @@ with st.expander("⚙️ Filtros: ", expanded=True):
             default=["Pendente representante"],
             help="Filtra chamados que tenham estes status (normalizados) no período. As outras abas usam TODOS os chamados do período até você ajustar o status.",
         )
-        
-    with col_f4:
-        st.write("")
-        st.write("")
-        if st.button("🔄 Atualizar", width='stretch', help="Limpa cache e relê o banco (use após o bot sincronizar)"):
-            st.cache_data.clear()
-            st.rerun()
 
 if len(datas_selecionadas) != 2:
     st.warning("Selecione um intervalo de início e fim para continuar.")

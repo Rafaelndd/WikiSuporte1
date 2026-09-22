@@ -140,7 +140,7 @@ df_raw["tempo_fechamento_dias"] = df_raw["tempo_aberto_str"].apply(_parse_tempo_
 
 # Painel de filtros (estilo Dashboard Chamados / Atendimentos)
 with st.expander("⚙️ Filtros", expanded=True):
-    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1])
+    col_f1, col_f2, col_f3 = st.columns([2, 2, 2])
     with col_f1:
         datas_validas = df_raw["data_abertura"].dropna()
         data_min = datas_validas.min().date() if not datas_validas.empty else None
@@ -163,12 +163,6 @@ with st.expander("⚙️ Filtros", expanded=True):
     with col_f3:
         analista_disp = ["Todos"] + sorted(df_raw["nome_analista"].dropna().unique().tolist())
         analista_filtro = st.selectbox("👤 Analista:", analista_disp)
-    with col_f4:
-        st.write("")
-        st.write("")
-        if st.button("🔄 Atualizar", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
 
 # Aplicar filtros
 df = df_raw.copy()

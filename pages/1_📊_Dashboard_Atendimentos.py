@@ -210,7 +210,7 @@ if df_goto_raw.empty and df_multi360_raw.empty:
 
 # --- NOVO PAINEL DE FILTROS NA PÁGINA PRINCIPAL ---
 with st.expander("⚙️ Filtros: ", expanded=True):
-    col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
+    col_f1, col_f2 = st.columns([2, 1])
     
     with col_f1:
         # Descobre as datas dinamicamente
@@ -237,13 +237,6 @@ with st.expander("⚙️ Filtros: ", expanded=True):
         
     with col_f2:
         sla_finalizacao_horas = st.number_input("⏱️ Meta SLA WhatsApp (Horas):", value=24)
-        
-    with col_f3:
-        st.write("") 
-        st.write("")
-        if st.button("🔄 Atualizar", width='stretch'):
-            st.cache_data.clear()
-            st.rerun()
 
 
 # --- APLICAÇÃO DE FILTROS BÁSICOS (DATAS) ---
