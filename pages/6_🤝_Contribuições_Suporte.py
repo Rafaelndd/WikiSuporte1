@@ -172,7 +172,6 @@ aba_ativa = st.segmented_control(
     default=labels_abas[0],
     key="cs_aba_ativa",
     label_visibility="collapsed",
-    required=True,
 )
 if aba_ativa not in labels_abas:
     aba_ativa = labels_abas[0]

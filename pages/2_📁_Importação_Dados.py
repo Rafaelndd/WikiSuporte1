@@ -240,8 +240,9 @@ aba_ativa = st.segmented_control(
     default=ABA_API,
     key="imp_aba_ativa",
     label_visibility="collapsed",
-    required=True,
 )
+if aba_ativa not in (ABA_API, ABA_IMPORTAR, ABA_PLANTAO):
+    aba_ativa = ABA_API
 st.divider()
 
 # ------------------------------------------

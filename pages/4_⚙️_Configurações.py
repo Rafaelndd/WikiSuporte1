@@ -56,8 +56,9 @@ aba_ativa = st.segmented_control(
     default=ABA_CLIENTES,
     key="cfg_aba_ativa",
     label_visibility="collapsed",
-    required=True,
 )
+if aba_ativa not in (ABA_CLIENTES, ABA_NOTIFICACOES):
+    aba_ativa = ABA_CLIENTES
 st.divider()
 
 
