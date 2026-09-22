@@ -188,6 +188,9 @@ def carregar_chamados_para_classificar() -> pd.DataFrame:
                 SELECT
                     c.nr_chamado,
                     {expr_cliente} AS cliente_nome,
+                    c.titulo,
+                    c.assunto_html,
+                    c.data_abertura,
                     {sql_categoria} AS categoria_ia
                 FROM chamados_tecnuv c
                 WHERE COALESCE(TRIM(c.status_atual), '') NOT IN ('Encerrado', 'Cancelado')
@@ -196,9 +199,26 @@ def carregar_chamados_para_classificar() -> pd.DataFrame:
             ),
             engine,
         )
-        return df
+
+        def _titulo_ou_resumo(row):
+            t = str(row.get("titulo") or "").strip()
+            if t:
+                return t
+            html = row.get("assunto_html")
+            if not html or not str(html).strip():
+                return ""
+            try:
+                texto = BeautifulSoup(str(html), "html.parser").get_text(separator=" ").strip()
+            except Exception:
+                texto = str(html)
+            return texto[:150] + ("…" if len(texto) > 150 else "")
+
+        df["titulo_ou_resumo"] = df.apply(_titulo_ou_resumo, axis=1)
+        return df.drop(columns=["titulo", "assunto_html"])
     except Exception:
-        return pd.DataFrame(columns=["nr_chamado", "cliente_nome", "categoria_ia"])
+        return pd.DataFrame(
+            columns=["nr_chamado", "cliente_nome", "titulo_ou_resumo", "data_abertura", "categoria_ia"]
+        )
 
 
 @st.cache_data(ttl=45)
@@ -1436,12 +1456,29 @@ with aba3:
             )
             _OPCOES_CATEGORIA = ["Erro", "Melhoria", "Adequação Fiscal"]
             df_classif = carregar_chamados_para_classificar().copy()
-            df_classif = df_classif.rename(columns={"cliente_nome": "Cliente", "categoria_ia": "Categoria atual"})
-            df_classif["Categoria atual"] = df_classif["Categoria atual"].replace("Não classificada", "")
-            df_classif["_sem_categoria"] = df_classif["Categoria atual"].eq("") | df_classif["Categoria atual"].isna()
+            df_classif["_sem_categoria"] = df_classif["categoria_ia"].isna() | (
+                df_classif["categoria_ia"].astype(str).str.strip() == ""
+            )
+            df_classif["categoria_ia"] = df_classif["categoria_ia"].where(
+                ~df_classif["_sem_categoria"], "Sem classificação"
+            )
             df_classif = df_classif.sort_values(
                 ["_sem_categoria", "nr_chamado"], ascending=[False, False]
             ).drop(columns="_sem_categoria")
+            df_classif = df_classif.rename(
+                columns={
+                    "cliente_nome": "Cliente",
+                    "titulo_ou_resumo": "Título/Descrição",
+                    "data_abertura": "Data abertura",
+                    "categoria_ia": "Categoria atual",
+                }
+            )
+            df_classif["Data abertura"] = pd.to_datetime(
+                df_classif["Data abertura"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y").fillna("—")
+            df_classif = df_classif[
+                ["nr_chamado", "Cliente", "Título/Descrição", "Data abertura", "Categoria atual"]
+            ]
             df_classif.insert(0, "Selecionar", False)
 
             editado_classif = st.data_editor(
@@ -1449,9 +1486,10 @@ with aba3:
                 hide_index=True,
                 use_container_width=True,
                 height=400,
-                disabled=["nr_chamado", "Cliente", "Categoria atual"],
+                disabled=["nr_chamado", "Cliente", "Título/Descrição", "Data abertura", "Categoria atual"],
                 column_config={
                     "Selecionar": st.column_config.CheckboxColumn(help="Marque os chamados a classificar em lote."),
+                    "Título/Descrição": st.column_config.TextColumn(width="large"),
                 },
                 key="editor_classificacao_manual_chamados",
             )
