@@ -151,6 +151,18 @@ def carregar_contexto_filtros() -> Tuple[Optional[datetime], Optional[datetime],
         return None, None, []
 
 
+@st.cache_data(ttl=60)
+def carregar_ultima_atualizacao() -> Optional[datetime]:
+    """Data/hora da última gravação em chamados_tecnuv (coluna atualizado_em, mantida pelo robô)."""
+    try:
+        engine = get_connection()
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT MAX(atualizado_em) FROM chamados_tecnuv")).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=45)
 def carregar_dados_tecnuv(data_inicio: datetime, data_fim_exclusivo: datetime, analista: str):
     engine = get_connection()
@@ -611,6 +623,9 @@ def sincronizar_chamados(
 # ==========================================
 st.title("🖥️ Dashboard Chamados")
 st.markdown("Análise detalhada dos chamados, com foco em tempo de atendimento, reincidências e desempenho da desenvolvedora.")
+_ultima_atualizacao = carregar_ultima_atualizacao()
+if _ultima_atualizacao is not None:
+    st.caption(f"🕓 Dados atualizados em {_ultima_atualizacao.strftime('%d/%m/%Y %H:%M')}")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
         "**Período padrão:** 12 meses. **Status padrão:** Pendente representante. "

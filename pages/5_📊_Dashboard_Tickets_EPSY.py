@@ -57,6 +57,18 @@ def carregar_tickets_cruzados():
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=60)
+def carregar_ultima_atualizacao():
+    """Data/hora da última gravação em tickets_epsy (coluna atualizado_em, mantida pelo robô)."""
+    try:
+        engine = get_connection()
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT MAX(atualizado_em) FROM tickets_epsy")).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 def _status_eh_aberto(s: str) -> bool:
     """Considera aberto todo status que não for concluído/fechado/resolvido."""
     if pd.isna(s) or not str(s).strip():
@@ -103,6 +115,9 @@ st.title("📊 Dashboard - Tickets EPSY")
 st.caption(
     "Visão geral dos tickets: clientes que mais abrem, principais assuntos, tempo médio e fila atual"
 )
+_ultima_atualizacao = carregar_ultima_atualizacao()
+if _ultima_atualizacao is not None:
+    st.caption(f"🕓 Dados atualizados em {_ultima_atualizacao.strftime('%d/%m/%Y %H:%M')}")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
         "Use os **filtros** para mudar período, status ou analista. O padrão é **Somente abertos**, "
