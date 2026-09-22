@@ -163,6 +163,44 @@ def carregar_ultima_atualizacao() -> Optional[datetime]:
         return None
 
 
+@st.cache_data(ttl=60)
+def carregar_chamados_para_classificar() -> pd.DataFrame:
+    """
+    Todos os chamados abertos (não Encerrado/Cancelado), independente de
+    período/versão/analista filtrados na tela — a classificação manual
+    precisa enxergar o backlog inteiro, não só o recorte atual.
+    """
+    engine = get_connection()
+    meta = _metadata_chamados_tecnuv()
+    expr_cliente = meta["expr_cliente"]
+    tem_categoria = "categoria_ia" in meta["colunas"]
+    tem_categoria_manual = "categoria_manual" in meta["colunas"]
+    if tem_categoria and tem_categoria_manual:
+        sql_categoria = "COALESCE(c.categoria_manual, c.categoria_ia)"
+    elif tem_categoria:
+        sql_categoria = "c.categoria_ia"
+    else:
+        sql_categoria = "NULL::text"
+    try:
+        df = pd.read_sql(
+            text(
+                f"""
+                SELECT
+                    c.nr_chamado,
+                    {expr_cliente} AS cliente_nome,
+                    {sql_categoria} AS categoria_ia
+                FROM chamados_tecnuv c
+                WHERE COALESCE(TRIM(c.status_atual), '') NOT IN ('Encerrado', 'Cancelado')
+                ORDER BY c.nr_chamado DESC
+                """
+            ),
+            engine,
+        )
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["nr_chamado", "cliente_nome", "categoria_ia"])
+
+
 @st.cache_data(ttl=45)
 def carregar_dados_tecnuv(data_inicio: datetime, data_fim_exclusivo: datetime, analista: str):
     engine = get_connection()
@@ -1391,13 +1429,14 @@ with aba3:
         with st.expander("🏷️ Classificar chamados manualmente", expanded=False):
             st.caption(
                 "A classificação automática já roda por palavra-chave no título (ex.: **[ERRO]**, **[MELHORIA]**, **fiscal**). "
-                "Os **não classificados** aparecem primeiro. Marque um ou vários, escolha a categoria e aplique de uma vez — "
+                "Lista **todos os chamados abertos** (independente dos filtros de período/versão acima) — os "
+                "**não classificados** aparecem primeiro. Marque um ou vários, escolha a categoria e aplique de uma vez — "
                 "também funciona para **reclassificar** chamados que já têm categoria. Sua escolha manual sempre tem "
                 "prioridade sobre a automática."
             )
             _OPCOES_CATEGORIA = ["Erro", "Melhoria", "Adequação Fiscal"]
-            df_classif = det_sorted[["nr_chamado", "Cliente", "categoria_ia"]].copy()
-            df_classif = df_classif.rename(columns={"categoria_ia": "Categoria atual"})
+            df_classif = carregar_chamados_para_classificar().copy()
+            df_classif = df_classif.rename(columns={"cliente_nome": "Cliente", "categoria_ia": "Categoria atual"})
             df_classif["Categoria atual"] = df_classif["Categoria atual"].replace("Não classificada", "")
             df_classif["_sem_categoria"] = df_classif["Categoria atual"].eq("") | df_classif["Categoria atual"].isna()
             df_classif = df_classif.sort_values(
