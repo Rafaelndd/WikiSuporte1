@@ -118,3 +118,7 @@ uploads/
 database/pgvector/pgvector-master/
 database/pgvector/
 Prompts.txt
+
+# Estado runtime do robô de raspagem (reescrito a cada ciclo) — não é código,
+# não deve gerar diff a cada commit.
+robo_state.json
