@@ -98,15 +98,20 @@ function Find-PgDump {
     return $null
 }
 
-function Get-DbPasswordFromEnv {
+function Get-EnvValue {
+    param([string]$Key, [string]$Default = $null)
     $envFile = Join-Path $root '.env'
-    if (-not (Test-Path -LiteralPath $envFile)) { return $null }
+    if (-not (Test-Path -LiteralPath $envFile)) { return $Default }
     foreach ($line in Get-Content -LiteralPath $envFile -Encoding UTF8) {
-        if ($line -match '^\s*DB_PASS\s*=\s*(.*)$') {
+        if ($line -match "^\s*$Key\s*=\s*(.*)$") {
             return $Matches[1].Trim().Trim('"')
         }
     }
-    return $null
+    return $Default
+}
+
+function Get-DbPasswordFromEnv {
+    return Get-EnvValue -Key 'DB_PASS'
 }
 
 function Add-ZipEntrySafe {
@@ -123,7 +128,7 @@ function Add-ZipEntrySafe {
         )
         return $true
     } catch {
-        Write-BackupLog "ZIP skip (bloqueado ou erro): $SourceFile — $($_.Exception.Message)"
+        Write-BackupLog "ZIP skip (bloqueado ou erro): $SourceFile - $($_.Exception.Message)"
         return $false
     }
 }
@@ -184,7 +189,7 @@ if (-not (Test-Path -LiteralPath $backupsDir)) {
     New-Item -ItemType Directory -Path $backupsDir -Force | Out-Null
 }
 
-Write-Host "=== WikiSuporte — 03_create_backup.ps1 ===" -ForegroundColor White
+Write-Host "=== WikiSuporte - 03_create_backup.ps1 ===" -ForegroundColor White
 Write-Host "Raiz: $root" -ForegroundColor Gray
 
 $pgDump = Find-PgDump
@@ -198,10 +203,16 @@ if (-not $pgDump) {
 # pg_dump → raiz (temporário)
 # ---------------------------------------------------------------------------
 $dbPass = Get-DbPasswordFromEnv
+$dbName = Get-EnvValue -Key 'DB_NAME' -Default 'wikisuporte'
+$dbUser = Get-EnvValue -Key 'DB_USER' -Default 'postgres'
+$dbHost = Get-EnvValue -Key 'DB_HOST' -Default 'localhost'
+$dbPort = Get-EnvValue -Key 'DB_PORT' -Default '5432'
 $env:PGPASSWORD = $dbPass
+$prevErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
-    Write-Host "A executar pg_dump (wikisuporte)..." -ForegroundColor Cyan
-    & $pgDump -U postgres -d wikisuporte -F p -f $dumpPath -v 2>&1 | ForEach-Object { Write-Host $_ }
+    Write-Host "A executar pg_dump ($dbName)..." -ForegroundColor Cyan
+    & $pgDump -h $dbHost -p $dbPort -U $dbUser -d $dbName -F p -f $dumpPath -v 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { throw "pg_dump exit $LASTEXITCODE" }
     if (-not (Test-Path -LiteralPath $dumpPath) -or ((Get-Item $dumpPath).Length -lt 1)) {
         throw 'Dump vazio ou não criado.'
@@ -211,9 +222,11 @@ try {
     $msg = "FALHA pg_dump: $($_.Exception.Message)"
     Write-BackupLog $msg -ErrorOnly
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    $ErrorActionPreference = $prevErrorActionPreference
     exit 1
 } finally {
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    $ErrorActionPreference = $prevErrorActionPreference
 }
 
 # ---------------------------------------------------------------------------
