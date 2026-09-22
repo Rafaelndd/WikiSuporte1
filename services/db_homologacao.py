@@ -138,6 +138,26 @@ def _extrair_versao_do_titulo(texto: str) -> str:
     return m.group(1) if m else ""
 
 
+def obter_ultimo_release_salvo() -> Optional[str]:
+    """Versão do release mais recente salvo (tabela releases), ou None se vazia."""
+    engine = get_connection()
+    with engine.connect() as c:
+        row = c.execute(
+            text(
+                """
+                SELECT versao_release
+                FROM releases
+                ORDER BY data_liberacao DESC NULLS LAST, id_release DESC
+                LIMIT 1
+                """
+            )
+        ).fetchone()
+    if not row or not row[0]:
+        return None
+    titulo = str(row[0]).strip()
+    return _extrair_versao_do_titulo(titulo) or titulo
+
+
 def get_helpdesk_release_head() -> tuple[str, str]:
     """(titulo_link_primeiro_release, versao_norm). Tabela helpdesk_release_head id=1."""
     try:
@@ -494,7 +514,9 @@ def buscar_release_itens_semantico(
     para ranking semântico; sem coluna embedding ou sem API, usa texto.
     """
     engine = get_connection()
-    consulta = (consulta or "").strip()
+    # Normaliza espaços (múltiplos/borda) para não perder correspondências no ILIKE por causa
+    # de digitação; a comparação em si já é case-insensitive (ILIKE cobre caixa alta/baixa).
+    consulta = re.sub(r"\s+", " ", (consulta or "").strip())
     params: dict = {"lim": int(limite)}
     nr_filter: Optional[int] = None
     if nr_chamado is not None:

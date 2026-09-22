@@ -4,7 +4,6 @@ import pandas as pd
 import re
 import io
 import datetime
-import os
 from sqlalchemy import text
 from modules.database import get_connection
 from modules.processador_csv import gerar_hash_lgpd
@@ -217,7 +216,7 @@ def is_plantao_normal(dt):
 # 3. INTERFACE DE USUÁRIO (UX) - ABAS
 # ==========================================
 st.title("📁 Importação e Exportação de Relatórios")
-st.markdown("Importe seus relatórios de atendimento do GoTo Connect e Multi360 para alimentar os dashboards do WikiSuporte! Siga as instruções abaixo para garantir que seus dados sejam processados corretamente.")
+st.caption("Importe seus relatórios de atendimento do GoTo Connect e Multi360 para alimentar os dashboards do WikiSuporte! Siga as instruções abaixo para garantir que seus dados sejam processados corretamente.")
 with st.expander("🤔 Como usar esta página?"):
     st.markdown(
         "**API GoTo:** conecta direto na nuvem (precisa de credenciais no `.env`). "
@@ -226,17 +225,30 @@ with st.expander("🤔 Como usar esta página?"):
         "Após importar, use **Salvar**; se aparecer cadastro de números sem cliente, preencha para melhorar os dashboards."
     )
 
-aba1, aba2, aba3 = st.tabs([
-    "🔌 Buscar via API GoTo",
-    "📥 Importar Mensal / Relatórios",
-    "📥 Extrator de Plantões Diário",
-])
+ABA_API = "🔌 Buscar via API GoTo"
+ABA_IMPORTAR = "📥 Importar Mensal / Relatórios"
+ABA_PLANTAO = "📥 Extrator de Plantões Diário"
+
+# ``st.tabs`` reinicia sempre para a primeira aba a cada rerun (inclusive ao apertar
+# Enter num campo de texto ou clicar em qualquer botão dentro da própria aba — bug
+# conhecido do Streamlit, https://github.com/streamlit/streamlit/issues/12554).
+# ``st.segmented_control`` com ``key`` guarda a seleção em session_state como
+# qualquer outro widget, então a navegação não pula de volta ao clicar em nada.
+aba_ativa = st.segmented_control(
+    "Navegação",
+    [ABA_API, ABA_IMPORTAR, ABA_PLANTAO],
+    default=ABA_API,
+    key="imp_aba_ativa",
+    label_visibility="collapsed",
+    required=True,
+)
+st.divider()
 
 # ------------------------------------------
 # ABA 1: INTEGRAÇÃO COM A API DO GOTO (PLANO PRINCIPAL)
 # ------------------------------------------
-with aba1:
-    st.markdown("### 🔌 Buscar Atendimentos Diretamente da API GoTo Connect")
+if aba_ativa == ABA_API:
+    st.subheader("🔌 Buscar Atendimentos Diretamente da API GoTo Connect")
     st.success(
         "🚀 **Integração WikiSuporte e GoTo**\n"
         
@@ -247,10 +259,12 @@ with aba1:
         st.error("❌ Módulo `goto_api` não encontrado. Certifique-se de que o arquivo `goto_api.py` está na raiz do projeto.")
         st.stop()
 
-    # Verifica se as credenciais estão configuradas
+    # Verifica se as credenciais estão configuradas (a busca também exige GOTO_REFRESH_TOKEN,
+    # ver goto_api.buscar_atendimentos_goto — sem ele a chamada falha mesmo com Client ID/Secret certos)
     cid_env = os.getenv("GOTO_CLIENT_ID", "")
     csecret_env = os.getenv("GOTO_CLIENT_SECRET", "")
-    credenciais_configuradas = bool(cid_env and csecret_env)
+    rtoken_env = os.getenv("GOTO_REFRESH_TOKEN", "")
+    credenciais_configuradas = bool(cid_env and csecret_env and rtoken_env)
 
     with st.container(border=True):
         st.markdown("#### 🔑 Credenciais da API GoTo")
@@ -259,8 +273,8 @@ with aba1:
             usar_env = st.checkbox("Usar as credenciais configuradas no sistema.", value=True, key="goto_usar_env")
         else:
             st.warning(
-                "⚠️ Variáveis `GOTO_CLIENT_ID` e `GOTO_CLIENT_SECRET` não encontradas no `.env`. "
-                "Preencha abaixo para continuar."
+                "⚠️ Variáveis `GOTO_CLIENT_ID`, `GOTO_CLIENT_SECRET` e/ou `GOTO_REFRESH_TOKEN` não encontradas no `.env`. "
+                "Preencha Client ID/Secret abaixo para continuar (o Refresh Token só pode ser configurado no `.env`)."
             )
             usar_env = False
 
@@ -418,13 +432,15 @@ with aba1:
                     st.success(f"✅ {len(df_goto_api)} registros salvos com sucesso!")
                     registrar_log_auditoria(usuario_id, "IMPORT_API_GOTO", f"Importado via API GoTo: {len(df_goto_api)} registros")
                     del st.session_state['df_goto_api']
+                    st.rerun()
                 else:
                     st.error(f"❌ Erro ao salvar: {msg}")
 
 # ------------------------------------------
 # ABA 2: IMPORTAÇÃO DE ARQUIVOS (MENSAL) — PLANO B
 # ------------------------------------------
-with aba2:
+if aba_ativa == ABA_IMPORTAR:
+    st.subheader("📥 Importar Mensal / Relatórios")
     st.warning(
         "📋 **Upload Manual:** Use esta aba quando a API do GoTo estiver indisponível. "
         "Exporte o arquivo CSV/XLSX diretamente pelo portal GoTo e importe aqui."
@@ -498,9 +514,11 @@ with aba2:
                     nome_tabela_bd = "atendimentos_multi360"
             except Exception as e: erro_processamento = str(e)
                 
-        if erro_processamento: 
+        if erro_processamento:
             st.error(f"❌ Erro no processamento: {erro_processamento}")
-        elif df_processado is not None and not df_processado.empty:
+        elif df_processado is None or df_processado.empty:
+            st.warning("⚠️ O arquivo foi processado, mas nenhum registro válido foi encontrado nele.")
+        else:
             if len(df_processado) > MAX_REGISTROS_POR_IMPORTACAO:
                 st.error(f"⚠️ O arquivo processado possui {len(df_processado)} registros, acima do limite de {MAX_REGISTROS_POR_IMPORTACAO}.")
             else:
@@ -576,6 +594,12 @@ with aba2:
                                 df_processado['cliente_nome'] = df_processado['telefone_hash'].map(mapa_hash).fillna("Não Identificado")
                             except Exception:
                                 df_processado['cliente_nome'] = df_processado.get('cliente_nome', "Não Identificado")
+                        # Precisa gravar em session_state (igual GOTO/GOTO_AGENT_CALLS) para o botão
+                        # "Salvar" não reaproveitar por engano um df de um tipo de arquivo anterior.
+                        st.session_state["import_df_processado"] = df_processado.copy()
+                        st.session_state["import_nome_tabela"] = nome_tabela_bd
+                        st.session_state["import_tipo"] = tipo_identificado
+                        st.session_state["import_arquivo_nome"] = arquivo_upload.name
 
                     if tipo_identificado == "GOTO_AGENT_CALLS":
                         st.success(f"📞 **Relatório Agent Calls:** {len(df_processado)} chamadas atendidas (Contact Resolution = COMPLETED). Salve no banco para o Dashboard usar estes números.")
@@ -585,19 +609,24 @@ with aba2:
                         st.session_state['import_arquivo_nome'] = arquivo_upload.name
 
                     with st.container(border=True):
-                        st.markdown("### 🔍 Pré-visualização dos Dados (Prontos para o Banco)")
+                        st.markdown("#### 🔍 Pré-visualização dos Dados (Prontos para o Banco)")
                         st.dataframe(df_processado.head(5), width='stretch')
                     
                     with st.container(border=True):
                         st.markdown("#### 📊 Resumo do Arquivo Mensal")
                         col_m1, col_m2, col_m3 = st.columns(3)
                         col_m1.metric("Total de Registros", len(df_processado))
+                        # Cada tipo de arquivo tem sua própria coluna de data (GOTO_AGENT_CALLS não
+                        # tem 'data_inicio' — usar isso quebrava a página com KeyError nesse tipo).
                         if tipo_identificado == "GOTO":
-                            col_m2.metric("Data Inicial", df_processado['data_chamada'].min().strftime('%d/%m/%Y'))
-                            col_m3.metric("Data Final", df_processado['data_chamada'].max().strftime('%d/%m/%Y'))
+                            col_data_ref = df_processado["data_chamada"]
+                        elif tipo_identificado == "GOTO_AGENT_CALLS":
+                            col_data_ref = df_processado["contact_creation_time"]
                         else:
-                            col_m2.metric("Data Inicial", df_processado['data_inicio'].min().strftime('%d/%m/%Y'))
-                            col_m3.metric("Data Final", df_processado['data_inicio'].max().strftime('%d/%m/%Y'))
+                            col_data_ref = df_processado.get("data_inicio")
+                        if col_data_ref is not None and col_data_ref.notna().any():
+                            col_m2.metric("Data Inicial", col_data_ref.min().strftime('%d/%m/%Y'))
+                            col_m3.metric("Data Final", col_data_ref.max().strftime('%d/%m/%Y'))
                     
                     if st.button("💾 Salvar", type="primary", width='stretch'):
                         df_para_salvar = st.session_state.get('import_df_processado', df_processado)
@@ -618,7 +647,7 @@ with aba2:
 # ------------------------------------------
 # ABA 3: ANÁLISE DE PLANTÕES (GOTO)
 # ------------------------------------------
-with aba3:
+if aba_ativa == ABA_PLANTAO:
     st.subheader("📥 Extrator de Plantões Diário - GoTo")
     st.info("**Faça o upload do arquivo do GoTo**.")
     

@@ -15,7 +15,10 @@ import streamlit as st
 
 from services.perfil_usuario import normalizar_perfil_para_sessao
 from services.ui_theme_presets import wiki_theme_apply_authenticated
-from services.wiki_authenticator import process_forced_logout_from_url
+from services.wiki_authenticator import (
+    ensure_stauth_cookie_restored,
+    process_forced_logout_from_url,
+)
 
 
 def normalize_perfil(raw_perfil: str | None) -> str:
@@ -34,6 +37,11 @@ def require_login() -> str:
     """
     if process_forced_logout_from_url():
         st.rerun()
+    if not st.session_state.get("autenticado", False):
+        # F5 / nova aba numa subpágina abre sessão nova (sem session_state) — tenta
+        # restaurar o login pelo cookie do streamlit-authenticator antes de expulsar
+        # para app.py, senão qualquer refresh trocaria de página e voltaria à Home.
+        ensure_stauth_cookie_restored()
     if not st.session_state.get("autenticado", False):
         st.switch_page("app.py")
 

@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 # ``require_login()`` já aplica notificações globais e tema.
-require_login()
+perfil_normalizado = require_login()
 
 _ROOT = Path(__file__).resolve().parent.parent
 _FOTOS_DIR = _ROOT / "uploads" / "fotos_perfil"
@@ -44,132 +44,88 @@ if not ok_d or not dados:
     st.stop()
 
 nome = str(dados.get("nome") or "")
+username = str(dados.get("username") or "").strip()
 ramal = str(dados.get("ramal") or "").strip() or "—"
 rel_foto = str(dados.get("caminho_foto_perfil") or "").strip()
 path_foto = (_ROOT / rel_foto.replace("/", os.sep)) if rel_foto else None
 tem_foto_ficheiro = path_foto is not None and path_foto.is_file()
 
-_AVATAR_PX = 268
+_AVATAR_PX = 132
 
+# Tema é fixo em escuro (ver services/ui_theme_presets.py) — paleta única, sem fallback claro.
 st.markdown(
     """
     <style>
-    .ws-perfil-hero-avatar {
+    .ws-perfil-card {
         display: flex;
-        justify-content: flex-start;
-        align-items: flex-start;
-        padding: 0 0 0.35rem 0;
+        align-items: center;
+        gap: 1.5rem;
     }
-    .ws-perfil-hero-avatar img,
-    .ws-perfil-hero-avatar div[role="img"] {
+    .ws-perfil-card img,
+    .ws-perfil-card div[role="img"] {
         margin: 0 !important;
-        box-shadow: 0 14px 36px rgba(15, 23, 42, 0.14);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
         border-radius: 50% !important;
+        flex-shrink: 0;
     }
-    html[data-theme="dark"] .ws-perfil-hero-avatar img,
-    html[data-theme="dark"] .ws-perfil-hero-avatar div[role="img"] {
-        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
-    }
-    .ws-perfil-welcome-wrap {
-        text-align: center;
-        margin: 0.85rem auto 0.5rem;
-        max-width: 48rem;
-        padding: 0 1rem;
-    }
-    .ws-perfil-dados-wrap {
-        max-width: 36rem;
-        margin: 0.35rem 0 0 0;
-        margin-right: auto;
-        padding: 0;
-        text-align: left;
-    }
-    .ws-perfil-welcome-italic {
+    .ws-perfil-nome {
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        color: #475569;
-        font-size: clamp(1.05rem, 2.2vw, 1.28rem);
-        font-weight: 500;
-        font-style: italic;
-        line-height: 1.55;
-        margin: 0 auto;
-        max-width: 40rem;
-    }
-    html[data-theme="dark"] .ws-perfil-welcome-italic { color: #94a3b8; }
-    .ws-perfil-dado-linha {
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        font-size: clamp(1.15rem, 2.6vw, 1.45rem);
-        font-weight: 700;
-        color: #0f172a;
-        margin: 0 0 0.65rem 0;
-        line-height: 1.3;
-    }
-    html[data-theme="dark"] .ws-perfil-dado-linha { color: #f1f5f9; }
-    .ws-perfil-dado-linha .ws-perfil-rotulo {
-        color: #64748b;
-        font-weight: 700;
-        margin-right: 0.35rem;
-    }
-    html[data-theme="dark"] .ws-perfil-dado-linha .ws-perfil-rotulo { color: #94a3b8; }
-    .ws-perfil-dado-linha .ws-perfil-valor {
+        font-size: clamp(1.4rem, 3vw, 1.9rem);
         font-weight: 800;
-        color: #0f172a;
-    }
-    html[data-theme="dark"] .ws-perfil-dado-linha .ws-perfil-valor { color: #f8fafc; }
-    .ws-perfil-section-title {
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        font-size: clamp(1.25rem, 3vw, 1.6rem);
-        font-weight: 800;
-        margin: 0 0 0.35rem 0;
-        color: #0f172a;
+        color: #f8fafc;
+        margin: 0 0 0.4rem 0;
+        line-height: 1.2;
         letter-spacing: -0.02em;
     }
-    html[data-theme="dark"] .ws-perfil-section-title { color: #f1f5f9; }
+    .ws-perfil-username {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        color: #94a3b8;
+        font-size: 0.95rem;
+        margin: 0.5rem 0 0 0;
+    }
+    .ws-perfil-section-title {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-size: clamp(1.15rem, 2.6vw, 1.4rem);
+        font-weight: 800;
+        margin: 0 0 0.35rem 0;
+        color: #f1f5f9;
+        letter-spacing: -0.02em;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-_msg_boas_vindas = (
-    "Este é o seu espaço: adicione ou altere sua foto de perfil e sua senha. "
-    "Em breve teremos novas funcionalidades."
-)
-nome_safe = html_module.escape(nome)
+nome_safe = html_module.escape(nome or "Usuário")
+username_safe = html_module.escape(username)
 ramal_safe = html_module.escape(ramal)
-msg_safe = html_module.escape(_msg_boas_vindas)
 
-st.markdown(
-    '<div class="ws-perfil-hero-avatar">'
-    + html_avatar_perfil_circular(
-        str(path_foto) if tem_foto_ficheiro else None,
-        tamanho_px=_AVATAR_PX,
-    )
-    + "</div>",
-    unsafe_allow_html=True,
-)
-st.markdown(
-    f'<div class="ws-perfil-welcome-wrap">'
-    f'<p class="ws-perfil-welcome-italic">{msg_safe}</p></div>',
-    unsafe_allow_html=True,
-)
-
-st.divider()
-
-st.markdown(
-    f'<div class="ws-perfil-dados-wrap">'
-    f'<p class="ws-perfil-dado-linha">'
-    f'<span class="ws-perfil-rotulo">Usuário:</span>'
-    f'<span class="ws-perfil-valor">{nome_safe}</span></p>'
-    f'<p class="ws-perfil-dado-linha">'
-    f'<span class="ws-perfil-rotulo">Meu Ramal:</span>'
-    f'<span class="ws-perfil-valor">{ramal_safe}</span></p>'
-    f"</div>",
-    unsafe_allow_html=True,
-)
-
-st.divider()
+with st.container(border=True):
+    col_avatar, col_info = st.columns([1, 4], vertical_alignment="center")
+    with col_avatar:
+        st.markdown(
+            '<div class="ws-perfil-card">'
+            + html_avatar_perfil_circular(
+                str(path_foto) if tem_foto_ficheiro else None,
+                tamanho_px=_AVATAR_PX,
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    with col_info:
+        st.markdown(f'<p class="ws-perfil-nome">{nome_safe}</p>', unsafe_allow_html=True)
+        badge_cargo = (
+            ":violet-badge[:material/shield_person: Administrador]"
+            if perfil_normalizado == "admin"
+            else ":blue-badge[:material/support_agent: Analista]"
+        )
+        st.markdown(f"{badge_cargo} :gray-badge[:material/call: Ramal {ramal_safe}]")
+        if username_safe:
+            st.markdown(f'<p class="ws-perfil-username">@{username_safe}</p>', unsafe_allow_html=True)
 
 # ——— Foto de perfil ———
 with st.container(border=True):
-    st.markdown('<p class="ws-perfil-section-title">Foto de perfil</p>', unsafe_allow_html=True)
+    st.markdown('<p class="ws-perfil-section-title">🖼️ Foto de perfil</p>', unsafe_allow_html=True)
     st.caption("PNG ou JPEG · até 2,5 MB.")
 
     _FOTOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -262,11 +218,9 @@ with st.container(border=True):
                             pass
                         st.error(msg_db)
 
-st.divider()
-
 # ——— Senha ———
 with st.container(border=True):
-    st.markdown('<p class="ws-perfil-section-title">Segurança da conta</p>', unsafe_allow_html=True)
+    st.markdown('<p class="ws-perfil-section-title">🔒 Segurança da conta</p>', unsafe_allow_html=True)
     st.caption("Escolha uma senha forte. Se algo parecer estranho após a troca, saia e entre de novo.")
 
     with st.form("form_trocar_senha", clear_on_submit=False):

@@ -15,10 +15,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import text
 from datetime import datetime, timedelta, time
 from modules.database import get_connection
-from services.perfil_usuario import normalizar_perfil_para_sessao
-from services.ui_realtime import render_global_notifications_listener
-from services.ui_theme_presets import wiki_theme_apply_authenticated
-from services.wiki_authenticator import process_forced_logout_from_url
+from services.auth_guard import require_profile
 from config_ramais import (
     RAMAIS_EXCLUIR,
     RAMAL_NOME_ESPECIAL,
@@ -119,26 +116,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-if process_forced_logout_from_url():
-    st.rerun()
-
-# Inicializa variáveis de estado da sessão para controle de login e histórico de notificações
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-if "notificacoes_lidas" not in st.session_state:
-    st.session_state["notificacoes_lidas"] = []
-
-# Cadeado de segurança: exige login e perfil adequado
-if not st.session_state.get("autenticado", False):
-    st.switch_page("app.py")
-render_global_notifications_listener()
-wiki_theme_apply_authenticated()
-
-perfil_logado = normalizar_perfil_para_sessao(st.session_state.get("perfil", "analista"))
-
-if perfil_logado != "admin":
-    st.error("⛔ Acesso Negado.")
-    st.stop()
+# Exige login (com restauração de sessão via cookie num F5 direto na página) e perfil admin.
+require_profile(["admin"], titulo_bloqueio="⛔ Acesso Negado.")
 
 
 # ==========================================

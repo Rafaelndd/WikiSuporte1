@@ -1,14 +1,13 @@
 """
 WikiSuporte - Página de Configurações.
 Cadastro de clientes com telefones e administração de comunicados globais.
-Acesso restrito ao perfil **admin**. O robô de varredura roda em modo único
-e automático (ciclo diário à meia-noite, via `motor_extracao.py`) e não é
+Acesso liberado a todos os perfis autenticados. O robô de varredura roda em
+modo único e automático (ciclo diário à meia-noite, via `motor_extracao.py`) e não é
 mais controlado por esta tela — ver `oraculo_engine.log` para status. O
 cadastro de clientes/telefones é usado para cruzar dados de suporte. Logs
 de auditoria registram ações importantes.
 """
 import re
-import urllib.request
 from datetime import datetime
 
 import pandas as pd
@@ -30,58 +29,47 @@ from services.system_notifications import (
     registrar_bloqueio_versao,
     resolver_bloqueio_versao,
 )
-from services.perfil_usuario import eh_admin
-from services.ui_realtime import render_global_notifications_listener
-from services.ui_theme_presets import wiki_theme_apply_authenticated
-from services.wiki_authenticator import process_forced_logout_from_url
-
-try:
-    from modules.auditoria import registrar_log_auditoria
-except ImportError:
-    def registrar_log_auditoria(*args): pass
+from services.auth_guard import require_login
 
 st.set_page_config(page_title="WikiSuporte - Configurações", page_icon="⚙️", layout="wide")
 
-if process_forced_logout_from_url():
-    st.rerun()
+# Exige login (com restauração de sessão via cookie num F5 direto na página).
+require_login()
 
-if not st.session_state.get("autenticado"):
-    st.switch_page("app.py")
-
-usuario_id = st.session_state.get("usuario_id")
 nome_usuario = str(st.session_state.get("usuario_nome", "Sistema"))
-perfil_raw = st.session_state.get("perfil", "")
-render_global_notifications_listener()
-wiki_theme_apply_authenticated()
 ensure_notifications_schema()
 
-if not eh_admin(perfil_raw):
-    st.error("⛔ Acesso Negado. Apenas usuários com perfil **admin**.")
-    st.stop()
-
-perfil_usuario = "admin"
-
 st.title("⚙️ WikiSuporte - Configurações")
-st.markdown("Clientes, telefones e comunicados globais do sistema.")
+st.caption("Clientes, telefones e comunicados globais do sistema.")
 
-nomes_abas = [
-    "🏢 Clientes e Telefones",
-]
-tem_painel_notifs = True
-if tem_painel_notifs:
-    nomes_abas.append("📣 Notificações e Comunicados")
-abas = st.tabs(nomes_abas)
-aba_clientes = abas[0]
-aba_notificacoes = abas[1] if tem_painel_notifs else None
+# ``st.tabs`` reinicia sempre para a primeira aba a cada rerun (inclusive ao apertar
+# Enter num campo de texto ou clicar em qualquer botão dentro da própria aba — bug
+# conhecido do Streamlit, https://github.com/streamlit/streamlit/issues/12554).
+# ``st.segmented_control`` com ``key`` guarda a seleção em session_state como
+# qualquer outro widget, então a navegação não pula de volta ao clicar em nada.
+ABA_CLIENTES = "🏢 Clientes e Telefones"
+ABA_NOTIFICACOES = "📣 Notificações e Comunicados"
+
+aba_ativa = st.segmented_control(
+    "Navegação",
+    [ABA_CLIENTES, ABA_NOTIFICACOES],
+    default=ABA_CLIENTES,
+    key="cfg_aba_ativa",
+    label_visibility="collapsed",
+    required=True,
+)
+st.divider()
+
+
+def _apenas_numeros(txt):
+    return re.sub(r"\D", "", str(txt)) if txt else ""
+
 
 # ==========================================
 # ABA 1: CLIENTES E TELEFONES
 # ==========================================
-def _apenas_numeros(txt):
-    return re.sub(r"\D", "", str(txt)) if txt else ""
-
-with aba_clientes:
-    st.subheader("Cadastre e Vincule números de Telefone/Celular ao cadastro dos clientes cadastrados")
+if aba_ativa == ABA_CLIENTES:
+    st.caption("Cadastre e vincule números de Telefone/Celular ao cadastro dos clientes cadastrados.")
 
     ok_idx, msg_idx = garantir_indices_clientes_busca()
     if not ok_idx:
@@ -92,6 +80,8 @@ with aba_clientes:
     if "cfg_cli_cnpj" not in st.session_state:
         st.session_state["cfg_cli_cnpj"] = ""
     if "cfg_cli_telefone" not in st.session_state:
+        st.session_state["cfg_cli_telefone"] = ""
+    if st.session_state.pop("cfg_cli_reset_telefone", False):
         st.session_state["cfg_cli_telefone"] = ""
     if "cfg_cli_last_sel_razao" not in st.session_state:
         st.session_state["cfg_cli_last_sel_razao"] = ""
@@ -106,122 +96,131 @@ with aba_clientes:
         st.session_state["cfg_cli_cnpj"] = str(escolhido.get("cnpj") or "")
         st.rerun()
 
-    st.markdown("#### Busca inteligente em tempo real")
-    b1, b2 = st.columns(2)
-    with b1:
-        busca_razao = st.text_input(
-            "Buscar por razão social/nome/CNPJ",
-            key="cfg_cli_busca_razao",
-            placeholder="Digite parte do nome, razão social ou CNPJ",
-        )
-        if (busca_razao or "").strip():
-            df_sug_razao = buscar_clientes_autocomplete(busca_razao, limite=12)
-            if not df_sug_razao.empty:
-                opcoes_razao = {"": {}}
-                for _, row in df_sug_razao.iterrows():
-                    label = f"{row['razao_social']} | CNPJ: {row['cnpj'] or 'não informado'}"
-                    opcoes_razao[label] = {
-                        "razao_social": str(row["razao_social"] or ""),
-                        "cnpj": str(row["cnpj"] or ""),
-                    }
-                escolha_razao = st.selectbox(
-                    "Sugestões da busca por razão social",
-                    list(opcoes_razao.keys()),
-                    key="cfg_cli_sug_razao",
-                )
-                if escolha_razao and escolha_razao != st.session_state.get("cfg_cli_last_sel_razao", ""):
-                    st.session_state["cfg_cli_last_sel_razao"] = escolha_razao
-                    _aplicar_sugestao_cliente(escolha_razao, opcoes_razao)
-                elif not escolha_razao:
-                    st.session_state["cfg_cli_last_sel_razao"] = ""
-            else:
-                st.caption("Nenhuma correspondência encontrada para essa busca.")
-    with b2:
-        busca_cnpj = st.text_input(
-            "Buscar por CNPJ (com ou sem máscara)",
-            key="cfg_cli_busca_cnpj",
-            placeholder="Ex.: 12.345.678/0001-90 ou 12345678000190",
-        )
-        if (busca_cnpj or "").strip():
-            df_sug_cnpj = buscar_clientes_autocomplete(busca_cnpj, limite=12)
-            if not df_sug_cnpj.empty:
-                opcoes_cnpj = {"": {}}
-                for _, row in df_sug_cnpj.iterrows():
-                    label = f"{row['cnpj'] or 'não informado'} | {row['razao_social']}"
-                    opcoes_cnpj[label] = {
-                        "razao_social": str(row["razao_social"] or ""),
-                        "cnpj": str(row["cnpj"] or ""),
-                    }
-                escolha_cnpj = st.selectbox(
-                    "Sugestões da busca por CNPJ",
-                    list(opcoes_cnpj.keys()),
-                    key="cfg_cli_sug_cnpj",
-                )
-                if escolha_cnpj and escolha_cnpj != st.session_state.get("cfg_cli_last_sel_cnpj", ""):
-                    st.session_state["cfg_cli_last_sel_cnpj"] = escolha_cnpj
-                    _aplicar_sugestao_cliente(escolha_cnpj, opcoes_cnpj)
-                elif not escolha_cnpj:
-                    st.session_state["cfg_cli_last_sel_cnpj"] = ""
-            else:
-                st.caption("Nenhuma correspondência encontrada para esse CNPJ.")
-
-    st.markdown("#### Vincular telefone")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        razao = st.text_input(
-            "Razão Social *",
-            key="cfg_cli_razao_social",
-            placeholder="Ex.: Posto Avenida LTDA",
-        )
-    with c2:
-        cnpj_in = st.text_input(
-            "CNPJ",
-            key="cfg_cli_cnpj",
-            placeholder="00.000.000/0000-00",
-        )
-    with c3:
-        tel_in = st.text_input(
-            "Telefone/Celular *",
-            key="cfg_cli_telefone",
-            placeholder="48999999999",
-        )
-
-    if st.button("Salvar e vincular", type="primary", key="cfg_cli_btn_salvar", use_container_width=True):
-        razao_limpa = (razao or "").strip()
-        cnpj_limpo = _apenas_numeros(cnpj_in)
-        tel_limpo = _apenas_numeros(tel_in)
-        if not razao_limpa or not tel_limpo:
-            st.warning("Preencha Razão Social e Telefone/Celular.")
-        else:
-            ok, msg = vincular_telefone_cliente(
-                razao_social=razao_limpa,
-                numero_raw=tel_limpo,
-                cnpj=cnpj_limpo or None,
+    with st.container(border=True):
+        st.markdown("#### 🔎 Busca inteligente em tempo real")
+        b1, b2 = st.columns(2)
+        with b1:
+            busca_razao = st.text_input(
+                "Buscar por razão social/nome/CNPJ",
+                key="cfg_cli_busca_razao",
+                placeholder="Digite parte do nome, razão social ou CNPJ",
             )
-            if ok:
-                st.success("Vínculo salvo com sucesso. Os dados já ficam disponíveis na página de Registro de Atendimentos.")
-                st.session_state["cfg_cli_telefone"] = ""
-                st.rerun()
-            else:
-                st.error(msg)
-
-    try:
-        df_cli = listar_clientes_telefones_resumo(limite=2000)
-        if not df_cli.empty:
-            df_cli = df_cli.rename(
-                columns={
-                    "razao_social": "Razão Social",
-                    "cnpj": "CNPJ",
-                    "qtd_telefones": "Qtd. Telefones",
-                }
+            if (busca_razao or "").strip():
+                df_sug_razao = buscar_clientes_autocomplete(busca_razao, limite=12)
+                if not df_sug_razao.empty:
+                    opcoes_razao = {"": {}}
+                    for _, row in df_sug_razao.iterrows():
+                        label = f"{row['razao_social']} | CNPJ: {row['cnpj'] or 'não informado'}"
+                        opcoes_razao[label] = {
+                            "razao_social": str(row["razao_social"] or ""),
+                            "cnpj": str(row["cnpj"] or ""),
+                        }
+                    escolha_razao = st.selectbox(
+                        "Sugestões da busca por razão social",
+                        list(opcoes_razao.keys()),
+                        key="cfg_cli_sug_razao",
+                    )
+                    if escolha_razao and escolha_razao != st.session_state.get("cfg_cli_last_sel_razao", ""):
+                        st.session_state["cfg_cli_last_sel_razao"] = escolha_razao
+                        _aplicar_sugestao_cliente(escolha_razao, opcoes_razao)
+                    elif not escolha_razao:
+                        st.session_state["cfg_cli_last_sel_razao"] = ""
+                else:
+                    st.caption("Nenhuma correspondência encontrada para essa busca.")
+        with b2:
+            busca_cnpj = st.text_input(
+                "Buscar por CNPJ (com ou sem máscara)",
+                key="cfg_cli_busca_cnpj",
+                placeholder="Ex.: 12.345.678/0001-90 ou 12345678000190",
             )
-            st.dataframe(df_cli, hide_index=True, use_container_width="stretch")
-    except Exception as e:
-        st.caption(f"Listagem indisponível: {e}")
+            if (busca_cnpj or "").strip():
+                df_sug_cnpj = buscar_clientes_autocomplete(busca_cnpj, limite=12)
+                if not df_sug_cnpj.empty:
+                    opcoes_cnpj = {"": {}}
+                    for _, row in df_sug_cnpj.iterrows():
+                        label = f"{row['cnpj'] or 'não informado'} | {row['razao_social']}"
+                        opcoes_cnpj[label] = {
+                            "razao_social": str(row["razao_social"] or ""),
+                            "cnpj": str(row["cnpj"] or ""),
+                        }
+                    escolha_cnpj = st.selectbox(
+                        "Sugestões da busca por CNPJ",
+                        list(opcoes_cnpj.keys()),
+                        key="cfg_cli_sug_cnpj",
+                    )
+                    if escolha_cnpj and escolha_cnpj != st.session_state.get("cfg_cli_last_sel_cnpj", ""):
+                        st.session_state["cfg_cli_last_sel_cnpj"] = escolha_cnpj
+                        _aplicar_sugestao_cliente(escolha_cnpj, opcoes_cnpj)
+                    elif not escolha_cnpj:
+                        st.session_state["cfg_cli_last_sel_cnpj"] = ""
+                else:
+                    st.caption("Nenhuma correspondência encontrada para esse CNPJ.")
 
-if aba_notificacoes:
-    with aba_notificacoes:
-        st.subheader("📣 Painel do Suporte para Notificações")
+    with st.container(border=True):
+        st.markdown("#### 🔗 Vincular telefone")
+        with st.form("cfg_form_vincular_telefone", clear_on_submit=False):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                razao = st.text_input(
+                    "Razão Social *",
+                    key="cfg_cli_razao_social",
+                    placeholder="Ex.: Posto Avenida LTDA",
+                )
+            with c2:
+                cnpj_in = st.text_input(
+                    "CNPJ",
+                    key="cfg_cli_cnpj",
+                    placeholder="00.000.000/0000-00",
+                )
+            with c3:
+                tel_in = st.text_input(
+                    "Telefone/Celular *",
+                    key="cfg_cli_telefone",
+                    placeholder="48999999999",
+                )
+            salvar_vinculo = st.form_submit_button("Salvar e vincular", type="primary", use_container_width=True)
+
+        if salvar_vinculo:
+            razao_limpa = (razao or "").strip()
+            cnpj_limpo = _apenas_numeros(cnpj_in)
+            tel_limpo = _apenas_numeros(tel_in)
+            if not razao_limpa or not tel_limpo:
+                st.warning("Preencha Razão Social e Telefone/Celular.")
+            else:
+                ok, msg = vincular_telefone_cliente(
+                    razao_social=razao_limpa,
+                    numero_raw=tel_limpo,
+                    cnpj=cnpj_limpo or None,
+                )
+                if ok:
+                    st.success("Vínculo salvo com sucesso. Os dados já ficam disponíveis na página de Registro de Atendimentos.")
+                    st.session_state["cfg_cli_reset_telefone"] = True
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    with st.container(border=True):
+        st.markdown("#### 📋 Clientes cadastrados")
+        try:
+            df_cli = listar_clientes_telefones_resumo(limite=2000)
+            if not df_cli.empty:
+                df_cli = df_cli.rename(
+                    columns={
+                        "razao_social": "Razão Social",
+                        "cnpj": "CNPJ",
+                        "qtd_telefones": "Qtd. Telefones",
+                    }
+                )
+                st.dataframe(df_cli, hide_index=True, use_container_width="stretch")
+        except Exception as e:
+            st.caption(f"Listagem indisponível: {e}")
+
+# ==========================================
+# ABA 2: NOTIFICAÇÕES E COMUNICADOS
+# ==========================================
+if aba_ativa == ABA_NOTIFICACOES:
+    with st.container(border=True):
+        st.markdown("#### 📣 Painel do Suporte para Notificações")
         st.caption(
             "Dispare comunicados em tempo real para usuários ativos. "
             "Tipos: comunicado, aviso, erro crítico e bloqueio de versão."
@@ -307,7 +306,8 @@ if aba_notificacoes:
                                 status.update(label="Falha ao publicar.", state="error")
                                 st.error(msg)
 
-        st.markdown("### Notificações recentes")
+    with st.container(border=True):
+        st.markdown("#### 🗂️ Notificações recentes")
         df_not = listar_notificacoes_admin(120)
         if df_not.empty:
             st.info("Nenhuma notificação cadastrada.")
@@ -327,7 +327,8 @@ if aba_notificacoes:
                     else:
                         st.error(msgd)
 
-        st.markdown("### Bloqueios de versão ativos")
+    with st.container(border=True):
+        st.markdown("#### 🚧 Bloqueios de versão ativos")
         df_blocks = bloqueios_versao_ativos()
         if df_blocks.empty:
             st.caption("Sem bloqueios ativos.")
