@@ -628,18 +628,33 @@ class OraculoBot:
                     f"[FASE 2] Órfãos: {len(orfaos)} no banco; neste ciclo investigando só {len(fila)} "
                     f"(mais recentes). Demais ficam para próximos ciclos — prioridade é a fila aberta do helpdesk."
                 )
-                for nr in fila:
-                    if deve_parar():
-                        break
-                    if self._esta_sem_permissao(nr):
-                        continue
-                    logging.info(f"[ÓRFÃO] Chamado {nr} sumiu da lista ativa. Investigando...")
-                    encontrado = self.executar_busca_especifica(nr)
-                    if encontrado:
-                        if self._verificar_acesso_pagina(nr):
-                            self.deep_scrape_finalizacao(nr)
-                    else:
-                        logging.warning(f"[ÓRFÃO] Chamado {nr} não localizado em nenhuma busca.")
+
+                # A busca de órfãos usa um widget de filtro (dropdown "Status") que fica
+                # instável depois de centenas de navegações acumuladas nas Fases 1/2
+                # (confirmado por diagnóstico: 100% de sucesso com sessão nova, falha
+                # quase sempre numa sessão já longa). Reinicia o navegador antes de
+                # começar, mesmo padrão já usado na Fase 3 (Auto-Cura).
+                self._fechar_driver()
+                self._abrir_navegador()
+                sessao_orfaos_ok = self.login()
+                if not sessao_orfaos_ok:
+                    logging.warning(
+                        "[FASE 2] Falha ao reautenticar para a busca de órfãos — pulando para este ciclo."
+                    )
+
+                if sessao_orfaos_ok:
+                    for nr in fila:
+                        if deve_parar():
+                            break
+                        if self._esta_sem_permissao(nr):
+                            continue
+                        logging.info(f"[ÓRFÃO] Chamado {nr} sumiu da lista ativa. Investigando...")
+                        encontrado = self.executar_busca_especifica(nr)
+                        if encontrado:
+                            if self._verificar_acesso_pagina(nr):
+                                self.deep_scrape_finalizacao(nr)
+                        else:
+                            logging.warning(f"[ÓRFÃO] Chamado {nr} não localizado em nenhuma busca.")
 
             # --- Relatório Final ---
             logging.info("====== RELATÓRIO DE SINCRONIZAÇÃO ======")
