@@ -14,12 +14,12 @@ def test_ler_linhas_grade_helpdesk_usa_execucao_js_em_lote():
 
     chamadas = {"qtd": 0}
 
-    def _execute_script(script):
+    def _evaluate(script):
         chamadas["qtd"] += 1
         assert "table tbody tr" in script
         return retorno_esperado
 
-    bot.driver = types.SimpleNamespace(execute_script=_execute_script)
+    bot.page = types.SimpleNamespace(evaluate=_evaluate)
 
     linhas = bot._ler_linhas_grade_helpdesk()
 

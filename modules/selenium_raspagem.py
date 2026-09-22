@@ -1,7 +1,6 @@
 import os
 import re
 import logging
-import time
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,19 +16,8 @@ if sys.platform == "win32":
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# Selenium
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import (
-    NoSuchElementException,
-    TimeoutException,
-    WebDriverException,
-    StaleElementReferenceException,
-)
+# Playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 
 # Banco de Dados
 from sqlalchemy.orm import sessionmaker
@@ -106,14 +94,17 @@ def extrair_versao_liberacao(texto):
 class OraculoBot:
     def __init__(self):
         """
-        Inicializa o ChromeDriver, a conexão com o banco e as configurações de espera.
+        Inicializa o navegador (Playwright/Chromium), a conexão com o banco e as
+        configurações de espera.
         A lista chamados_sem_permissao armazena IDs que o bot não conseguiu acessar.
         """
-        self.driver = self._iniciar_driver()
+        self._playwright = None
+        self.browser = None
+        self.page = None
+        self._iniciar_driver()
         self.engine = get_connection()
         self._garantir_schema_minimo()
         self.Session = sessionmaker(bind=self.engine)
-        self.wait = WebDriverWait(self.driver, 5)
         # Lista de chamados que o bot não tem permissão para acessar
         self.chamados_sem_permissao = []
 
@@ -148,57 +139,73 @@ class OraculoBot:
 
     def _iniciar_driver(self):
         """
-        Configura e inicia o ChromeDriver com SUPER VISÃO no Modo Fantasma.
+        Inicia o processo do Playwright (uma única vez por bot) e abre o navegador.
         """
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless=new")
+        self._playwright = sync_playwright().start()
+        self._abrir_navegador()
 
+    def _abrir_navegador(self):
+        """
+        Abre um navegador Chromium (Playwright) novo com SUPER VISÃO no Modo Fantasma,
+        reaproveitando o processo do Playwright já iniciado (self._playwright).
+
+        Reaberto sem reiniciar sync_playwright(): iniciar um segundo
+        sync_playwright().start() na mesma thread depois que alguma lib async
+        (ex.: cliente Gemini/OpenAI usado na classificação) tocou num event loop
+        asyncio quebra com "Playwright Sync API inside the asyncio loop".
+        """
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        options.add_argument(f"user-agent={user_agent}")
-        options.add_argument("--window-size=2560,1440")
-        options.add_argument("--force-device-scale-factor=1.0")
-        options.add_argument("--start-maximized")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        # NOTA: mascara sinais de automação (CDP user-agent override, flags
-        # abaixo) contra o helpdesk do fornecedor (postogestor.com.br). Uso
-        # autorizado formalmente pela equipe/fornecedor — confirmado em
-        # 2026-09-11 — não é uma tentativa de burlar controle de acesso.
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
 
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
-        driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
+        self.browser = self._playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--window-size=2560,1440",
+                "--force-device-scale-factor=1.0",
+                "--start-maximized",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                # NOTA: mascara sinais de automação contra o helpdesk do fornecedor
+                # (postogestor.com.br). Uso autorizado formalmente pela equipe/
+                # fornecedor — confirmado em 2026-09-11 — não é uma tentativa de
+                # burlar controle de acesso.
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
+        context = self.browser.new_context(
+            user_agent=user_agent,
+            viewport={"width": 2560, "height": 1440},
+            device_scale_factor=1.0,
+        )
+        self.page = context.new_page()
         # Timeouts explícitos evitam travas silenciosas em execução longa (24/7).
-        driver.set_page_load_timeout(60)
-        driver.set_script_timeout(30)
-        return driver
+        self.page.set_default_navigation_timeout(60_000)
+        self.page.set_default_timeout(5_000)
 
     def _ler_linhas_grade_helpdesk(self):
         """
         Lê a grade da página de chamados em lote (uma chamada JS),
-        reduzindo round-trips Selenium e risco de queda de sessão.
+        reduzindo round-trips e risco de queda de sessão.
         """
         script = """
-            const rows = Array.from(document.querySelectorAll("table tbody tr"));
-            return rows.map((tr) => {
-                const cols = Array.from(tr.querySelectorAll("td"));
-                return {
-                    colunas: cols.map((td) => (td.innerText || "").trim()),
-                    html_coluna_10: cols[10] ? (cols[10].innerHTML || "") : "",
-                };
-            });
+            () => {
+                const rows = Array.from(document.querySelectorAll("table tbody tr"));
+                return rows.map((tr) => {
+                    const cols = Array.from(tr.querySelectorAll("td"));
+                    return {
+                        colunas: cols.map((td) => (td.innerText || "").trim()),
+                        html_coluna_10: cols[10] ? (cols[10].innerHTML || "") : "",
+                    };
+                });
+            }
         """
-        return self.driver.execute_script(script) or []
+        return self.page.evaluate(script) or []
 
     def fechar_modal_se_existir(self):
         """Tenta fechar modais de notificação sem interromper o fluxo."""
         try:
-            modais = self.driver.find_elements(By.CSS_SELECTOR, ".modal-dialog .close")
-            if modais and modais[0].is_displayed():
-                modais[0].click()
+            modal = self.page.locator(".modal-dialog .close").first
+            if modal.count() and modal.is_visible():
+                modal.click()
                 logging.info("[OK] Modal de notificação interceptado e fechado.")
         except Exception:
             pass
@@ -211,16 +218,16 @@ class OraculoBot:
         """
         try:
             # Verifica se a página carregou o label de chamado (indica acesso OK)
-            WebDriverWait(self.driver, 4).until(
-                EC.presence_of_element_located((By.XPATH, "//label[contains(text(), 'Num. Chamado:')]"))
+            self.page.wait_for_selector(
+                "xpath=//label[contains(text(), 'Num. Chamado:')]", timeout=4_000
             )
             return True
-        except TimeoutException:
+        except PlaywrightTimeoutError:
             pass
 
         # Verifica sinais de bloqueio/sem permissão na página
         try:
-            page_text = self.driver.find_element(By.TAG_NAME, "body").text.lower()
+            page_text = (self.page.locator("body").inner_text() or "").lower()
             sinais_bloqueio = [
                 "acesso negado", "sem permissão", "não autorizado",
                 "access denied", "forbidden", "permissão negada",
@@ -253,35 +260,36 @@ class OraculoBot:
         """Realiza o login seguro no sistema da Tecnuv."""
         try:
             logging.info("Acessando página de login...")
-            self.driver.get("https://postogestor.com.br/helpdesk/sistema/login/")
+            self.page.goto("https://postogestor.com.br/helpdesk/sistema/login/")
 
             usuario_cru = os.getenv("TECNUV_USER", "")
             senha_cru = os.getenv("TECNUV_PASS", "")
 
-            xpath_user = "//div[contains(@class, 'card-container')]//input[@name='userdata[user]']"
-            xpath_pass = "//div[contains(@class, 'card-container')]//input[@name='userdata[pass]']"
-            xpath_btn  = "//div[contains(@class, 'card-container')]//button[@type='submit']"
+            xpath_user = "xpath=//div[contains(@class, 'card-container')]//input[@name='userdata[user]']"
+            xpath_pass = "xpath=//div[contains(@class, 'card-container')]//input[@name='userdata[pass]']"
+            xpath_btn = "xpath=//div[contains(@class, 'card-container')]//button[@type='submit']"
 
-            campo_usuario = self.wait.until(EC.element_to_be_clickable((By.XPATH, xpath_user)))
-            campo_senha = self.driver.find_element(By.XPATH, xpath_pass)
-            botao_acessar = self.driver.find_element(By.XPATH, xpath_btn)
+            campo_usuario = self.page.locator(xpath_user)
+            campo_usuario.wait_for(state="visible", timeout=5_000)
+            campo_senha = self.page.locator(xpath_pass)
+            botao_acessar = self.page.locator(xpath_btn)
 
-            campo_usuario.clear()
-            campo_usuario.send_keys(usuario_cru)
-            campo_senha.clear()
-            campo_senha.send_keys(senha_cru)
+            campo_usuario.fill("")
+            campo_usuario.fill(usuario_cru)
+            campo_senha.fill("")
+            campo_senha.fill(senha_cru)
 
             logging.info("Clicando em Acessar...")
-            self.driver.execute_script("arguments[0].click();", botao_acessar)
+            botao_acessar.evaluate("(el) => el.click()")
 
-            time.sleep(3)
-            erro_msg = self.driver.find_elements(By.XPATH, "//a[contains(@style, 'color: red')]")
-            if erro_msg and erro_msg[0].text.strip():
-                logging.error(f"O site recusou o acesso: {erro_msg[0].text}")
+            self.page.wait_for_timeout(3_000)
+            erro_msg = self.page.locator("xpath=//a[contains(@style, 'color: red')]")
+            if erro_msg.count() and (erro_msg.first.text_content() or "").strip():
+                logging.error(f"O site recusou o acesso: {erro_msg.first.text_content()}")
                 return False
 
             logging.info("Login realizado com sucesso!")
-            self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
+            self.page.goto("https://postogestor.com.br/helpdesk/sistema/tecnuv")
             return True
 
         except Exception as e:
@@ -305,45 +313,42 @@ class OraculoBot:
         Assim, mesmo que a tela liste históricos, a Fase 2 só trabalha com a fila ativa.
         """
         try:
-            self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
+            self.page.goto("https://postogestor.com.br/helpdesk/sistema/tecnuv")
 
             # Limpeza de Filtros (sem aplicar nenhum filtro de status)
             try:
-                btn_limpar = WebDriverWait(self.driver, 3).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "a.limpa_filtros"))
-                )
+                btn_limpar = self.page.locator("a.limpa_filtros")
+                btn_limpar.wait_for(state="visible", timeout=3_000)
                 btn_limpar.click()
-                time.sleep(2)
-            except TimeoutException:
+                self.page.wait_for_timeout(2_000)
+            except PlaywrightTimeoutError:
                 pass
 
             # Paginação 500
             try:
-                select_pag = self.driver.find_element(By.XPATH, "//select[contains(@name, 'per_page')]")
-                select_pag.click()
-                self.driver.find_element(By.XPATH, "//option[@value='500']").click()
-                time.sleep(1)
+                self.page.locator("xpath=//select[contains(@name, 'per_page')]").select_option("500")
+                self.page.wait_for_timeout(1_000)
             except Exception:
                 pass
 
             # Clica em Buscar (visão nativa sem filtros = apenas ativos)
-            self.driver.find_element(By.ID, "btnBusca").click()
+            self.page.locator("#btnBusca").click()
             logging.info("[FASE 1] Buscando todos os chamados ativos no helpdesk (sem filtros)...")
-            time.sleep(5)
+            self.page.wait_for_timeout(5_000)
 
             chamados_helpdesk = {}
             pagina_atual = 1
 
             while True:
                 logging.info(f"[FASE 1] Lendo página {pagina_atual}...")
-                self.wait.until(EC.presence_of_all_elements_located((By.XPATH, "//table/tbody/tr")))
+                self.page.wait_for_selector("xpath=//table/tbody/tr")
 
                 linhas = []
                 for tentativa in range(1, 4):
                     try:
                         linhas = self._ler_linhas_grade_helpdesk()
                         break
-                    except (StaleElementReferenceException, WebDriverException) as e:
+                    except PlaywrightError as e:
                         if tentativa == 3:
                             raise RuntimeError(
                                 f"[FASE 1] Falha ao ler grade na página {pagina_atual} após 3 tentativas: {e}"
@@ -351,7 +356,7 @@ class OraculoBot:
                         logging.warning(
                             f"[FASE 1] Instabilidade ao ler grade (página {pagina_atual}, tentativa {tentativa}/3): {e}"
                         )
-                        time.sleep(2)
+                        self.page.wait_for_timeout(2_000)
 
                 for linha in linhas:
                     try:
@@ -407,14 +412,14 @@ class OraculoBot:
 
                 # Próxima página
                 try:
-                    btn_proximo = self.driver.find_elements(By.CSS_SELECTOR, "a[title='próxima página']")
-                    if btn_proximo and btn_proximo[0].is_displayed():
+                    btn_proximo = self.page.locator("a[title='próxima página']")
+                    if btn_proximo.count() and btn_proximo.first.is_visible():
                         pagina_atual += 1
-                        self.driver.execute_script("arguments[0].click();", btn_proximo[0])
-                        time.sleep(4)
+                        btn_proximo.first.evaluate("(el) => el.click()")
+                        self.page.wait_for_timeout(4_000)
                     else:
                         break
-                except NoSuchElementException:
+                except Exception:
                     break
 
             logging.info(f"[FASE 1] Total de chamados ativos encontrados no helpdesk: {len(chamados_helpdesk)}")
@@ -528,7 +533,7 @@ class OraculoBot:
                 logging.info(f"[DB] Chamado {nr} inserido na fila (commit).")
 
                 # Tenta deep scrape — se não tiver permissão, pula
-                self.driver.get(meta["link"])
+                self.page.goto(meta["link"])
                 self.fechar_modal_se_existir()
 
                 if self._verificar_acesso_pagina(nr):
@@ -596,7 +601,7 @@ class OraculoBot:
                     logging.info(f"[DIFERENÇA] Chamado {nr} - Motivo: {motivo}. Buscando detalhes...")
                     session.commit()
                     logging.info(f"[DB] Chamado {nr} lista/status gravados (commit). Deep scrape a seguir.")
-                    self.driver.get(meta["link"])
+                    self.page.goto(meta["link"])
                     self.fechar_modal_se_existir()
 
                     if self._verificar_acesso_pagina(nr):
@@ -663,12 +668,14 @@ class OraculoBot:
         Retorna lista de dicts compatíveis com HistoricoInteracao.
         """
         interacoes = []
-        blocos = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'col-md-11')]")
-        for bloco in blocos:
+        blocos = self.page.locator("xpath=//div[contains(@class, 'col-md-11')]")
+        for i in range(blocos.count()):
+            bloco = blocos.nth(i)
             try:
-                header = bloco.find_element(By.TAG_NAME, "label").text
-                corpo_html = bloco.find_element(By.CLASS_NAME, "msgMd").get_attribute("innerHTML")
-                corpo_txt = bloco.find_element(By.CLASS_NAME, "msgMd").text
+                header = bloco.locator("label").first.text_content() or ""
+                corpo_locator = bloco.locator(".msgMd").first
+                corpo_html = corpo_locator.inner_html()
+                corpo_txt = corpo_locator.inner_text()
 
                 m = re.search(
                     r"Usuário:\s*(.*?)\s*-\s*Data:\s*(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}:\d{2})",
@@ -769,20 +776,20 @@ class OraculoBot:
 
             def get_val(label_text):
                 try:
-                    return self.driver.find_element(
-                        By.XPATH,
-                        f"//label[normalize-space(text())='{label_text}']/following-sibling::span"
-                    ).text.strip()
+                    loc = self.page.locator(
+                        f"xpath=//label[normalize-space(text())='{label_text}']/following-sibling::span"
+                    )
+                    return (loc.first.text_content() or "").strip()
                 except Exception:
                     return "Não Informado"
 
             try:
-                versao = self.driver.find_element(By.ID, "tecnuv_versao_abertura").get_attribute("value").strip()
+                versao = (self.page.locator("#tecnuv_versao_abertura").first.input_value() or "").strip()
             except Exception:
                 versao = "Não Informada"
 
             try:
-                html_motivo = self.driver.find_element(By.ID, "tecnuv_motivo").get_attribute("innerHTML").strip()
+                html_motivo = (self.page.locator("#tecnuv_motivo").first.inner_html() or "").strip()
             except Exception:
                 html_motivo = ""
             try:
@@ -813,10 +820,11 @@ class OraculoBot:
                 # Cobranças
                 try:
                     session.query(CobrancaChamado).filter_by(nr_chamado=nr_chamado).delete()
-                    blocos_cobranca = self.driver.find_elements(By.XPATH, "//div[contains(@style, '#EA4335')]")
-                    for cob in blocos_cobranca:
+                    blocos_cobranca = self.page.locator("xpath=//div[contains(@style, '#EA4335')]")
+                    for i in range(blocos_cobranca.count()):
+                        cob = blocos_cobranca.nth(i)
                         try:
-                            header = cob.find_element(By.TAG_NAME, "label").text
+                            header = cob.locator("label").first.text_content() or ""
                             match = re.search(
                                 r'Usuário:\s*(.*?)\s*-\s*Data:\s*(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}:\d{2})',
                                 header
@@ -824,7 +832,7 @@ class OraculoBot:
                             if match:
                                 usu = match.group(1).strip()
                                 dt = datetime.strptime(match.group(2), "%d/%m/%Y %H:%M:%S")
-                                texto_msg = cob.find_element(By.CLASS_NAME, "msgMd").text
+                                texto_msg = cob.locator(".msgMd").first.inner_text()
                                 cli_match = re.search(r'pelo cliente\s+(.*?)\s+-', texto_msg)
                                 cli_nome = cli_match.group(1).strip() if cli_match else "Não Identificado"
                                 nova_cob = CobrancaChamado(
@@ -841,8 +849,8 @@ class OraculoBot:
                 # Clientes Vinculados
                 try:
                     session.query(ClienteVinculadoChamado).filter_by(nr_chamado=nr_chamado).delete()
-                    list_vinc = self.driver.find_element(By.ID, "list-vinculo")
-                    textos = list_vinc.text.split('\n')
+                    list_vinc = self.page.locator("#list-vinculo").first
+                    textos = (list_vinc.inner_text() or "").split('\n')
                     for t in textos:
                         if t.strip():
                             cnpj_match = re.search(r'\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}', t)
@@ -891,40 +899,49 @@ class OraculoBot:
         Usado para encontrar chamados que sumiram da fila de ativos.
         """
         try:
-            self.driver.get("https://postogestor.com.br/helpdesk/sistema/tecnuv")
+            self.page.goto("https://postogestor.com.br/helpdesk/sistema/tecnuv")
             self.fechar_modal_se_existir()
 
             try:
-                btn_limpar = WebDriverWait(self.driver, 3).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "a.limpa_filtros"))
-                )
+                btn_limpar = self.page.locator("a.limpa_filtros")
+                btn_limpar.wait_for(state="visible", timeout=3_000)
                 btn_limpar.click()
-                time.sleep(2)
+                self.page.wait_for_timeout(2_000)
             except Exception:
                 pass
 
             numero_limpo = str(nr_chamado).strip()
-            campo = self.wait.until(EC.presence_of_element_located((By.ID, "chamado")))
-            campo.clear()
-            campo.send_keys(numero_limpo)
+            campo = self.page.locator("#chamado")
+            campo.wait_for(state="visible", timeout=5_000)
+            campo.fill("")
+            # Digita caractere a caractere (like o send_keys do Selenium): esta
+            # grade tem busca-enquanto-digita em JS que escuta eventos de tecla
+            # reais; .fill() só dispara um evento 'input' e deixa o widget de
+            # Status num estado inconsistente/instável (timeout intermitente).
+            campo.press_sequentially(numero_limpo, delay=50)
 
-            btn_status = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@title='Status']")))
-            btn_status.click()
-            time.sleep(1)
+            # Botão de dropdown "Status" (multiselect Bootstrap): a checagem de
+            # "clicável" do Playwright (não sobreposto/estável) é mais rígida que a
+            # do Selenium e falha aqui apesar do elemento estar visível — usa clique
+            # via JS, mesmo padrão já usado para o botão de login e paginação.
+            btn_status = self.page.locator("xpath=//button[@title='Status']")
+            btn_status.wait_for(state="visible", timeout=5_000)
+            btn_status.evaluate("(el) => el.click()")
+            self.page.wait_for_timeout(1_000)
 
-            chk_all = self.driver.find_element(By.XPATH, "//input[@value='multiselect-all']")
-            if not chk_all.is_selected():
-                chk_all.find_element(By.XPATH, "./parent::label").click()
-                time.sleep(0.5)
+            chk_all = self.page.locator("xpath=//input[@value='multiselect-all']").first
+            if not chk_all.is_checked():
+                chk_all.locator("xpath=./parent::label").evaluate("(el) => el.click()")
+                self.page.wait_for_timeout(500)
 
-            btn_status.click()
+            btn_status.evaluate("(el) => el.click()")
 
-            self.driver.find_element(By.ID, "btnBusca").click()
-            time.sleep(4)
+            self.page.locator("#btnBusca").click()
+            self.page.wait_for_timeout(4_000)
 
-            links = self.driver.find_elements(By.XPATH, f"//a[contains(@href, '/id/{numero_limpo}')]")
-            if links:
-                links[0].click()
+            links = self.page.locator(f"xpath=//a[contains(@href, '/id/{numero_limpo}')]")
+            if links.count():
+                links.first.click()
                 return True
 
             return False
@@ -940,19 +957,22 @@ class OraculoBot:
         """
         session = self.Session()
         try:
-            self.wait.until(EC.presence_of_element_located((By.XPATH, "//legend[contains(text(), 'Histórico')]")))
+            self.page.wait_for_selector("xpath=//legend[contains(text(), 'Histórico')]")
 
-            blocos = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'col-md-11')]")
-            if not blocos:
+            blocos = self.page.locator("xpath=//div[contains(@class, 'col-md-11')]")
+            total_blocos = blocos.count()
+            if not total_blocos:
                 return
 
-            ultimo = blocos[-1]
-            header = ultimo.find_element(By.TAG_NAME, "label").text
-            corpo = ultimo.find_element(By.CLASS_NAME, "msgMd").text.strip()
+            ultimo = blocos.nth(total_blocos - 1)
+            header = ultimo.locator("label").first.text_content() or ""
+            corpo = (ultimo.locator(".msgMd").first.text_content() or "").strip()
 
-            status_site = self.driver.find_element(
-                By.XPATH, "//label[contains(text(), 'Status:')]/following-sibling::span"
-            ).text.strip()
+            status_site = (
+                self.page.locator(
+                    "xpath=//label[contains(text(), 'Status:')]/following-sibling::span"
+                ).first.text_content() or ""
+            ).strip()
 
             match = re.search(
                 r'Usuário:\s*(.*?)\s*-\s*Data:\s*(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2}:\d{2})',
@@ -1037,9 +1057,8 @@ class OraculoBot:
             sucesso_count = 0
             falhas_lista = []
 
-            self.driver.quit()
-            self.driver = self._iniciar_driver()
-            self.wait = WebDriverWait(self.driver, 15)
+            self._fechar_driver()
+            self._abrir_navegador()
 
             if self.login():
                 for chamado in chamados_para_curar:
@@ -1047,7 +1066,7 @@ class OraculoBot:
                         continue
 
                     link = f"https://postogestor.com.br/helpdesk/sistema/tecnuv/editar/id/{chamado.nr_chamado}"
-                    self.driver.get(link)
+                    self.page.goto(link)
                     self.fechar_modal_se_existir()
 
                     if self._verificar_acesso_pagina(chamado.nr_chamado):
@@ -1070,14 +1089,27 @@ class OraculoBot:
         finally:
             session.close()
 
+    def _fechar_driver(self):
+        """Fecha browser/contexto Playwright em uso, sem parar o processo do driver."""
+        try:
+            if self.browser:
+                self.browser.close()
+        except Exception:
+            pass
+
     def encerrar(self):
-        """Encerra o driver e exibe relatório final de permissões."""
+        """Encerra o navegador e exibe relatório final de permissões."""
         if self.chamados_sem_permissao:
             logging.info(
                 f"[REL] Sem permissao neste ciclo ({len(self.chamados_sem_permissao)}): "
                 f"{self.chamados_sem_permissao}"
             )
-        self.driver.quit()
+        self._fechar_driver()
+        try:
+            if self._playwright:
+                self._playwright.stop()
+        except Exception:
+            pass
         logging.info("Robô finalizado e recursos liberados.")
 
 
