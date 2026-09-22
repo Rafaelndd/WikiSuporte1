@@ -849,19 +849,34 @@ if df.empty:
 # 6. CONSTRUÇÃO DO DASHBOARD (INTERFACE)
 # ==========================================
 
-aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
+LABELS_ABAS_CHAMADOS = [
     "🎯 Visão Geral",
     "⏳ Tempo de espera e gargalos nos chamados com a desenvolvedora.",
     "📈 Detalhamento de Versões",
     "👥 Chamados por Analistas EPSY & Clientes",
     "📈 Entrega Tecnuv (suporte)",
     "📂 Fila aberta & releases",
-])
+]
+# ``st.tabs`` reinicia sempre para a primeira aba a cada rerun (inclusive ao apertar
+# Enter num campo de texto ou clicar em qualquer botão dentro da própria aba — bug
+# conhecido do Streamlit, https://github.com/streamlit/streamlit/issues/12554).
+# ``st.segmented_control`` com ``key`` guarda a seleção em session_state como
+# qualquer outro widget, então a navegação não pula de volta ao interagir com nada.
+aba_ativa = st.segmented_control(
+    "Navegação",
+    LABELS_ABAS_CHAMADOS,
+    default=LABELS_ABAS_CHAMADOS[0],
+    key="dashboard_chamados_aba_ativa",
+    label_visibility="collapsed",
+)
+if aba_ativa not in LABELS_ABAS_CHAMADOS:
+    aba_ativa = LABELS_ABAS_CHAMADOS[0]
+st.divider()
 
 # ------------------------------------------
 # ABA 1: VISÃO GERAL (período + analista; todos os status no período)
 # ------------------------------------------
-with aba1:
+if aba_ativa == LABELS_ABAS_CHAMADOS[0]:
     X = len(df_visao)
     _p0 = d_inicio_visao if d_inicio_visao is not None else "—"
     _p1 = d_fim_visao if d_inicio_visao is not None else "—"
@@ -1028,7 +1043,7 @@ with aba1:
 # ------------------------------------------
 # ABA 2: AGING E GARGALOS (FILA COMPLETA)
 # ------------------------------------------
-with aba2:
+if aba_ativa == LABELS_ABAS_CHAMADOS[1]:
     st.subheader("⏳ Análise de Tempo de Espera e Gargalos")
     st.markdown("Tempo em aberto dos chamados por status e motivo, destacando os mais antigos e as principais causas de atraso.")
     
@@ -1203,7 +1218,7 @@ def _eh_fiscal(cat) -> bool:
     return "fiscal" in c or "adequa" in c or "sped" in c or "nfe" in c
 
 
-with aba3:
+if aba_ativa == LABELS_ABAS_CHAMADOS[2]:
     st.subheader(" Versões do sistema — análise de chamados por versão")
     _teto_v = _teto_versao_atual_sistema()
     _ok_ver = lambda v: _versao_sistema_listagem_ok(v, teto=_teto_v)
@@ -1241,33 +1256,6 @@ with aba3:
         por_versao["Chamados_abertos"] = por_versao["Chamados_abertos"].astype(int)
         por_versao["_ord"] = por_versao["versao_sistema"].apply(_semver_tuple)
         por_versao = por_versao.sort_values("_ord", ascending=True)
-
-        st.markdown("#### 📌 Por versão — chamados **ainda abertos** (contexto da versão no cadastro)")
-        st.caption("Apenas volume **atual** por versão. O histórico total de chamados por versão está na seção abaixo, separado.")
-        st.dataframe(
-            por_versao[["versao_sistema", "Chamados_abertos"]].rename(
-                columns={"versao_sistema": "Versão", "Chamados_abertos": "Abertos agora"}
-            ),
-            hide_index=True,
-            use_container_width=True,
-            height=min(380, max(220, 40 + min(len(por_versao), 12) * 28)),
-        )
-        if len(por_versao) > 12:
-            st.caption(f"Tabela com rolagem — **{len(por_versao)}** versões. Gráfico: amostra das que têm mais abertos.")
-
-        st.markdown("#### 📜 Total histórico de chamados por versão")
-        st.caption(
-            "Quantidade **acumulada** de chamados já vinculados a cada versão no recorte (abertos + encerrados). "
-            "Independente da tabela de **abertos agora** acima."
-        )
-        st.dataframe(
-            por_versao.sort_values("_ord", ascending=True)[["versao_sistema", "Total_chamados"]].rename(
-                columns={"versao_sistema": "Versão", "Total_chamados": "Total histórico (recorte)"}
-            ),
-            hide_index=True,
-            use_container_width=True,
-            height=min(380, max(220, 40 + min(len(por_versao), 12) * 28)),
-        )
 
         nmax = len(por_versao)
         n_graf = st.slider(
@@ -1531,7 +1519,7 @@ with aba3:
 # ------------------------------------------
 # ABA 4: PERFORMANCE EPSY & OFENSORES
 # ------------------------------------------
-with aba4:
+if aba_ativa == LABELS_ABAS_CHAMADOS[3]:
     st.subheader("👥 Análise de Performance")
     
     # Performance deve refletir a fila aberta real do recorte (sem restringir pelo filtro de status da aba).
@@ -1615,7 +1603,7 @@ with aba4:
 # ------------------------------------------
 # ABA 5: ENTREGA TECNUV — indicadores úteis (chamados_tecnuv + release_itens + interações)
 # ------------------------------------------
-with aba5:
+if aba_ativa == LABELS_ABAS_CHAMADOS[4]:
     st.subheader("Auditoria da entrega da produtora de software")
     st.markdown(
         "Painel focado em reincidência técnica da entrega: quantas vezes o mesmo chamado reaparece em releases "
@@ -1667,7 +1655,7 @@ with aba5:
 # ------------------------------------------
 # ABA 6: FILA ABERTA + RELEASES / REINCIDÊNCIA
 # ------------------------------------------
-with aba6:
+if aba_ativa == LABELS_ABAS_CHAMADOS[5]:
     st.subheader("📂 Chamados x releases (tempo real no banco)")
     st.markdown(
         "**Reincidência** = chamado citado em **mais de um** release (`release_itens`). "
