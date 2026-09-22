@@ -1536,6 +1536,14 @@ ADD COLUMN IF NOT EXISTS embedding vector(768);
 ALTER TABLE chamados_tecnuv
 ADD COLUMN IF NOT EXISTS categoria_ia TEXT;
 
+-- Título curto da grade TecNuv (classificação automática por palavra-chave) e
+-- classificação manual do usuário (sempre com prioridade sobre categoria_ia).
+ALTER TABLE chamados_tecnuv
+ADD COLUMN IF NOT EXISTS titulo TEXT;
+
+ALTER TABLE chamados_tecnuv
+ADD COLUMN IF NOT EXISTS categoria_manual TEXT;
+
 -- Índice vetorial para busca por similaridade (cosine)
 CREATE INDEX IF NOT EXISTS idx_chamados_tecnuv_embedding
 ON chamados_tecnuv

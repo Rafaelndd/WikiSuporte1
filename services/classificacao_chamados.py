@@ -1,8 +1,12 @@
 """
-Classificação semântica de chamados (Erro / Melhoria / Adequação Fiscal) via pgvector.
-Requer: migracao_vector_chamados.sql aplicada e EMBEDDING_MODEL/GEMINI ou OPENAI no .env.
+Classificação de chamados (Erro / Melhoria / Adequação Fiscal).
+- classificar_por_palavra_chave(): pré-filtro por texto no título, sem IA — roda
+  sempre, mesmo sem chave de embedding configurada.
+- classificar_chamado(): classificação semântica via pgvector (requer
+  migracao_vector_chamados.sql aplicada e EMBEDDING_MODEL/GEMINI ou OPENAI no .env).
 """
 import logging
+import re
 from typing import Optional, Tuple
 
 from sqlalchemy import text
@@ -15,6 +19,53 @@ from services.embedding_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+CATEGORIAS_VALIDAS = ("Erro", "Melhoria", "Adequação Fiscal")
+
+# Tag entre colchetes no título (ex.: "[ERRO] ...", "[Melhoria] ...") — maior confiança,
+# checada primeiro.
+_PADRAO_COLCHETE = re.compile(
+    r"\[\s*(erro|melhoria|adequa[çc][aã]o\s+fiscal|fiscal)\s*\]", re.IGNORECASE
+)
+
+# Palavras-chave soltas no título, checadas se não houver tag entre colchetes.
+_PALAVRAS_CHAVE = (
+    (re.compile(r"\berro\b|\bbug\b|\bfalha\b", re.IGNORECASE), "Erro"),
+    (re.compile(r"\bmelhoria\b", re.IGNORECASE), "Melhoria"),
+    (
+        re.compile(
+            r"adequa[çc][aã]o\s+fiscal|\bfiscal\b|\bsped\b|\bnfe\b|\bnf-?e\b|\bimposto\b|\btributa",
+            re.IGNORECASE,
+        ),
+        "Adequação Fiscal",
+    ),
+)
+
+
+def classificar_por_palavra_chave(titulo: Optional[str]) -> Optional[str]:
+    """
+    Classifica um chamado pelo texto do título, sem IA. Prioriza tags entre
+    colchetes (ex.: "[ERRO] ..."); na ausência delas, cai para palavras-chave
+    soltas no texto. Retorna None se nada bater (fica para classificação manual).
+    """
+    if not titulo or not str(titulo).strip():
+        return None
+    texto = str(titulo)
+
+    m = _PADRAO_COLCHETE.search(texto)
+    if m:
+        termo = m.group(1).lower()
+        if "erro" in termo:
+            return "Erro"
+        if "melhoria" in termo:
+            return "Melhoria"
+        return "Adequação Fiscal"
+
+    for padrao, categoria in _PALAVRAS_CHAVE:
+        if padrao.search(texto):
+            return categoria
+
+    return None
 
 
 def _engine():

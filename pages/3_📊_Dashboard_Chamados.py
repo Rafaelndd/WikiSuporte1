@@ -170,7 +170,13 @@ def carregar_dados_tecnuv(data_inicio: datetime, data_fim_exclusivo: datetime, a
     expr_analista = meta["expr_analista"]
     expr_cliente = meta["expr_cliente"]
     tem_categoria = "categoria_ia" in meta["colunas"]
-    sql_categoria = "c.categoria_ia" if tem_categoria else "NULL::text AS categoria_ia"
+    tem_categoria_manual = "categoria_manual" in meta["colunas"]
+    if tem_categoria and tem_categoria_manual:
+        sql_categoria = "COALESCE(c.categoria_manual, c.categoria_ia) AS categoria_ia"
+    elif tem_categoria:
+        sql_categoria = "c.categoria_ia"
+    else:
+        sql_categoria = "NULL::text AS categoria_ia"
     try:
         df = pd.read_sql(
             text(
@@ -1381,6 +1387,70 @@ with aba3:
             "Chamado **aberto** = problema ainda não encerrado no Helpdesk. Migração **release_itens** + raspagem/manual de releases enriquece esta coluna."
         )
 
+        st.divider()
+        with st.expander("🏷️ Classificar chamados manualmente", expanded=False):
+            st.caption(
+                "A classificação automática já roda por palavra-chave no título (ex.: **[ERRO]**, **[MELHORIA]**, **fiscal**). "
+                "Os **não classificados** aparecem primeiro. Marque um ou vários, escolha a categoria e aplique de uma vez — "
+                "também funciona para **reclassificar** chamados que já têm categoria. Sua escolha manual sempre tem "
+                "prioridade sobre a automática."
+            )
+            _OPCOES_CATEGORIA = ["Erro", "Melhoria", "Adequação Fiscal"]
+            df_classif = det_sorted[["nr_chamado", "Cliente", "categoria_ia"]].copy()
+            df_classif = df_classif.rename(columns={"categoria_ia": "Categoria atual"})
+            df_classif["Categoria atual"] = df_classif["Categoria atual"].replace("Não classificada", "")
+            df_classif["_sem_categoria"] = df_classif["Categoria atual"].eq("") | df_classif["Categoria atual"].isna()
+            df_classif = df_classif.sort_values(
+                ["_sem_categoria", "nr_chamado"], ascending=[False, False]
+            ).drop(columns="_sem_categoria")
+            df_classif.insert(0, "Selecionar", False)
+
+            editado_classif = st.data_editor(
+                df_classif,
+                hide_index=True,
+                use_container_width=True,
+                height=400,
+                disabled=["nr_chamado", "Cliente", "Categoria atual"],
+                column_config={
+                    "Selecionar": st.column_config.CheckboxColumn(help="Marque os chamados a classificar em lote."),
+                },
+                key="editor_classificacao_manual_chamados",
+            )
+
+            selecionados = editado_classif[editado_classif["Selecionar"]]
+            col_sel, col_cat, col_btn = st.columns([2, 3, 2])
+            with col_sel:
+                st.metric("Selecionados", len(selecionados))
+            with col_cat:
+                categoria_aplicar = st.radio(
+                    "Classificar como:",
+                    _OPCOES_CATEGORIA,
+                    horizontal=True,
+                    key="radio_categoria_aplicar_lote",
+                )
+            with col_btn:
+                st.write("")
+                aplicar = st.button(
+                    "💾 Aplicar aos selecionados",
+                    key="btn_aplicar_classificacao_lote",
+                    disabled=selecionados.empty,
+                    use_container_width=True,
+                )
+
+            if aplicar and not selecionados.empty:
+                engine = get_connection()
+                with engine.begin() as conn:
+                    for _, row in selecionados.iterrows():
+                        conn.execute(
+                            text(
+                                "UPDATE chamados_tecnuv SET categoria_manual = :cat WHERE nr_chamado = :nr"
+                            ),
+                            {"cat": categoria_aplicar, "nr": int(row["nr_chamado"])},
+                        )
+                st.success(f"{len(selecionados)} chamado(s) classificado(s) como **{categoria_aplicar}**.")
+                st.cache_data.clear()
+                st.rerun()
+
 # ------------------------------------------
 # ABA 4: PERFORMANCE EPSY & OFENSORES
 # ------------------------------------------
@@ -1571,7 +1641,12 @@ with aba6:
         FROM release_itens GROUP BY nr_chamado
         """
 
-        cat_select = "COALESCE(c.categoria_ia, '—') AS categoria_ia" if "categoria_ia" in cols else "'—' AS categoria_ia"
+        if "categoria_ia" in cols and "categoria_manual" in cols:
+            cat_select = "COALESCE(c.categoria_manual, c.categoria_ia, '—') AS categoria_ia"
+        elif "categoria_ia" in cols:
+            cat_select = "COALESCE(c.categoria_ia, '—') AS categoria_ia"
+        else:
+            cat_select = "'—' AS categoria_ia"
 
         sql = f"""
         SELECT

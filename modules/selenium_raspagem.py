@@ -27,6 +27,7 @@ from modules.database import get_connection
 from modules.log_redaction import install_sensitive_data_redaction
 from modules.models import ChamadoTecnuv, HistoricoInteracao, HistoricoTransicaoStatus
 from services.bot_control import definir_etapa, deve_parar
+from services.classificacao_chamados import classificar_por_palavra_chave
 
 
 def _status_encerrado_cancelado(status_txt: str) -> bool:
@@ -400,6 +401,7 @@ class OraculoBot:
                             "status_web": status_web,
                             "data_alt_web": data_alt_web,
                             "ticket_vinculado": colunas[2].strip(),
+                            "titulo": colunas[3].strip() if len(colunas) > 3 else "",
                             "setor": colunas[6].strip(),
                             "situacao": colunas[8].strip(),
                             "prioridade": colunas[9].strip(),
@@ -523,8 +525,10 @@ class OraculoBot:
                     nr_chamado=nr, status_atual=meta["status_web"],
                     ultima_alteracao_tecnuv=meta["data_alt_web"],
                     ticket_vinculado=meta["ticket_vinculado"],
+                    titulo=meta.get("titulo") or None,
                     setor=meta["setor"], situacao=meta["situacao"],
-                    prioridade=meta["prioridade"], data_abertura=dt_abertura
+                    prioridade=meta["prioridade"], data_abertura=dt_abertura,
+                    categoria_ia=classificar_por_palavra_chave(meta.get("titulo")),
                 )
                 if meta.get("data_alt_web"):
                     novo.ultima_alteracao_tecnuv = meta["data_alt_web"]
@@ -556,6 +560,16 @@ class OraculoBot:
 
                 if chamado_db.status_atual in ["Encerrado", "Cancelado"]:
                     continue
+
+                # Título e categoria automática (palavra-chave) são leves — sem navegação —
+                # e atualizados todo ciclo a partir da grade, sem esperar deep scrape.
+                # Nunca sobrescreve categoria_manual (escolha do usuário tem prioridade).
+                titulo_novo = meta.get("titulo")
+                if titulo_novo and titulo_novo != chamado_db.titulo:
+                    chamado_db.titulo = titulo_novo
+                    if not getattr(chamado_db, "categoria_manual", None):
+                        chamado_db.categoria_ia = classificar_por_palavra_chave(titulo_novo)
+                    session.commit()
 
                 precisa_raspar = False
                 motivo = ""

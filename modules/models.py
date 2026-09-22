@@ -37,6 +37,13 @@ class ChamadoTecnuv(Base):
     prioridade = Column(Text, nullable=True)
     assunto_html = Column(Text, nullable=True)
     motivo_abertura_html = Column(Text, nullable=True)
+    # Texto curto do título na grade TecNuv (ex.: "[ERRO] ...") — usado na
+    # classificação automática por palavra-chave.
+    titulo = Column(Text, nullable=True)
+    categoria_ia = Column(Text, nullable=True)
+    # Classificação escolhida manualmente por um usuário — sempre tem
+    # prioridade sobre categoria_ia na exibição.
+    categoria_manual = Column(Text, nullable=True)
     versao_sistema = Column(String(50), nullable=True)
     data_abertura = Column(DateTime, nullable=True)
     data_encerramento = Column(DateTime, nullable=True)
