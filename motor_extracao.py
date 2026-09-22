@@ -604,53 +604,60 @@ def _executar_motor(tarefa: str | None = None):
         motor.fechar()
 
 
-# Máximo de falhas consecutivas do ciclo diário antes de o robô desistir e
-# encerrar (em vez de tentar de novo indefinidamente). Não há canal de
-# alerta externo hoje — o log (oraculo_engine.log) é a única fonte de
-# diagnóstico, então uma falha persistente precisa parar de forma visível
-# em vez de girar em silêncio.
+# Máximo de falhas consecutivas do ciclo antes de o robô desistir e encerrar
+# (em vez de tentar de novo indefinidamente). Não há canal de alerta externo
+# hoje — o log (oraculo_engine.log) é a única fonte de diagnóstico, então uma
+# falha persistente precisa parar de forma visível em vez de girar em silêncio.
 MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO = 5
 
+# Intervalo entre o fim de um ciclo e o início do próximo. Configurável via
+# .env (CICLO_INTERVALO_MINUTOS) — padrão 30min. Um ciclo completo já leva
+# 15-20+ min; intervalos curtos demais arriscam rate-limit no site da TecNuv
+# (observado durante testes: logins em sequência rápida geraram erros
+# intermitentes de "usuário/senha inválidos" e scripts não carregados mesmo
+# com credenciais corretas).
+CICLO_INTERVALO_MINUTOS_DEFAULT = 30
 
-def _segundos_ate_proxima_meia_noite() -> float:
-    agora = datetime.now()
-    proxima = (agora + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return (proxima - agora).total_seconds()
+
+def _intervalo_segundos() -> float:
+    try:
+        minutos = float(os.getenv("CICLO_INTERVALO_MINUTOS", CICLO_INTERVALO_MINUTOS_DEFAULT))
+    except (TypeError, ValueError):
+        minutos = CICLO_INTERVALO_MINUTOS_DEFAULT
+    return max(60.0, minutos * 60.0)
 
 
 def iniciar_psy_assistente():
     """
     Único modo de operação do robô: roda o ciclo completo de sincronização
-    (chamados, releases, plantões, manuais, wikis) uma vez por dia, à meia-
-    noite (horário local do servidor). Substitui os antigos modos manual/
-    intervalo configurável e os pontos de disparo redundantes
-    (main_oraculo.py e modules/selenium_raspagem.py rodado diretamente).
+    (chamados, releases, plantões, manuais, wikis) em loop contínuo 24/7,
+    aguardando um intervalo configurável (CICLO_INTERVALO_MINUTOS, padrão
+    30min) entre o fim de um ciclo e o início do próximo. Substitui os
+    antigos modos manual/intervalo configurável pela UI e os pontos de
+    disparo redundantes (main_oraculo.py e modules/selenium_raspagem.py
+    rodado diretamente).
     """
-    logging.info("🤖 PSY Assistente do WikiSuporte iniciado. Execução automática diária à meia-noite.")
+    intervalo = _intervalo_segundos()
+    logging.info(
+        f"🤖 PSY Assistente do WikiSuporte iniciado. Execução contínua automática "
+        f"a cada {intervalo / 60:.0f} min (sem agendamento fixo, sem intervenção manual)."
+    )
 
     falhas_consecutivas = 0
 
     while True:
-        segundos = _segundos_ate_proxima_meia_noite()
-        proxima = datetime.now() + timedelta(seconds=segundos)
-        logging.info(
-            f"Próxima execução automática: {proxima.strftime('%d/%m/%Y %H:%M:%S')} "
-            f"(em {segundos / 3600:.1f}h)."
-        )
-        time.sleep(segundos)
-
         try:
-            iniciar_execucao("Ciclo automático diário: chamados + demais fontes")
+            iniciar_execucao("Ciclo automático: chamados + demais fontes")
             try:
                 _executar_motor()
             finally:
                 finalizar_execucao()
-            logging.info("✅ Ciclo automático diário concluído com sucesso.")
+            logging.info("✅ Ciclo automático concluído com sucesso.")
             falhas_consecutivas = 0
         except Exception as e:
             falhas_consecutivas += 1
             logging.error(
-                f"❌ Falha no ciclo automático diário "
+                f"❌ Falha no ciclo automático "
                 f"(tentativa {falhas_consecutivas}/{MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO}): {e}"
             )
             try:
@@ -660,10 +667,18 @@ def iniciar_psy_assistente():
             if falhas_consecutivas >= MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO:
                 logging.critical(
                     f"🛑 {MAX_FALHAS_CONSECUTIVAS_CICLO_DIARIO} falhas consecutivas no ciclo "
-                    "automático diário. Encerrando o PSY Assistente — requer intervenção "
+                    "automático. Encerrando o PSY Assistente — requer intervenção "
                     "manual (ver oraculo_engine.log)."
                 )
                 raise SystemExit(1)
+
+        intervalo = _intervalo_segundos()
+        proxima = datetime.now() + timedelta(seconds=intervalo)
+        logging.info(
+            f"Próximo ciclo automático: {proxima.strftime('%d/%m/%Y %H:%M:%S')} "
+            f"(em {intervalo / 60:.0f} min)."
+        )
+        time.sleep(intervalo)
 
 
 if __name__ == "__main__":
