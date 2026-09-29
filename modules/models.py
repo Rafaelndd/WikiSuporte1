@@ -80,13 +80,11 @@ class HistoricoTransicaoStatus(Base):
 class HistoricoInteracao(Base):
     __tablename__ = "historico_interacoes"
 
-    # DB usa id_interacao; mantemos atributo id.
-    id = Column("id_interacao", BigInteger, primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True)
     nr_chamado = Column(BigInteger, ForeignKey("chamados_tecnuv.nr_chamado", ondelete="CASCADE"))
     usuario = Column(Text, nullable=False)
     data_interacao = Column(DateTime, nullable=False)
-    # DB usa descricao_texto; mantemos atributo descricao_html para compatibilidade.
-    descricao_html = Column("descricao_texto", Text, nullable=True)
+    descricao_html = Column(Text, nullable=True)
 
     chamado = relationship("ChamadoTecnuv", back_populates="interacoes")
 

@@ -307,12 +307,14 @@ CREATE TABLE IF NOT EXISTS historico_transicao_tickets (
 );
 
 CREATE TABLE IF NOT EXISTS historico_interacoes (
-    id_interacao SERIAL PRIMARY KEY,
-    nr_chamado INTEGER REFERENCES chamados_tecnuv(nr_chamado) ON DELETE CASCADE,
-    data_interacao TIMESTAMP WITH TIME ZONE,
-    descricao_texto TEXT,
+    id BIGSERIAL PRIMARY KEY,
+    nr_chamado INTEGER NOT NULL REFERENCES chamados_tecnuv(nr_chamado) ON DELETE CASCADE,
+    data_interacao TIMESTAMP WITH TIME ZONE NOT NULL,
+    usuario TEXT NOT NULL,
+    descricao_html TEXT,
     id_analista_epsy INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-    nome_analista_epsy VARCHAR(100)
+    nome_analista_epsy VARCHAR(100),
+    UNIQUE (nr_chamado, data_interacao, usuario)
 );
 
 CREATE TABLE IF NOT EXISTS cobrancas_chamados (
